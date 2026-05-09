@@ -41,12 +41,12 @@ describe('intent router run modes', () => {
     });
   });
 
-  it('routes current weather questions to the local live desktop browser', async () => {
+  it('routes current weather questions to the embedded local browser', async () => {
     await expect(
       route("what's the weather today in Mumbai?"),
     ).resolves.toMatchObject({
-      runMode: 'gui_computer',
-      operator: Operator.LocalComputer,
+      runMode: 'gui_browser',
+      operator: Operator.LocalBrowser,
       taskType: 'browser_research',
     });
   });
@@ -106,12 +106,12 @@ describe('intent router run modes', () => {
     });
   });
 
-  it('routes research/news tasks to the local live desktop browser', async () => {
+  it('routes research/news tasks to the embedded local browser', async () => {
     await expect(
       route('latest AI news and summarize the top article'),
     ).resolves.toMatchObject({
-      runMode: 'gui_computer',
-      operator: Operator.LocalComputer,
+      runMode: 'gui_browser',
+      operator: Operator.LocalBrowser,
       requiresValidation: true,
       complexity: 'research',
       taskType: 'browser_research',
@@ -119,20 +119,20 @@ describe('intent router run modes', () => {
     });
   });
 
-  it('routes structured webpage extraction to the local live desktop browser', async () => {
+  it('routes structured webpage extraction to the embedded local browser', async () => {
     await expect(
       route('extract table from this website https://example.com'),
     ).resolves.toMatchObject({
-      runMode: 'gui_computer',
-      operator: Operator.LocalComputer,
+      runMode: 'gui_browser',
+      operator: Operator.LocalBrowser,
       requiresValidation: true,
     });
   });
 
-  it('keeps simple browser open tasks on the local live desktop path', async () => {
+  it('keeps simple browser open tasks inside the embedded browser path', async () => {
     await expect(route('open YouTube')).resolves.toMatchObject({
-      runMode: 'gui_computer',
-      operator: Operator.LocalComputer,
+      runMode: 'gui_browser',
+      operator: Operator.LocalBrowser,
     });
   });
 

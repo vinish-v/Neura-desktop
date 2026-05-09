@@ -279,6 +279,9 @@ export const runAgent = async (
 
     if (screenshotBase64 || screenshotContext?.size) {
       ComputerRuntimeController.frame({
+        dataUrl: screenshotBase64
+          ? `data:${screenshotContext?.mime || 'image/jpeg'};base64,${screenshotBase64}`
+          : undefined,
         mime: screenshotContext?.mime || 'image/jpeg',
         width: screenshotContext?.size?.width,
         height: screenshotContext?.size?.height,

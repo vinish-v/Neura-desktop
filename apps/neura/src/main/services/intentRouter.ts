@@ -62,9 +62,6 @@ const complexBrowserPattern =
 const executorBrowserPattern =
   /\b(research|summari[sz]e|compare|comparison|extract|scrape|source-backed|sources?|top result|article|ranking|ranked|details?|verify|official|review|reviews|table|tables|dataset|data|near me|available|book|tickets?)\b/i;
 
-const simpleBrowserPattern =
-  /\b(open|go to|navigate to|visit)\s+((a\s+)?website|youtube|google|gmail|github|amazon|flipkart|book\s*my\s*show|bookmyshow|https?:\/\/|www\.)/i;
-
 const wideResearchPattern =
   /\b(wide research|parallel research|research\s+\d+|analy[sz]e\s+(all|these|\d+)|compare\s+(all|these|\d+)|batch research|lead generation|prospects|competitors list)\b/i;
 
@@ -188,13 +185,13 @@ function inferRunMetadata(
   }
 
   if (mode === 'browser' || mode === 'mixed') {
-    const isComplexBrowser =
-      executorBrowserPattern.test(normalized) &&
-      !simpleBrowserPattern.test(normalized);
+    const needsValidation =
+      executorBrowserPattern.test(normalized) ||
+      needsResearchVerification(normalized);
     return {
-      runMode: isComplexBrowser ? 'executor_browser' : 'gui_browser',
-      requiresValidation: isComplexBrowser,
-      complexity: isComplexBrowser
+      runMode: 'gui_browser',
+      requiresValidation: needsValidation,
+      complexity: needsValidation
         ? 'research'
         : mode === 'mixed'
           ? 'multi_step'
@@ -242,7 +239,7 @@ function inferSemanticIntent(
     taskType = needsResearchVerification(normalized)
       ? 'browser_research'
       : 'browser_navigation';
-    requiredTools.push(runMode === 'gui_computer' ? 'desktop_browser' : 'browser');
+    requiredTools.push('browser');
   } else if (runMode === 'artifact_workflow') {
     taskType = 'artifact';
     requiredTools.push('artifact_studio');
@@ -320,10 +317,7 @@ function deterministicRuleDecision(instructions: string): BaseIntentDecision {
   const mode = modeFromSharedSurface(sharedIntent.surface);
   return {
     mode,
-    operator:
-      sharedIntent.firstOperator === 'browser'
-        ? Operator.LocalComputer
-        : operatorFromSharedFirstOperator(sharedIntent.firstOperator),
+    operator: operatorFromSharedFirstOperator(sharedIntent.firstOperator),
     confidence: sharedIntent.confidence,
     source: 'rules',
     reason: sharedIntent.reason,
@@ -350,10 +344,7 @@ function applySafetyOverrides(
     return {
       ...decision,
       mode: modeFromSharedSurface(sharedIntent.surface),
-      operator:
-        sharedIntent.firstOperator === 'browser'
-          ? Operator.LocalComputer
-          : operatorFromSharedFirstOperator(sharedIntent.firstOperator),
+      operator: operatorFromSharedFirstOperator(sharedIntent.firstOperator),
       confidence: Math.max(decision.confidence, sharedIntent.confidence),
       reason: `${decision.reason}; deterministic override: ${sharedIntent.reason}`,
     };
@@ -392,15 +383,6 @@ function operatorFromFirstOperator(
 
   return initialOperatorForMode(fallbackMode);
 }
-
-const applyLocalLiveMirrorOperator = (decision: BaseIntentDecision) =>
-  decision.operator === Operator.LocalBrowser
-    ? {
-        ...decision,
-        operator: Operator.LocalComputer,
-        reason: `${decision.reason}; local live mirror uses the desktop browser`,
-      }
-    : decision;
 
 function parseLlmDecision(raw: string): Partial<BaseIntentDecision> | null {
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
@@ -576,19 +558,13 @@ export async function routeIntent({
 
   const llmDecision = await classifyWithLlm(instructions, settings);
   if (llmDecision) {
-    const enriched = enrichDecision(
-      instructions,
-      applyLocalLiveMirrorOperator(llmDecision),
-    );
+    const enriched = enrichDecision(instructions, llmDecision);
     logger.info('[IntentRouter] llm decision', enriched);
     return enriched;
   }
 
   // Fallback if LLM fails or is not configured
-  const enriched = enrichDecision(
-    instructions,
-    applyLocalLiveMirrorOperator(ruleDecision),
-  );
+  const enriched = enrichDecision(instructions, ruleDecision);
   logger.info('[IntentRouter] fallback decision', enriched);
   return enriched;
 }
