@@ -78,7 +78,7 @@ const Docs: React.FC = () => {
 
                 <Button
                   as="a"
-                  href="https://github.com/bytedance/UI-TARS-desktop/issues"
+                  href="https://github.com/neura-ai/neura-desktop/issues"
                   target="_blank"
                   className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:opacity-90 transition-opacity"
                   startContent={<FaBug className="text-sm" />}

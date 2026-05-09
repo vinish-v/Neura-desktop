@@ -7,7 +7,7 @@ The pull request resolves the flickering issue in the panel UI by:
 1. Replacing `motion.div` with a standard `div` in the `Layout` component.
 2. Optimizing the flex layout of the panel to improve stability.
 
-The PR is linked to [Issue #696](https://github.com/bytedance/UI-TARS-desktop/issues/696) and includes two commits:
+The PR is linked to [Issue #696](https://github.com/neura-ai/neura-desktop/issues/696) and includes two commits:
 - `fix(agent-tars-web-ui): resolve panel UI flicker`
 - `chore(agent-tars-cli): fix ci`
 

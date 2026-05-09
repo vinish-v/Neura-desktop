@@ -2,7 +2,7 @@
 
 ## Introduction
 
-[Agent TARS](https://github.com/bytedance/UI-TARS-desktop) is an open-source multimodal agent designed to revolutionize GUI interaction by visually interpreting web pages and seamlessly integrating with command lines and file systems.
+[Agent TARS](https://github.com/neura-ai/neura-desktop) is an open-source multimodal agent designed to revolutionize GUI interaction by visually interpreting web pages and seamlessly integrating with command lines and file systems.
 
 <p align="center">
   <img width="800" src="https://sf16-sg.tiktokcdn.com/obj/eden-sg/psvhouloj/agent-tars-docs/agent-tars-welcome-screen.png">
@@ -26,10 +26,10 @@ Before you begin, you will need to set some necessary settings, you can click th
 
 - **OS**: `macOS`
 - **Necessary software**: [Chrome](https://www.google.com/chrome/).
-- **Install Agent TARS App**: https://github.com/bytedance/UI-TARS-desktop/releases
+- **Install Agent TARS App**: https://github.com/neura-ai/neura-desktop/releases
 
 > [!TIP]
-> Since Agent TARS is still in the `technical preview` stage and the developers are primarily focusing on Mac, the unstable Windows poses challenges for troubleshooting. Therefore, we DO NOT support Windows at this time. You can subscribe to https://github.com/bytedance/UI-TARS-desktop/issues/268 to stay updated on Windows support.
+> Since Agent TARS is still in the `technical preview` stage and the developers are primarily focusing on Mac, the unstable Windows poses challenges for troubleshooting. Therefore, we DO NOT support Windows at this time. You can subscribe to https://github.com/neura-ai/neura-desktop/issues/268 to stay updated on Windows support.
 
 ---
 
@@ -65,14 +65,14 @@ The preliminary comparison of **known** model providers is as follows:
 > [!TIP]
 > Disclaimer: The above table is based on the test results of the current stage and the summary of Github Issues, and should be replaced by the official Benchmark in the future.
 
-To reflect this, we’ve added reminders in the settings for clarity. Other models, such as `GPT-4o`, `DeepSeek`, and others, are in an experimental state. Agent TARS does not guarantee their effectiveness, so please use them with caution. Learn more about updates: https://github.com/bytedance/UI-TARS-desktop/discussions/377
+To reflect this, we’ve added reminders in the settings for clarity. Other models, such as `GPT-4o`, `DeepSeek`, and others, are in an experimental state. Agent TARS does not guarantee their effectiveness, so please use them with caution. Learn more about updates: https://github.com/neura-ai/neura-desktop/discussions/377
 
 ---
 
 #### Test Model Provider
 
 > [!TIP]
-> From [v0.0.1-alpha.8](https://github.com/bytedance/UI-TARS-desktop/releases/tag/Agent-TARS-v1.0.0-alpha.8).
+> From [v0.0.1-alpha.8](https://github.com/neura-ai/neura-desktop/releases/tag/Agent-TARS-v1.0.0-alpha.8).
 
 You can click **Test Model Provider** button to check if current model setting is available:
 

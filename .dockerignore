@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+dist
+out
+**/dist
+**/out
+.git
+.vscode
+*.log
+coverage
+apps/neura/resources/*.nupkg

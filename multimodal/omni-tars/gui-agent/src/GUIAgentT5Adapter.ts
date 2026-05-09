@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
-// import { PredictionParsed } from '@ui-tars/shared';
+// import { PredictionParsed } from '@neura-desktop/shared';
 import { ConsoleLogger } from '@agent-infra/logger';
 import { ChatCompletionMessageToolCall, LogLevel } from '@tarko/agent-interface';
 import { ActionParserHelper } from '@gui-agent/action-parser';

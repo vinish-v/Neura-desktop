@@ -189,7 +189,7 @@ program
           userAgent: options.userAgent,
           /**
            * The server MUST NOT write anything to its stdout that is not a valid MCP message.
-           * issue: https://github.com/bytedance/UI-TARS-desktop/issues/888#issuecomment-3125273977
+           * issue: https://github.com/neura-ai/neura-desktop/issues/888#issuecomment-3125273977
            */
           logger: new BaseLogger(),
           viewportSize: parseViewportSize(options.viewportSize),

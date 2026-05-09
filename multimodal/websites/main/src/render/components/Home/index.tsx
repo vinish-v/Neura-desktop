@@ -17,8 +17,8 @@ export const Home: React.FC = () => {
       const octokit = new Octokit();
       try {
         const { data } = await octokit.repos.get({
-          owner: 'bytedance',
-          repo: 'UI-TARS-desktop',
+          owner: 'neura-ai',
+          repo: 'Neura Desktop',
         });
         setStarCount(data.stargazers_count);
       } catch (error) {

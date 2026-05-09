@@ -41,8 +41,8 @@ mcp-http-server >= mcp-proxy TypeScript > Supergateway > mcp-proxy Python
 ## Development
 
 ```
-git clone git@github.com:bytedance/UI-TARS-desktop.git
-cd UI-TARS-desktop/packages/agent-infra/mcp-benchmark
+git clone git@github.com:neura-ai/Neura Desktop.git
+cd Neura Desktop/packages/agent-infra/mcp-benchmark
 pnpm i
 pnpm run dev
 ```

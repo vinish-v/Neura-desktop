@@ -15,7 +15,7 @@
     "cli",
     "typescript"
   ],
-  "author": "UI-TARS Team",
+  "author": "Neura Team",
   "license": "Apache-2.0",
   "dependencies": {
     "dotenv": "^16.4.7",

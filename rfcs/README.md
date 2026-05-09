@@ -1,4 +1,4 @@
-# UI-TARS-desktop RFCs
+# Neura Desktop RFCs
 
 Most changes including bug fixes and documentation improvements can be handled through standard GitHub pull requests. However, substantial technical changes requiring cross-platform considerations (Windows/macOS/Linux) should follow this RFC process to ensure systematic design review.
 
@@ -22,7 +22,7 @@ Consider initiating an RFC for changes involving:
 
 ### 2. Draft Submission
 
-1. Fork https://github.com/bytedance/UI-TARS-desktop
+1. Fork https://github.com/neura-ai/neura-desktop
 2. Copy `rfcs/template.md` to `rfcs/drafts/000-feature-name.md`
 3. Submit draft PR with [WIP] prefix
 

@@ -1,12 +1,12 @@
 # Trouble Shooting
 
-Starting from [v0.0.1-alpha.4](https://github.com/bytedance/UI-TARS-desktop/releases/tag/Agent-TARS-v1.0.0-alpha.4), we have introduced log-based error troubleshooting capabilities.
+Starting from [v0.0.1-alpha.4](https://github.com/neura-ai/neura-desktop/releases/tag/Agent-TARS-v1.0.0-alpha.4), we have introduced log-based error troubleshooting capabilities.
 
 ## Introduction
 
 Since the Agent TARS App is currently in the `preview` stage and considering the occasional instability of LLM provider services, you may encounter various unexpected issues during runtime. This guide will help you perform self-troubleshooting to resolve many common problems quickly and efficiently.
 
-If after following this guide your problem persists, or if you encounter an error scenario not covered in this document, please [report the issue](https://github.com/bytedance/UI-TARS-desktop/issues) to us with the minimal steps needed to reproduce the problem.
+If after following this guide your problem persists, or if you encounter an error scenario not covered in this document, please [report the issue](https://github.com/neura-ai/neura-desktop/issues) to us with the minimal steps needed to reproduce the problem.
 
 ## Overview
 

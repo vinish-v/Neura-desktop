@@ -2,10 +2,10 @@
 
 ## Overview
 
-**UI-TARS Desktop** offers granular control over application behavior through its settings system. This document provides comprehensive guidance on configuration options, preset management, and operational best practices.
+**Neura Desktop** offers granular control over application behavior through its settings system. This document provides comprehensive guidance on configuration options, preset management, and operational best practices.
 
 <p align="center">
-  <img src="../apps/ui-tars/images/settings/setting.png" alt="Settings Interface Overview" width="650">
+  <img src="../apps/neura/images/settings/setting.png" alt="Settings Interface Overview" width="650">
   <br>
   <em>Main Settings Interface</em>
 </p>
@@ -26,7 +26,7 @@ Select the backend VLM provider to ensure more accurate execution of GUI actions
 | Property    | Details                |
 | ----------- | ---------------------- |
 | **Type**    | `string`               |
-| **Options** | - `Hugging Face for UI-TARS-1.0`<br /> - `Hugging Face for UI-TARS-1.5`<br /> - `VolcEngine Ark for Doubao-1.5-UI-TARS`<br /> - `VolcEngine Ark for Doubao-1.5-thinking-vision-pro` |
+| **Options** | - `Hugging Face for Neura-1.0`<br /> - `Hugging Face for Neura-1.5`<br /> - `VolcEngine Ark for Doubao-1.5-Neura`<br /> - `VolcEngine Ark for Doubao-1.5-thinking-vision-pro` |
 | **Required** | `true`         |
 
 > [!NOTE]
@@ -41,7 +41,7 @@ Select the backend VLM provider to ensure more accurate execution of GUI actions
 
 Specify the base url of the VLM that needs to be requested.
 
-For UI TARS deployment, please check out [Deployment](./deployment.md).
+For Neura deployment, please check out [Deployment](./deployment.md).
 
 | Property     | Details  |
 | ------------ | -------- |
@@ -84,7 +84,7 @@ Specify the requested module name.
 After completing the configuration, you can click the `Check Model Availability` button to verify if the VLM model is available.
 
 <p align="center">
-  <img src="../apps/ui-tars/images/settings/check_model.png" alt="check_model" width="650">
+  <img src="../apps/neura/images/settings/check_model.png" alt="check_model" width="650">
   <br>
   <em>Main Settings Interface</em>
 </p>
@@ -97,11 +97,11 @@ If the model supports the Responses API, you can enable this option. Once enable
 
 #### 🌟 Example
 
-In the HuggingFace example in [UI-TARS/README_deploy.md](https://github.com/bytedance/UI-TARS/blob/main/README_deploy.md#python-test-code), the VLM parameters are as follows:
+In the HuggingFace example in [Neura/README_deploy.md](https://github.com/neura-ai/Neura/blob/main/README_deploy.md#python-test-code), the VLM parameters are as follows:
 
 ```yaml
 Language: en
-VLM Provider: Hugging Face for UI-TARS-1.5
+VLM Provider: Hugging Face for Neura-1.5
 VLM Base URL: https:xxx
 VLM API KEY: hf_xxx
 VLM Model Name: tgi
@@ -109,14 +109,14 @@ VLM Model Name: tgi
 
 <br>
 
-In the VolcEngine(火山引擎) example in [Doubao-1.5-UI-TARS](https://console.volcengine.com/ark/region:ark+cn-beijing/model/detail?Id=doubao-1-5-ui-tars), the VLM parameters are as follows:
+In the VolcEngine(火山引擎) example in [Doubao-1.5-Neura](https://console.volcengine.com/ark/region:ark+cn-beijing/model/detail?Id=doubao-1-5-neura-desktop), the VLM parameters are as follows:
 
 ```yaml
 Language: cn
-VLM Provider: VolcEngine Ark for Doubao-1.5-UI-TARS
+VLM Provider: VolcEngine Ark for Doubao-1.5-Neura
 VLM Base URL: https://ark.cn-beijing.volces.com/api/v3
 VLM API KEY: ARK_API_KEY
-VLM Model Name: doubao-1.5-ui-tars-250328
+VLM Model Name: doubao-1.5-neura-desktop-250328
 ```
 
 <br>
@@ -196,14 +196,14 @@ For interactive operations that require time to complete, this parameter adds a 
 Defines the base URL for uploading report file. By default, when this option is not set, when the user clicks **Export as HTML** (a.k.a. <b>Share</b>), it will automatically trigger the download of the report file:
 
 <p align="center">
-  <img src="../apps/ui-tars/images/download-report.png" alt="Download report" width="400">
+  <img src="../apps/neura/images/download-report.png" alt="Download report" width="400">
   <br>
 </p>
 
 Once it's set, when user click **Export as HTML**, a popup window will appear asking you. If you choose "**Yes, continue!**", the report file will be uploaded directly. After waiting for a few seconds, a tip notification will appear, informing you that the report link has been copied to your clipboard.
 
 <p align="center">
-  <img src="../apps/ui-tars/images/upload-report-success.png" alt="Download report" width="800">
+  <img src="../apps/neura/images/upload-report-success.png" alt="Download report" width="800">
   <br>
 </p>
 
@@ -236,7 +236,7 @@ The request should be sent as `multipart/form-data` with the following field:
 The response should return a JSON object containing a publicly accessible URL where the report can be accessed.
 
 > [!NOTE]
-> Currently, there is no authentication designed for Report Storage Server. If you have any requirements, please submit an [issue](https://github.com/bytedance/UI-TARS-desktop/issues).
+> Currently, there is no authentication designed for Report Storage Server. If you have any requirements, please submit an [issue](https://github.com/neura-ai/neura-desktop/issues).
 
 
 <br>
@@ -244,10 +244,10 @@ The response should return a JSON object containing a publicly accessible URL wh
 
 #### UTIO Base URL
 
-**UTIO** (_UI-TARS Insights and Observation_) is a data collection mechanism for insights into **UI-TARS Desktop** (_Introduced at [#60](https://github.com/bytedance/UI-TARS-desktop/pull/60)_). The design of UTIO is also related to sharing. The overall process is as follows:
+**UTIO** (_Neura Insights and Observation_) is a data collection mechanism for insights into **Neura Desktop** (_Introduced at [#60](https://github.com/neura-ai/neura-desktop/pull/60)_). The design of UTIO is also related to sharing. The overall process is as follows:
 
 <p align="center">
-  <img src="../apps/ui-tars/images/utio-flow.png" alt="UTIO Flow" width="800">
+  <img src="../apps/neura/images/utio-flow.png" alt="UTIO Flow" width="800">
   <br>
   <em>UTIO Flow</em>
 </p>

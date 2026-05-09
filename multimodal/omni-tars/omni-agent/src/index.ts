@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -110,9 +110,9 @@ export default class OmniTARSAgent extends ComposableAgent {
           'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=400&h=300&fit=crop&crop=center',
       },
       {
-        title: 'UI TARS Information',
+        title: 'Neura Information',
         category: 'Research',
-        prompt: 'Find information about UI TARS',
+        prompt: 'Find information about Neura',
         image:
           'https://images.unsplash.com/photo-1561070791-2526d30994b5?w=400&h=300&fit=crop&crop=center',
       },
@@ -163,7 +163,7 @@ export default class OmniTARSAgent extends ComposableAgent {
         title: 'ByteDance News Website',
         category: 'Code',
         prompt:
-          'Search news about bytedance seed1.6 model, then write a web page in modern style and deploy it',
+          'Search news about neura-ai seed1.6 model, then write a web page in modern style and deploy it',
         image:
           'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=400&h=300&fit=crop&crop=center',
       },

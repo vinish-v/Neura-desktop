@@ -4,8 +4,8 @@
   "commit": false,
   "fixed": [
     [
-      "@ui-tars/*",
-      "!@ui-tars/visualizer"
+      "@neura-desktop/*",
+      "!@neura-desktop/visualizer"
     ],
     [
       "@agent-infra/mcp-*"
@@ -16,8 +16,8 @@
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
   "ignore": [
-    "ui-tars-desktop",
-    "ui-tars-desktop-renderer",
+    "neura-desktop",
+    "neura-desktop-renderer",
     "@common/*",
     "@agent-infra/mcp-benchmark"
   ]

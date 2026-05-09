@@ -1,13 +1,13 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import { AIOHybridOperator } from '../src/AIOHybridOperator';
-import { StatusEnum } from '@ui-tars/sdk';
+import { StatusEnum } from '@neura-desktop/sdk';
 // @ts-ignore - Module resolution issue: TypeScript cannot resolve this module with current 'Bundler' moduleResolution setting
-// The type exists at '/node_modules/@ui-tars/sdk/dist/core.d.ts' but requires 'node16', 'nodenext', or 'bundler' moduleResolution
-import type { ExecuteParams } from '@ui-tars/sdk/core';
+// The type exists at '/node_modules/@neura-desktop/sdk/dist/core.d.ts' but requires 'node16', 'nodenext', or 'bundler' moduleResolution
+import type { ExecuteParams } from '@neura-desktop/sdk/core';
 import * as fs from 'fs';
 import * as path from 'path';
 

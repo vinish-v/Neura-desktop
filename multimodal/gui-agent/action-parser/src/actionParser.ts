@@ -1,16 +1,16 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
   ActionInputs,
   PredictionParsed,
-  UITarsModelVersion,
+  NeuraModelVersion,
   MAX_RATIO,
   IMAGE_FACTOR,
   MIN_PIXELS,
   MAX_PIXELS_V1_5,
-} from '@ui-tars/shared/types';
+} from '@neura-desktop/shared/types';
 import isNumber from 'lodash.isnumber';
 
 function roundByFactor(num: number, factor: number): number {
@@ -68,7 +68,7 @@ export function actionParser(params: {
   };
   scaleFactor?: number;
   mode?: 'bc' | 'o1';
-  modelVer?: UITarsModelVersion;
+  modelVer?: NeuraModelVersion;
 }): {
   parsed: PredictionParsed[];
 } {
@@ -168,14 +168,14 @@ export function parseActionVlm(
     height: number;
   },
   scaleFactor?: number,
-  modelVer: UITarsModelVersion = UITarsModelVersion.V1_0,
+  modelVer: NeuraModelVersion = NeuraModelVersion.V1_0,
 ): PredictionParsed[] {
   let reflection: string | null = null;
   let thought: string | null = null;
   let actionStr = '';
 
   let smartResizeFactors: [number, number] | null = null;
-  if (modelVer === UITarsModelVersion.V1_5 && screenContext?.height && screenContext?.width) {
+  if (modelVer === NeuraModelVersion.V1_5 && screenContext?.height && screenContext?.width) {
     smartResizeFactors = smartResizeForV15(screenContext.height, screenContext.width);
   }
 
@@ -266,7 +266,7 @@ export function parseActionVlm(
           // Convert to float and scale
           const floatNumbers = numbers.map((num, idx) => {
             const factorIndex = idx % 2;
-            if (modelVer === UITarsModelVersion.V1_5 && smartResizeFactors) {
+            if (modelVer === NeuraModelVersion.V1_5 && smartResizeFactors) {
               return Number.parseFloat(num) / smartResizeFactors[factorIndex];
             }
             return Number.parseFloat(num) / factors[factorIndex];

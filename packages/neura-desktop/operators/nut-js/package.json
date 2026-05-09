@@ -1,0 +1,54 @@
+{
+  "name": "@neura-desktop/operator-nut-js",
+  "version": "1.2.3",
+  "description": "Operator Nut JS SDK for Neura",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neura-ai/neura-desktop"
+  },
+  "bugs": {
+    "url": "https://github.com/neura-ai/neura-desktop/issues"
+  },
+  "keywords": [
+    "AI",
+    "Core",
+    "SDK",
+    "Operator",
+    "Neura"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "dev": "rslib build --watch",
+    "build": "rslib build && node scripts/write-dts.cjs",
+    "build:watch": "rslib build --watch",
+    "prepare": "npm run build",
+    "test": "vitest"
+  },
+  "license": "Apache-2.0",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "dependencies": {
+    "@neura-desktop/shared": "workspace:*",
+    "big.js": "^6.2.2",
+    "jimp": "1.6.0",
+    "@computer-use/nut-js": "^4.2.0"
+  },
+  "peerDependencies": {
+    "@neura-desktop/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@neura-desktop/sdk": "workspace:*",
+    "@common/configs": "workspace:*",
+    "@rslib/core": "0.10.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.2",
+    "@types/big.js": "^6.2.2"
+  }
+}

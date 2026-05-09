@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { MCPAgent } from '../src';
@@ -29,7 +29,7 @@ async function main() {
       console.log(`- ${tool.name}: ${tool.description}`);
     }
 
-    const queries = ['Can you find information about the UI-TARS-Desktop'];
+    const queries = ['Can you find information about the Neura Desktop'];
 
     for (const query of queries) {
       console.log('\n==================================================');

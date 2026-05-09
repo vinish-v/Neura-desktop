@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import fs from 'node:fs';
@@ -25,8 +25,8 @@ import { ADB } from 'appium-adb';
 const defaultLogger = new ConsoleLogger(undefined, LogLevel.DEBUG);
 const yadbCommand =
   'app_process -Djava.class.path=/data/local/tmp/yadb /data/local/tmp com.ysbing.yadb.Main';
-const screenshotPathOnAndroid = '/data/local/tmp/ui_tars_screenshot.png';
-const screenshotPathOnLocal = path.join(os.homedir(), 'Downloads', 'ui_tars_screenshot.png');
+const screenshotPathOnAndroid = '/data/local/tmp/neura_screenshot.png';
+const screenshotPathOnLocal = path.join(os.homedir(), 'Downloads', 'neura_screenshot.png');
 
 export class AdbOperator extends Operator {
   private logger: ConsoleLogger;

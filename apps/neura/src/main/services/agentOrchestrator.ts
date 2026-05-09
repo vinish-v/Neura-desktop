@@ -1,0 +1,345 @@
+/**
+ * Copyright (c) 2025 Neura.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import { StatusEnum } from '@neura-desktop/shared/types';
+
+import { ConversationWithSoM } from '@main/shared/types';
+import {
+  AgentRunMode,
+  AppState,
+  CompletionProof,
+  TaskArtifact,
+  TaskProgressEventType,
+  TaskState,
+  TaskTodoItem,
+} from '@main/store/types';
+import { createTaskRun, TaskRunRegistry } from './taskRunRegistry';
+
+type StateAccess = {
+  getState: () => AppState;
+  setState: (state: AppState) => void;
+};
+
+export type TaskProgressEvent = {
+  type: TaskProgressEventType;
+  title: string;
+  detail?: string;
+  status?: 'pending' | 'in_progress' | 'done' | 'failed';
+};
+
+const actionForEvent = (type: TaskProgressEventType) => {
+  switch (type) {
+    case 'task.started':
+      return 'task_started';
+    case 'plan.updated':
+      return 'plan_updated';
+    case 'step.started':
+      return 'step_started';
+    case 'step.completed':
+      return 'step_completed';
+    case 'step.failed':
+      return 'step_failed';
+    case 'validation.completed':
+      return 'validation_completed';
+    case 'task.completed':
+      return 'task_completed';
+    default:
+      return 'step_started';
+  }
+};
+
+const statusToTodoStatus = (
+  status: TaskProgressEvent['status'],
+): TaskTodoItem['status'] => {
+  if (status === 'done') {
+    return 'done';
+  }
+  if (status === 'failed') {
+    return 'failed';
+  }
+  if (status === 'in_progress') {
+    return 'in_progress';
+  }
+  return 'pending';
+};
+
+const normalizeProgressText = (value?: string) =>
+  (value || '').replace(/\s+/g, ' ').trim();
+
+const isDuplicateProgressMessage = (
+  messages: ConversationWithSoM[],
+  event: TaskProgressEvent,
+) => {
+  const last = messages[messages.length - 1];
+  const step = last?.predictionParsed?.[0];
+  if (!step) {
+    return false;
+  }
+
+  return (
+    step.action_type === actionForEvent(event.type) &&
+    normalizeProgressText(step.thought) ===
+      normalizeProgressText(event.title) &&
+    normalizeProgressText(step.action_inputs?.content) ===
+      normalizeProgressText(event.detail || event.title)
+  );
+};
+
+const extractPlanTodoItems = (
+  detail: string | undefined,
+  existingItems: TaskTodoItem[],
+) => {
+  const lines = (detail || '')
+    .split(/\r?\n|(?=\s*\d+\.\s+)/)
+    .map((line) => line.trim())
+    .map((line) => line.replace(/^\d+\.\s+|^[-*]\s+/, '').trim())
+    .filter((line) => line.length >= 8)
+    .slice(0, 8);
+
+  if (!lines.length) {
+    return existingItems;
+  }
+
+  return lines.map((text, index) => {
+    const existing = existingItems.find(
+      (item) =>
+        normalizeProgressText(item.text) === normalizeProgressText(text),
+    );
+    return {
+      id: existing?.id || `plan-${Date.now()}-${index}`,
+      text,
+      status: existing?.status || (index === 0 ? 'in_progress' : 'pending'),
+    };
+  });
+};
+
+export class AgentOrchestrator {
+  private readonly getState: () => AppState;
+  private readonly setState: (state: AppState) => void;
+
+  constructor({ getState, setState }: StateAccess) {
+    this.getState = getState;
+    this.setState = setState;
+  }
+
+  begin(originalGoal: string, runMode: AgentRunMode) {
+    const taskState: TaskState = createTaskRun(originalGoal, runMode);
+    TaskRunRegistry.upsert(taskState);
+    TaskRunRegistry.setActiveRunId(taskState.runId);
+
+    this.setState({
+      ...this.getState(),
+      status: StatusEnum.RUNNING,
+      taskState,
+    });
+
+    this.emit({
+      type: 'task.started',
+      title: `Started ${runMode.replace(/_/g, ' ')}`,
+      detail: originalGoal,
+      status: 'in_progress',
+    });
+  }
+
+  getCurrentRunId() {
+    const runId = this.getState().taskState?.runId;
+    if (!runId) {
+      throw new Error('No active task run.');
+    }
+    return runId;
+  }
+
+  emit(event: TaskProgressEvent) {
+    const current = this.getState();
+    const taskState = current.taskState;
+    const messages = current.messages || [];
+    if (isDuplicateProgressMessage(messages, event)) {
+      return;
+    }
+
+    const nextTodoItems =
+      event.type === 'plan.updated'
+        ? extractPlanTodoItems(event.detail, taskState?.todoItems || [])
+        : taskState?.todoItems || [];
+    const nextProgressItems =
+      taskState && event.type !== 'task.started'
+        ? [
+            ...(taskState.progressItems || []),
+            {
+              id: `${Date.now()}-${messages.length}`,
+              title: event.title,
+              detail: event.detail,
+              status: statusToTodoStatus(event.status),
+              createdAt: Date.now(),
+              completedAt:
+                event.status === 'done' || event.status === 'failed'
+                  ? Date.now()
+                  : undefined,
+            },
+          ]
+        : taskState?.progressItems || [];
+
+    const message: ConversationWithSoM = {
+      from: 'gpt',
+      value: event.detail ? `${event.title}\n${event.detail}` : event.title,
+      predictionParsed: [
+        {
+          reflection: null,
+          thought: event.title,
+          action_type: actionForEvent(event.type),
+          action_inputs: {
+            content: event.detail || event.title,
+          },
+        },
+      ],
+    };
+
+    const nextTaskState = taskState
+      ? {
+          ...taskState,
+          todoItems: nextTodoItems,
+          progressItems: nextProgressItems,
+          currentStep:
+            event.type === 'step.started' ? event.title : taskState.currentStep,
+          validationStatus:
+            event.type === 'validation.completed'
+              ? event.status === 'done'
+                ? 'valid'
+                : 'invalid'
+              : taskState.validationStatus,
+        }
+      : taskState;
+
+    if (nextTaskState) {
+      TaskRunRegistry.upsert(nextTaskState);
+    }
+
+    this.setState({
+      ...current,
+      taskState: nextTaskState,
+      messages: [...messages, message],
+    });
+  }
+
+  addFact(fact: string) {
+    const current = this.getState();
+    if (!current.taskState || !fact.trim()) {
+      return;
+    }
+
+    const nextTaskState = {
+      ...current.taskState,
+      factsFound: [...current.taskState.factsFound, fact.trim()].slice(-30),
+    };
+    TaskRunRegistry.upsert(nextTaskState);
+
+    this.setState({
+      ...current,
+      taskState: nextTaskState,
+    });
+  }
+
+  addSource(url: string) {
+    const current = this.getState();
+    if (!current.taskState || !url.trim()) {
+      return;
+    }
+
+    const sources = new Set(current.taskState.sourcesVisited);
+    sources.add(url.trim());
+    const nextTaskState = {
+      ...current.taskState,
+      sourcesVisited: [...sources].slice(-30),
+    };
+    TaskRunRegistry.upsert(nextTaskState);
+
+    this.setState({
+      ...current,
+      taskState: nextTaskState,
+    });
+  }
+
+  addArtifact(artifact: Omit<TaskArtifact, 'sourceRunId'>) {
+    const current = this.getState();
+    if (!current.taskState) {
+      return;
+    }
+
+    const nextTaskState = {
+      ...current.taskState,
+      artifacts: [
+        ...current.taskState.artifacts,
+        { ...artifact, sourceRunId: current.taskState.runId },
+      ],
+    };
+    TaskRunRegistry.upsert(nextTaskState);
+
+    this.setState({
+      ...current,
+      taskState: nextTaskState,
+    });
+  }
+
+  setCompletionProof(completionProof: CompletionProof) {
+    const current = this.getState();
+    if (!current.taskState) {
+      return;
+    }
+
+    const nextTaskState = {
+      ...current.taskState,
+      completionProof,
+      validationStatus: 'valid' as const,
+    };
+    TaskRunRegistry.upsert(nextTaskState);
+
+    this.setState({
+      ...current,
+      taskState: nextTaskState,
+    });
+  }
+
+  complete(finalAnswer?: string) {
+    const current = this.getState();
+    const nextTaskState = current.taskState
+      ? {
+          ...current.taskState,
+          status: 'completed' as const,
+          finalAnswer,
+          validationStatus: 'valid' as const,
+          completedAt: Date.now(),
+        }
+      : current.taskState;
+    if (nextTaskState) {
+      TaskRunRegistry.upsert(nextTaskState);
+    }
+    this.setState({
+      ...current,
+      status: StatusEnum.END,
+      taskState: nextTaskState,
+    });
+  }
+
+  fail(errorMsg: string) {
+    const current = this.getState();
+    const nextTaskState = current.taskState
+      ? {
+          ...current.taskState,
+          status: 'failed' as const,
+          error: errorMsg,
+          validationStatus: 'failed' as const,
+          completedAt: Date.now(),
+        }
+      : current.taskState;
+    if (nextTaskState) {
+      TaskRunRegistry.upsert(nextTaskState);
+    }
+    this.setState({
+      ...current,
+      status: StatusEnum.ERROR,
+      errorMsg,
+      taskState: nextTaskState,
+    });
+  }
+}

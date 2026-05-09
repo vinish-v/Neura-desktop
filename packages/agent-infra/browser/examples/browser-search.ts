@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { READABILITY_SCRIPT, toMarkdown } from '@agent-infra/shared';
@@ -15,7 +15,7 @@ function getSearchUrl(query: string) {
 }
 
 async function main() {
-  const url = getSearchUrl('ui-tars');
+  const url = getSearchUrl('neura-desktop');
   const browser = new LocalBrowser();
 
   try {

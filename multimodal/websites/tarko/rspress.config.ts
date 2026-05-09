@@ -64,7 +64,7 @@ export default defineConfig({
       {
         icon: 'github',
         mode: 'link',
-        content: 'https://github.com/bytedance/UI-TARS-desktop',
+        content: 'https://github.com/neura-ai/neura-desktop',
       },
     ],
   },

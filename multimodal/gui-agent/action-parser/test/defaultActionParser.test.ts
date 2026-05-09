@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, it, expect } from 'vitest';
@@ -771,7 +771,7 @@ Action: click(start_box='[0, 964, 10, 984]')`,
 
   describe('omni format', () => {
     it('with think_never_used_51bce0c785ca2f68081bfa7d91973934', () => {
-      const input = `<think_never_used_51bce0c785ca2f68081bfa7d91973934>Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "UI TARS". That should work. So first, click the search input field, then type the query.</think_never_used_51bce0c785ca2f68081bfa7d91973934>
+      const input = `<think_never_used_51bce0c785ca2f68081bfa7d91973934>Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "Neura". That should work. So first, click the search input field, then type the query.</think_never_used_51bce0c785ca2f68081bfa7d91973934>
 <computer_env>
 Action: click(point='<point>400 435</point>')
 </computer_env>`;
@@ -799,16 +799,16 @@ Action: click(point='<point>400 435</point>')
           },
         ],
         rawActionStrings: [`click(point='<point>400 435</point>')`],
-        rawContent: `<think_never_used_51bce0c785ca2f68081bfa7d91973934>Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "UI TARS". That should work. So first, click the search input field, then type the query.</think_never_used_51bce0c785ca2f68081bfa7d91973934>
+        rawContent: `<think_never_used_51bce0c785ca2f68081bfa7d91973934>Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "Neura". That should work. So first, click the search input field, then type the query.</think_never_used_51bce0c785ca2f68081bfa7d91973934>
 <computer_env>
 Action: click(point='<point>400 435</point>')
 </computer_env>`,
-        reasoningContent: `Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "UI TARS". That should work. So first, click the search input field, then type the query.`,
+        reasoningContent: `Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "Neura". That should work. So first, click the search input field, then type the query.`,
       });
     });
 
     it('with think', () => {
-      const input = `<think>Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "UI TARS". That should work. So first, click the search input field, then type the query.</think>
+      const input = `<think>Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "Neura". That should work. So first, click the search input field, then type the query.</think>
 <computer_env>
 Action: click(point='<point>400 435</point>')
 </computer_env>`;
@@ -836,16 +836,16 @@ Action: click(point='<point>400 435</point>')
           },
         ],
         rawActionStrings: [`click(point='<point>400 435</point>')`],
-        rawContent: `<think>Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "UI TARS". That should work. So first, click the search input field, then type the query.</think>
+        rawContent: `<think>Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "Neura". That should work. So first, click the search input field, then type the query.</think>
 <computer_env>
 Action: click(point='<point>400 435</point>')
 </computer_env>`,
-        reasoningContent: `Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "UI TARS". That should work. So first, click the search input field, then type the query.`,
+        reasoningContent: `Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "Neura". That should work. So first, click the search input field, then type the query.`,
       });
     });
 
     it('with think_xxx', () => {
-      const input = `<think_xxx>Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "UI TARS". That should work. So first, click the search input field, then type the query.</think_xxx>
+      const input = `<think_xxx>Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "Neura". That should work. So first, click the search input field, then type the query.</think_xxx>
 <computer_env>
 Action: click(point='<point>400 435</point>')
 </computer_env>`;
@@ -873,11 +873,11 @@ Action: click(point='<point>400 435</point>')
           },
         ],
         rawActionStrings: [`click(point='<point>400 435</point>')`],
-        rawContent: `<think_xxx>Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "UI TARS". That should work. So first, click the search input field, then type the query.</think_xxx>
+        rawContent: `<think_xxx>Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "Neura". That should work. So first, click the search input field, then type the query.</think_xxx>
 <computer_env>
 Action: click(point='<point>400 435</point>')
 </computer_env>`,
-        reasoningContent: `Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "UI TARS". That should work. So first, click the search input field, then type the query.`,
+        reasoningContent: `Hmm, the previous action didn't work. Let's check again. The Google search page is open, and the search box is where we need to input. Wait, maybe the search box wasn't properly focused? Let me click on the search box first to make sure it's active, then type "Neura". That should work. So first, click the search input field, then type the query.`,
       });
     });
   });

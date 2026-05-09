@@ -1,0 +1,52 @@
+{
+  "name": "@neura-desktop/operator-adb",
+  "version": "1.2.3",
+  "description": "Operator Android SDK for Neura",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neura-ai/neura-desktop"
+  },
+  "bugs": {
+    "url": "https://github.com/neura-ai/neura-desktop/issues"
+  },
+  "keywords": [
+    "AI",
+    "Core",
+    "SDK",
+    "Operator",
+    "Neura"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "dev": "rslib build --watch",
+    "build": "rslib build",
+    "build:watch": "rslib build --watch",
+    "prepare": "npm run build",
+    "test": "vitest"
+  },
+  "license": "Apache-2.0",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "dependencies": {
+    "@neura-desktop/shared": "workspace:*",
+    "execa": "5.0.1",
+    "inquirer": "8.2.4",
+    "jimp": "1.6.0"
+  },
+  "devDependencies": {
+    "@neura-desktop/sdk": "workspace:*",
+    "@common/configs": "workspace:*",
+    "@rslib/core": "0.10.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.2",
+    "@types/big.js": "^6.2.2",
+    "@types/inquirer": "9.0.7"
+  }
+}

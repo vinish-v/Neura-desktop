@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { LogLevel, MCPAgent, Tool } from '../src';
@@ -58,7 +58,7 @@ async function main() {
 
   const stream = await agent.run({
     input: `
-    1. Open https://github.com/bytedance/UI-TARS-desktop/pull/700
+    1. Open https://github.com/neura-ai/neura-desktop/pull/700
     3. Give a "LGTM" comment 
 
     Please complete the task as quickly as possible.

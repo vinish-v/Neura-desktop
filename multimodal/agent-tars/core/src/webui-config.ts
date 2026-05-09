@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -23,9 +23,9 @@ export const AGENT_TARS_WEBUI_CONFIG: AgentWebUIImplementation = {
         'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=300&fit=crop&crop=center',
     },
     {
-      title: 'Find information about UI TARS',
+      title: 'Find information about Neura',
       category: 'Research',
-      prompt: 'Find information about UI TARS',
+      prompt: 'Find information about Neura',
       image:
         'https://images.unsplash.com/photo-1518186285589-2f7649de83e0?w=400&h=300&fit=crop&crop=center',
     },
@@ -69,9 +69,9 @@ export const AGENT_TARS_WEBUI_CONFIG: AgentWebUIImplementation = {
       title: 'Query Website Filings On MIIT',
       category: 'AI Browser',
       prompt:
-        '帮我打开 https://beian.miit.gov.cn/#/Integrated/recordQuery 查看以下网站的备案\r\n\r\n- https://www.bytedance.com\r\n- https://www.douyin.com\r\n- http://toutiao.com/\r\n\r\n整理成表格发给我，注意每次切换 website 要清空输入框',
+        '帮我打开 https://beian.miit.gov.cn/#/Integrated/recordQuery 查看以下网站的备案\r\n\r\n- https://www.neura-ai.com\r\n- https://www.douyin.com\r\n- http://toutiao.com/\r\n\r\n整理成表格发给我，注意每次切换 website 要清空输入框',
       image:
-        'https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/storage/general/httpsbeianmiitgovcnintegratedrecordquery-httpswwwbytedancec-120388.jpg',
+        'https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/storage/general/httpsbeianmiitgovcnintegratedrecordquery-httpswwwneura-aic-120388.jpg',
     },
     {
       title: "Draw Chart of Hangzhou's Weather",
@@ -84,7 +84,7 @@ export const AGENT_TARS_WEBUI_CONFIG: AgentWebUIImplementation = {
       title: 'How To Fix Git Process Error',
       category: 'CodeAct',
       prompt:
-        "如何修复这个报错：Another git process seems to be running in this repository, e.g.\r\nan editor opened by 'git commit'. Please make sure all processes\r\nare terminated then try again. If it still fails, a git process\r\nmay have crashed in this repository earlier:\r\nremove the file manually to continue.\r\nerror: Unable to create '/Users/chenhaoli/workspace/code/UI-TARS-desktop/.git/logs/refs/remotes/origin/release/v0.2.0-beta.1.lock': File exists.",
+        "如何修复这个报错：Another git process seems to be running in this repository, e.g.\r\nan editor opened by 'git commit'. Please make sure all processes\r\nare terminated then try again. If it still fails, a git process\r\nmay have crashed in this repository earlier:\r\nremove the file manually to continue.\r\nerror: Unable to create '/Users/chenhaoli/workspace/code/Neura Desktop/.git/logs/refs/remotes/origin/release/v0.2.0-beta.1.lock': File exists.",
       image:
         'https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/storage/general/another-git-process-seems-b6495e.jpg',
     },
@@ -94,7 +94,7 @@ export const AGENT_TARS_WEBUI_CONFIG: AgentWebUIImplementation = {
       prompt:
         '帮我深度调研一下 ByteDance Web Infra，给出一份详细的调研报告\r\n\r\n我期待覆盖的信息： \r\n\r\n1. 团队介绍\r\n2. 主要的开源项目、贡献者；\r\n3. 应用场景； \r\n4. 项目活跃状态；\r\n5. 社区影响力；\r\n6. 技术蓝图；\r\n7. 你的思考；\r\n\r\n要求报告采用 Markdown 输出中文，最后写入文件，同时，并使用 HTML 绘制一个图文并茂的 Slide，介绍 ByteDance Web Infra',
       image:
-        'https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/storage/general/bytedance-web-infra-1-002133.jpg',
+        'https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/storage/general/neura-ai-web-infra-1-002133.jpg',
     },
     {
       title: 'Agent TARS Showcase UI Recreation',

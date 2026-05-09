@@ -105,7 +105,7 @@ export const Navbar: React.FC = () => {
 
             <Button
               as="a"
-              href="https://github.com/bytedance/UI-TARS-desktop"
+              href="https://github.com/neura-ai/neura-desktop"
               target="_blank"
               className="min-w-[36px] w-[36px] h-[36px] p-0 bg-transparent border border-white/20 hover:bg-white/10"
               isIconOnly
@@ -126,7 +126,7 @@ export const Navbar: React.FC = () => {
             </Button>
             <Button
               as="a"
-              href="https://github.com/bytedance/UI-TARS-desktop/releases"
+              href="https://github.com/neura-ai/neura-desktop/releases"
               target="_blank"
               size="sm"
               className="
@@ -200,7 +200,7 @@ export const Navbar: React.FC = () => {
                 <div className="mt-8 pt-8 border-t border-white/10 flex flex-col gap-4">
                   <Button
                     as="a"
-                    href="https://github.com/bytedance/UI-TARS-desktop"
+                    href="https://github.com/neura-ai/neura-desktop"
                     target="_blank"
                     size="md"
                     className="w-full bg-white/10 text-white"
@@ -210,7 +210,7 @@ export const Navbar: React.FC = () => {
                   </Button>
                   <Button
                     as="a"
-                    href="https://github.com/bytedance/UI-TARS-desktop/releases?q=Agent-TARS&expanded=true"
+                    href="https://github.com/neura-ai/neura-desktop/releases?q=Agent-TARS&expanded=true"
                     target="_blank"
                     size="md"
                     className="w-full bg-gradient-to-r from-[#6D28D9] to-[#7C3AED] text-white"

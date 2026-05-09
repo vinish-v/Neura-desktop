@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { ConsoleLogger } from '@agent-infra/logger';
@@ -18,7 +18,7 @@ async function main() {
     // First search, keep browser open
     logger.info('Performing first search');
     const results1 = await browserSearch.perform({
-      query: 'ui-tars',
+      query: 'neura-desktop',
       count: 3,
       keepBrowserOpen: true, // Keep browser open
     });

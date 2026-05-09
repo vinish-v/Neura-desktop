@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { config } from 'dotenv';
@@ -7,10 +7,10 @@ import path from 'node:path';
 import { AgentModel, ModelProviderName } from '@tarko/agent';
 config({ path: path.join(__dirname, '../../', '.env.local') });
 
-export const doubao_1_5_ui_tars: AgentModel = {
+export const doubao_1_5_neura: AgentModel = {
   provider: 'volcengine' as ModelProviderName,
   baseURL: process.env.ARK_BASE_URL,
-  id: process.env.DOUBAO_1_5_UI_TARS,
+  id: process.env.DOUBAO_1_5_NEURA,
   apiKey: process.env.ARK_API_KEY, // secretlint-disable-line
 };
 

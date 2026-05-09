@@ -39,7 +39,7 @@ https://github.com/user-attachments/assets/772b0eef-aef7-4ab9-8cb0-9611820539d8
   </tbody>
 </table>
 
-For more use cases, please check out [#842](https://github.com/bytedance/UI-TARS-desktop/issues/842).
+For more use cases, please check out [#842](https://github.com/neura-ai/neura-desktop/issues/842).
 
 ## Overview
 
@@ -280,7 +280,7 @@ agent.eventStream.subscribe((event) => {
 
 ## What's Changed
 
-See Full [CHANGELOG](https://github.com/bytedance/UI-TARS-desktop/blob/main/multimodal/CHANGELOG.md)
+See Full [CHANGELOG](https://github.com/neura-ai/neura-desktop/blob/main/multimodal/CHANGELOG.md)
 
 ## Contributing
 

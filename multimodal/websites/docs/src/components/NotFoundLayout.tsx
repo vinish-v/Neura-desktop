@@ -24,7 +24,7 @@ export function NotFoundLayout() {
             title={t('not-found.github')}
             description={t('not-found.github-desc')}
             icon="🐙"
-            href="https://github.com/bytedance/UI-TARS-desktop/issues"
+            href="https://github.com/neura-ai/neura-desktop/issues"
             color="blue"
             showArrow={true}
             // GitHub 链接是外部链接，无需特殊处理，组件会自动判断

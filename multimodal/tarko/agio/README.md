@@ -40,7 +40,7 @@ npm install @tarko/agio
 
 ### JSON Schema
 
-You can access the AGIO Schema at [agio-schema.json](https://github.com/bytedance/UI-TARS-desktop/tree/main/multimodal/agio/agio-schema.json)
+You can access the AGIO Schema at [agio-schema.json](https://github.com/neura-ai/neura-desktop/tree/main/multimodal/agio/agio-schema.json)
 
 ### Basic Usage
 

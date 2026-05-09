@@ -1,10 +1,10 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
-  "name": "io.github.bytedance/mcp-server-commands",
+  "name": "io.github.neura-ai/mcp-server-commands",
   "description": "An MCP server to run arbitrary commands",
   "status": "active",
   "repository": {
-    "url": "https://github.com/bytedance/UI-TARS-desktop",
+    "url": "https://github.com/neura-ai/neura-desktop",
     "source": "github",
     "subfolder": "packages/agent-infra/mcp-servers/commands"
   },

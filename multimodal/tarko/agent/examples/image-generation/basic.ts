@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -20,7 +20,7 @@ async function main() {
   });
 
   const answer = await agent.run({
-    input: 'Generate a colorful poster with UI-TARS as the theme',
+    input: 'Generate a colorful poster with Neura as the theme',
   });
 
   console.log(answer);

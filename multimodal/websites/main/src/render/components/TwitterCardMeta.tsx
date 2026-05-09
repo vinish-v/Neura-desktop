@@ -12,7 +12,7 @@ interface TwitterCardMetaProps {
 export const TwitterCardMeta: React.FC<TwitterCardMetaProps> = ({
   title = 'Agent TARS - Open-source Multimodal AI Agent',
   description = 'An open-source multimodal AI agent designed to revolutionize GUI interaction by visually interpreting web pages and seamlessly integrating with command lines and file systems.',
-  image = 'https://github.com/bytedance/UI-TARS-desktop/blob/main/apps/agent-tars/public/twitter-card.png?raw=true',
+  image = 'https://github.com/neura-ai/neura-desktop/blob/main/apps/agent-tars/public/twitter-card.png?raw=true',
   url = 'https://agent-tars.com',
   type = 'summary_large_image',
 }) => {

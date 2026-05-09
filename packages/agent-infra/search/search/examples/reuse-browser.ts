@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { LocalBrowser } from '@agent-infra/browser';
@@ -23,7 +23,7 @@ async function main() {
   logger.info('Performing first search...');
   const firstResults = await client.search(
     {
-      query: 'UI-TARS',
+      query: 'Neura',
       count: 5,
     },
     {

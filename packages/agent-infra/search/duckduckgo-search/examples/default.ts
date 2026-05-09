@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { ConsoleLogger } from '@agent-infra/logger';
@@ -10,7 +10,7 @@ async function runExample() {
   try {
     const client = new DuckDuckGoSearchClient();
     const searchResults = await client.search({
-      query: 'UI-TARS',
+      query: 'Neura',
       count: 5,
       retry: {
         retries: 3,

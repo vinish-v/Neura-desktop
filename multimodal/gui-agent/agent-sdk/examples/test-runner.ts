@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -36,7 +36,7 @@ interface ConfigData {
     enable: boolean;
     storageDirectory: string;
   };
-  uiTarsVersion?: string;
+  neuraModelVersion?: string;
   webui?: {
     logo?: string;
     title?: string;

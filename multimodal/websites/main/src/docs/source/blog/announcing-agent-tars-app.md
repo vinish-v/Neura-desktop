@@ -38,7 +38,7 @@ Agent TARS leverages a sophisticated **agent framework** to execute complex `bro
 
 ### Real-time Artifact
 
-To enhance user engagement with AI _processes_ and _outcomes_, the Agent TARS App offers an intuitive streaming user interface showcasing `multimodal` artifacts like **browsers** and **documents**. _This is also an important entry point for you to contact Agent TARS_. You can find all released versions [here](https://github.com/bytedance/UI-TARS-desktop/releases?q=Agent+Tars&expanded=true).
+To enhance user engagement with AI _processes_ and _outcomes_, the Agent TARS App offers an intuitive streaming user interface showcasing `multimodal` artifacts like **browsers** and **documents**. _This is also an important entry point for you to contact Agent TARS_. You can find all released versions [here](https://github.com/neura-ai/neura-desktop/releases?q=Agent+Tars&expanded=true).
 
 These features combine to make Agent TARS a powerful and versatile tool for AI-assisted browsing, research, and task execution, check out our examples:
 
@@ -51,11 +51,11 @@ These features combine to make Agent TARS a powerful and versatile tool for AI-a
 
 ## Quick Start
 
-> **DISCLAIMER**: Agent TARS is still in **Technical Preview** stage and not stable yet. It's not recommended to use it in production. If you run into any issues, we welcome feedback on [Github](https://github.com/bytedance/UI-TARS-desktop) or on [Twitter](https://x.com/agent_tars).
+> **DISCLAIMER**: Agent TARS is still in **Technical Preview** stage and not stable yet. It's not recommended to use it in production. If you run into any issues, we welcome feedback on [Github](https://github.com/neura-ai/neura-desktop) or on [Twitter](https://x.com/agent_tars).
 
 ### Install
 
-Visit [Releases](https://github.com/bytedance/UI-TARS-desktop/releases?q=Agent+Tars&expanded=true) page to download the latest desktop package of Agent TARS.
+Visit [Releases](https://github.com/neura-ai/neura-desktop/releases?q=Agent+Tars&expanded=true) page to download the latest desktop package of Agent TARS.
 
 ![Github Releases](https://sf16-sg.tiktokcdn.com/obj/eden-sg/psvhouloj/images/releases.png)
 
@@ -148,4 +148,4 @@ Stay updated by following us on X ([@AgentTars](https://x.com/agent_tars)) and j
 - X: https://x.com/agent_tars
 - Discord: https://discord.gg/NAeJMKk4
 - Showcase: https://agent-tars.com/showcase
-- Github: https://github.com/bytedance/UI-TARS-desktop
+- Github: https://github.com/neura-ai/neura-desktop

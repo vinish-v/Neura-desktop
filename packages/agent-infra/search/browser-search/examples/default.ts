@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { ConsoleLogger } from '@agent-infra/logger';
@@ -15,7 +15,7 @@ async function browserSearch() {
   });
 
   const results = await browserSearch.perform({
-    query: 'ui-tars',
+    query: 'neura-desktop',
     count: 3,
   });
 

@@ -208,7 +208,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, session
                     <span className="text-xs font-mono text-gray-400 dark:text-gray-600">
                       (
                       <a
-                        href={`https://github.com/bytedance/UI-TARS-desktop/commit/${versionInfo.gitHash}`}
+                        href={`https://github.com/neura-ai/neura-desktop/commit/${versionInfo.gitHash}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:underline transition-colors"
@@ -253,7 +253,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, session
             <motion.a
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              href="https://github.com/bytedance/UI-TARS-desktop"
+              href="https://github.com/neura-ai/neura-desktop"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-3 px-8 py-4 bg-gray-900 dark:bg-gray-100 hover:bg-gray-800 dark:hover:bg-gray-200 text-white dark:text-gray-900 rounded-lg transition-colors group"

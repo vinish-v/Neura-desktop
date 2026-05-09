@@ -62,7 +62,7 @@ const Blog: React.FC = () => {
           url={currentUrl}
           image={
             currentPost.coverImage ||
-            'https://github.com/bytedance/UI-TARS-desktop/blob/main/apps/agent-tars/public/twitter-card.png?raw=true'
+            'https://github.com/neura-ai/neura-desktop/blob/main/apps/agent-tars/public/twitter-card.png?raw=true'
           }
         />
 

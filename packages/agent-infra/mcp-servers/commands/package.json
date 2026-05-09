@@ -1,7 +1,7 @@
 {
   "name": "@agent-infra/mcp-server-commands",
   "version": "1.2.29",
-  "mcpName": "io.github.bytedance/mcp-server-commands",
+  "mcpName": "io.github.neura-ai/mcp-server-commands",
   "description": "An MCP server to run arbitrary commands",
   "type": "module",
   "main": "./dist/server.cjs",
@@ -16,11 +16,11 @@
   "bin": {
     "mcp-server-commands": "./dist/index.cjs"
   },
-  "homepage": "https://github.com/bytedance/UI-TARS-desktop",
-  "bugs": "https://github.com/bytedance/UI-TARS-desktop/issues",
+  "homepage": "https://github.com/neura-ai/neura-desktop",
+  "bugs": "https://github.com/neura-ai/neura-desktop/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bytedance/UI-TARS-desktop.git",
+    "url": "https://github.com/neura-ai/neura-desktop.git",
     "directory": "packages/agent-infra/mcp-servers/commands"
   },
   "files": [

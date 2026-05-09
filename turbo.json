@@ -12,21 +12,32 @@
         "**/out/**"
       ]
     },
-    "ui-tars-desktop#build": {
+    "neura-desktop#build": {
       "outputs": [
-        "apps/ui-tars-desktop/dist/**",
-        "apps/ui-tars-desktop/out/**"
+        "apps/neura-desktop/dist/**",
+        "apps/neura-desktop/out/**"
       ]
     },
-    "ui-tars-desktop#build:e2e": {
+    "neura-desktop#build:e2e": {
       "outputs": [
-        "apps/ui-tars-desktop/out/**",
-        "apps/ui-tars-desktop/dist/**"
+        "apps/neura-desktop/out/**",
+        "apps/neura-desktop/dist/**"
       ]
     },
-    "ui-tars-desktop#test:e2e": {
+    "neura-desktop#test:e2e": {
       "dependsOn": [
-        "ui-tars-desktop#build:e2e"
+        "neura-desktop#build:e2e"
+      ]
+    },
+    "neura-desktop#build": {
+      "outputs": [
+        "apps/neura/dist/**",
+        "apps/neura/out/**"
+      ]
+    },
+    "neura-desktop#docker:build": {
+      "outputs": [
+        "apps/neura/dist/**"
       ]
     },
     "//#format": {},

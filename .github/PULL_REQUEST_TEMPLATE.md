@@ -6,7 +6,7 @@
     effectively, so please DO NOT delete this template.
 
     If you're new to contributing, learn more about contributing here:
-    https://github.com/bytedance/UI-TARS-desktop/blob/main/CONTRIBUTING.md.  
+    https://github.com/neura-ai/neura-desktop/blob/main/CONTRIBUTING.md.  
 ---------------------------------------------------------------------------------->
 
 ## Summary

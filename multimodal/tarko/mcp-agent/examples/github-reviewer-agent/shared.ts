@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -97,11 +97,11 @@ export const getCommonOptions = (filename: string): MCPAgentOptions => ({
   logLevel: LogLevel.DEBUG,
 });
 
-// /Users/chenhaoli/workspace/code/UI-TARS-desktop-5/multimodal/mcp-agent/examples/github-reviewer-agent/filesystem
+// /Users/chenhaoli/workspace/code/Neura Desktop-5/multimodal/mcp-agent/examples/github-reviewer-agent/filesystem
 
 export const runOptions = {
-  // input: 'Review https://github.com/bytedance/UI-TARS-desktop/pull/534',
-  input: 'Review https://github.com/bytedance/UI-TARS-desktop/pull/697',
+  // input: 'Review https://github.com/neura-ai/neura-desktop/pull/534',
+  input: 'Review https://github.com/neura-ai/neura-desktop/pull/697',
 };
 
 export async function run(agent: MCPAgent) {

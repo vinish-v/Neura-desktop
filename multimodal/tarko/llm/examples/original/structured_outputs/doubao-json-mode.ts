@@ -36,7 +36,7 @@ EXAMPLE JSON OUTPUT:
         content: userPrompt,
       },
     ],
-    // https://cloud.bytedance.net/docs/ark/docs/664afad9e16ff302cb5c0706/682bfcaebcd01f0508f0cb72?source=search&from=search_bytecloud&x-resource-account=public&x-bc-region-id=bytedance
+    // https://cloud.neura-ai.net/docs/ark/docs/664afad9e16ff302cb5c0706/682bfcaebcd01f0508f0cb72?source=search&from=search_bytecloud&x-resource-account=public&x-bc-region-id=neura-ai
     response_format: {
       type: 'json_object',
     },

@@ -4,13 +4,13 @@
   "version": "0.3.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bytedance/UI-TARS-desktop"
+    "url": "https://github.com/neura-ai/neura-desktop"
   },
   "bugs": {
-    "url": "https://github.com/bytedance/UI-TARS-desktop/issues"
+    "url": "https://github.com/neura-ai/neura-desktop/issues"
   },
   "keywords": [
-    "UI-TARS",
+    "Neura",
     "Operator",
     "AIO"
   ],

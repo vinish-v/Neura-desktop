@@ -1,25 +1,25 @@
 > [!WARNING]
 > This document has been archived.
 
-# @ui-tars/sdk Guide (Experimental)
+# @neura-desktop/sdk Guide (Experimental)
 
 ## Overview
 
-`@ui-tars/sdk` is a powerful cross-platform(ANY device/platform) toolkit for building GUI automation agents.
+`@neura-desktop/sdk` is a powerful cross-platform(ANY device/platform) toolkit for building GUI automation agents.
 
 It provides a flexible framework to create agents that can interact with graphical user interfaces through various operators. It supports running on both **Node.js** and the **Web Browser**
 
 ```mermaid
 classDiagram
     class GUIAgent~T extends Operator~ {
-        +model: UITarsModel
+        +model: NeuraModel
         +operator: T
         +signal: AbortSignal
         +onData
         +run()
     }
 
-    class UITarsModel {
+    class NeuraModel {
         +invoke()
     }
 
@@ -44,7 +44,7 @@ classDiagram
         +execute()
     }
 
-    GUIAgent --> UITarsModel
+    GUIAgent --> NeuraModel
     GUIAgent ..> Operator
     Operator <|.. NutJSOperator
     Operator <|.. WebOperator
@@ -54,10 +54,10 @@ classDiagram
 ## Try it out
 
 ```bash
-npx @ui-tars/cli start
+npx @neura-desktop/cli start
 ```
 
-Input your UI-TARS Model Service Config(`baseURL`, `apiKey`, `model`), then you can control your computer with CLI.
+Input your Neura Model Service Config(`baseURL`, `apiKey`, `model`), then you can control your computer with CLI.
 
 ```
 Need to install the following packages:
@@ -75,7 +75,7 @@ Ok to proceed? (y) y
 sequenceDiagram
     participant user as User
     participant guiAgent as GUI Agent
-    participant model as UI-TARS Model
+    participant model as Neura Model
     participant operator as Operator
 
     user -->> guiAgent: "`instruction` + <br /> `Operator.MANUAL.ACTION_SPACES`"
@@ -106,7 +106,7 @@ sequenceDiagram
 
 ### Basic Usage
 
-Basic usage is largely derived from package `@ui-tars/sdk`, here's a basic example of using the SDK:
+Basic usage is largely derived from package `@neura-desktop/sdk`, here's a basic example of using the SDK:
 
 > Note: Using `nut-js`(cross-platform computer control tool) as the operator, you can also use or customize other operators. NutJS operator that supports common desktop automation actions:
 > - Mouse actions: click, double click, right click, drag, hover
@@ -115,8 +115,8 @@ Basic usage is largely derived from package `@ui-tars/sdk`, here's a basic examp
 > - Screenshot capture
 
 ```ts
-import { GUIAgent } from '@ui-tars/sdk';
-import { NutJSOperator } from '@ui-tars/operator-nut-js';
+import { GUIAgent } from '@neura-desktop/sdk';
+import { NutJSOperator } from '@neura-desktop/operator-nut-js';
 
 const guiAgent = new GUIAgent({
   model: {
@@ -228,10 +228,10 @@ When implementing a custom operator, you need to implement two core methods: `sc
     "jimp": "^1.6.0"
   },
   "peerDependencies": {
-    "@ui-tars/sdk": "^1.2.0-beta.17"
+    "@neura-desktop/sdk": "^1.2.0-beta.17"
   },
   "devDependencies": {
-    "@ui-tars/sdk": "^1.2.0-beta.17",
+    "@neura-desktop/sdk": "^1.2.0-beta.17",
     "@rslib/core": "^0.5.4",
     "typescript": "^5.7.2",
     "vitest": "^3.0.2"
@@ -278,7 +278,7 @@ interface ExecuteParams {
 }
 ```
 
-Advanced sdk usage is largely derived from package `@ui-tars/sdk/core`, you can create custom operators by extending the base `Operator` class:
+Advanced sdk usage is largely derived from package `@neura-desktop/sdk/core`, you can create custom operators by extending the base `Operator` class:
 
 ```typescript
 import {
@@ -286,11 +286,11 @@ import {
   type ScreenshotOutput,
   type ExecuteParams
   type ExecuteOutput,
-} from '@ui-tars/sdk/core';
+} from '@neura-desktop/sdk/core';
 import { Jimp } from 'jimp';
 
 export class CustomOperator extends Operator {
-  // Define the action spaces and description for UI-TARS System Prompt splice
+  // Define the action spaces and description for Neura System Prompt splice
   static MANUAL = {
     ACTION_SPACES: [
       'click(start_box="") # click on the element at the specified coordinates',
@@ -333,8 +333,8 @@ Required methods:
 - `execute()`: Performs the requested action based on model predictions
 
 Optional static properties:
-- `MANUAL`: Define the action spaces and description for UI-TARS Model understanding
-  - `ACTION_SPACES`: Define the action spaces and description for UI-TARS Model understanding
+- `MANUAL`: Define the action spaces and description for Neura Model understanding
+  - `ACTION_SPACES`: Define the action spaces and description for Neura Model understanding
 
 Loaded into `GUIAgent`:
 
@@ -351,10 +351,10 @@ const guiAgent = new GUIAgent({
 
 ### Custom Model Implementation
 
-You can implement custom model logic by extending the `UITarsModel` class:
+You can implement custom model logic by extending the `NeuraModel` class:
 
 ```typescript
-class CustomUITarsModel extends UITarsModel {
+class CustomNeuraModel extends NeuraModel {
   constructor(modelConfig: { model: string }) {
     super(modelConfig);
   }
@@ -374,7 +374,7 @@ class CustomUITarsModel extends UITarsModel {
 }
 
 const agent = new GUIAgent({
-  model: new CustomUITarsModel({ model: 'custom-model' }),
+  model: new CustomNeuraModel({ model: 'custom-model' }),
   // ... other config
 });
 ```

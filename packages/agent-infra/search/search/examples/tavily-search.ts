@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { SearchClient, SearchProvider } from '../src';
@@ -14,7 +14,7 @@ export async function tavilySearch() {
 
   const results = await client.search(
     {
-      query: 'UI-TARS',
+      query: 'Neura',
       count: 5,
     },
     {

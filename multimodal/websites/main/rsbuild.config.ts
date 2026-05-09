@@ -30,7 +30,7 @@ export default defineConfig({
     title: 'Agent TARS - Open-source Multimodal AI Agent',
     template: 'public/index.html',
     favicon:
-      'https://github.com/bytedance/UI-TARS-desktop/blob/main/apps/ui-tars/resources/favicon-32x32.png?raw=true',
+      'https://github.com/neura-ai/neura-desktop/blob/main/apps/neura/resources/favicon-32x32.png?raw=true',
     meta: {
       description:
         'Agent TARS is an open-source multimodal AI agent designed to revolutionize GUI interaction by visually interpreting web pages and seamlessly integrating with command lines and file systems.',

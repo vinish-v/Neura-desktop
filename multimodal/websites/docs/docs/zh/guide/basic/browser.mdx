@@ -12,7 +12,7 @@ Agent TARS 支持直接操作你的本地浏览器，因此，在本地使用 Ag
 | 模式 | 介绍 |
 | --- | --- |
 | `dom` | 操作能力基于 DOM 分析的 [Browser Use](https://www.npmjs.com/@agent-infra/mcp-server-browser)，在 Agent TARS 早期版本为此方案。 |
-| `visual-grounding` | 操作能力基于 GUI Agent（[UI-TARS](https://seed-tars.com/) / [Doubao 1.5 VL](https://www.volcengine.com/docs/82379/1554521)），无 DOM 相关的工具。 |
+| `visual-grounding` | 操作能力基于 GUI Agent（[Neura](https://seed-tars.com/) / [Doubao 1.5 VL](https://www.volcengine.com/docs/82379/1554521)），无 DOM 相关的工具。 |
 | `hybrid` | 操作能力同时包含 `visual-grounding` 与 `dom` 相关的工具 |
 
 > \* _三种模式均包含 *`navigate`*、*`tab`* 相关的基础导航工具，以及 。_
@@ -130,9 +130,9 @@ click(point='<point>339 607</point>')  # 3. 点击 Check 按钮，完成检查
 
 这里的解析细节与跨模型兼容性，实际上比想象中要复杂，不在本文的讨论范围内，因此暂时跳过。
 
-::: tip 和 UI-TARS-desktop 对比
+::: tip 和 Neura-desktop 对比
 
-如果你使用过 UI-TARS-Desktop，你可以将这种形态理解为 UI-TARS-desktop 的 Browser operator + 导航工具 + 信息提取工具。
+如果你使用过 Neura-Desktop，你可以将这种形态理解为 Neura-desktop 的 Browser operator + 导航工具 + 信息提取工具。
 
 :::
 

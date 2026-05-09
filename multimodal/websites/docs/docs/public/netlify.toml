@@ -23,11 +23,11 @@ status = 200
 
 [[redirects]]
 from = "/wechat-intro"
-to = "https://bytedance.larkoffice.com/docx/KEbydDtCSoQ4J0xyrv4cYsf3nid"
+to = "https://neura-ai.larkoffice.com/docx/KEbydDtCSoQ4J0xyrv4cYsf3nid"
 
 [[redirects]]
-from = "/2025/04/11/difference-between-ui-tars-desktop-and-agent-tars-app"
-to = "https://preview.agent-tars.com/2025/04/11/difference-between-ui-tars-desktop-and-agent-tars-app"
+from = "/2025/04/11/difference-between-neura-desktop-and-agent-tars-app"
+to = "https://preview.agent-tars.com/2025/04/11/difference-between-neura-desktop-and-agent-tars-app"
 
 [[redirects]]
 from = "/2025/03/25/mcp-brings-a-new-paradigm-to-layered-ai-app-development"

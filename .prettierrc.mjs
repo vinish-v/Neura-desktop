@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 export default {
@@ -25,7 +25,7 @@ export default {
   // importOrder: [
   //   '^node:(.*)$',
   //   '<THIRD_PARTY_MODULES>',
-  //   '^@ui-tars/(.*)$',
+  //   '^@neura-desktop/(.*)$',
   //   '^@main/(.*)$',
   //   '^@shared/(.*)$',
   //   '^@renderer/(.*)$',

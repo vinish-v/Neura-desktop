@@ -1,14 +1,14 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 /**
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Operator } from '@gui-agent/shared/base';
 
-export const getSystemPromptUITARS_1_0 = (
+export const getSystemPromptNEURA_1_0 = (
   language: 'zh' | 'en',
   operator: Operator,
 ) => `You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
@@ -28,7 +28,7 @@ Action: ...
 ## User Instruction
 `;
 
-export const getSystemPromptUITARS_1_5 = (
+export const getSystemPromptNEURA_1_5 = (
   language: 'zh' | 'en',
   useCase: 'normal' | 'poki',
 ) => `You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
@@ -197,23 +197,23 @@ Action: click(point='<point>10 20</point>')
 `;
 
 export async function getSystemPromptForModel(
-  uiTarsVersion:
-    | 'ui-tars-1.0'
-    | 'ui-tars-1.5'
-    | 'doubao-1.5-ui-tars-15b'
-    | 'doubao-1.5-ui-tars-20b'
+  neuraModelVersion:
+    | 'neura-desktop-1.0'
+    | 'neura-desktop-1.5'
+    | 'doubao-1.5-neura-desktop-15b'
+    | 'doubao-1.5-neura-desktop-20b'
     | undefined
     | null
     | '',
   operator: Operator,
 ) {
-  if (uiTarsVersion === 'ui-tars-1.0') {
-    return getSystemPromptUITARS_1_0('zh', operator);
-  } else if (uiTarsVersion === 'ui-tars-1.5') {
-    return getSystemPromptUITARS_1_5('zh', 'normal');
-  } else if (uiTarsVersion === 'doubao-1.5-ui-tars-15b') {
+  if (neuraModelVersion === 'neura-desktop-1.0') {
+    return getSystemPromptNEURA_1_0('zh', operator);
+  } else if (neuraModelVersion === 'neura-desktop-1.5') {
+    return getSystemPromptNEURA_1_5('zh', 'normal');
+  } else if (neuraModelVersion === 'doubao-1.5-neura-desktop-15b') {
     return getSystemPromptDoubao_15_15B('zh');
-  } else if (uiTarsVersion === 'doubao-1.5-ui-tars-20b') {
+  } else if (neuraModelVersion === 'doubao-1.5-neura-desktop-20b') {
     return getSystemPromptDoubao_15_20B('zh', 'browser');
   } else {
     return SYSTEM_PROMPT;

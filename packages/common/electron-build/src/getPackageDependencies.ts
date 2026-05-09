@@ -7,30 +7,60 @@
  * https://github.com/timfish/forge-externals-plugin/blob/master/LICENSE
  */
 import { Walker, DepType } from 'flora-colossus';
-import { dirname } from 'path';
+import fs from 'node:fs';
+import { dirname, join } from 'node:path';
 import { findUpSync } from './findUp';
 
+const readPackageName = (pkgPath: string): string | undefined => {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as {
+      name?: string;
+    };
+    return pkg.name;
+  } catch {
+    return undefined;
+  }
+};
+
+const findNodeModulesPackageRoot = (
+  cwd: string,
+  pkgName: string,
+): string => {
+  let current = cwd || process.cwd();
+
+  while (true) {
+    const candidate = join(current, 'node_modules', ...pkgName.split('/'));
+    const pkgPath = join(candidate, 'package.json');
+
+    if (fs.existsSync(pkgPath) && readPackageName(pkgPath) === pkgName) {
+      return candidate;
+    }
+
+    const parent = dirname(current);
+    if (parent === current) {
+      return '';
+    }
+    current = parent;
+  }
+};
+
 export const getModuleRoot = (cwd: string, pkgName: string): string => {
+  const directModuleRoot = findNodeModulesPackageRoot(cwd, pkgName);
+  if (directModuleRoot) {
+    return directModuleRoot;
+  }
+
   let moduleEntryPath;
   try {
-    moduleEntryPath = dirname(
-      require.resolve(`${pkgName}/package.json`, {
-        paths: [cwd || process.cwd()],
-      }),
-    );
-  } catch (error) {
     moduleEntryPath = dirname(
       require.resolve(pkgName, {
         paths: [cwd || process.cwd()],
       }),
     );
-    console.warn(
-      'Failed to read package.json:',
-      error,
-      'new_entry_path',
-      moduleEntryPath,
-    );
+  } catch {
+    return '';
   }
+
   let pkgPath = findUpSync('package.json', {
     cwd: moduleEntryPath,
   });
@@ -43,21 +73,16 @@ export const getModuleRoot = (cwd: string, pkgName: string): string => {
   let isMatched = false;
 
   while (pkgPath && !isMatched) {
-    try {
-      const pkg = require(pkgPath);
-      if (pkg.name === pkgName) {
-        isMatched = true;
-        break;
-      }
-
-      currentDir = dirname(currentDir);
-      pkgPath = findUpSync('package.json', {
-        cwd: currentDir,
-      });
-    } catch (err) {
-      console.warn('Failed to read package.json:', err);
+    const foundPackageName = readPackageName(pkgPath);
+    if (foundPackageName === pkgName) {
+      isMatched = true;
       break;
     }
+
+    currentDir = dirname(currentDir);
+    pkgPath = findUpSync('package.json', {
+      cwd: currentDir,
+    });
   }
 
   if (!isMatched || !pkgPath) {

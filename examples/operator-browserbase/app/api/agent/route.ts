@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 import { NextResponse } from 'next/server';
-import { GUIAgent, StatusEnum } from '@ui-tars/sdk';
-import { BrowserbaseOperator } from '@ui-tars/operator-browserbase';
+import { GUIAgent, StatusEnum } from '@neura-desktop/sdk';
+import { BrowserbaseOperator } from '@neura-desktop/operator-browserbase';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,9 +59,9 @@ export async function POST(request: Request) {
     const guiAgent = new GUIAgent({
       systemPrompt: SYSTEM_PROMPT,
       model: {
-        baseURL: process.env.UI_TARS_BASE_URL,
-        apiKey: process.env.UI_TARS_API_KEY,
-        model: process.env.UI_TARS_MODEL!,
+        baseURL: process.env.NEURA_BASE_URL,
+        apiKey: process.env.NEURA_API_KEY,
+        model: process.env.NEURA_MODEL!,
       },
       // signal,
       operator,

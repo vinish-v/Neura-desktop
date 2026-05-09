@@ -267,7 +267,7 @@
 - 792a2a7: fix: factors type
 - d0878b8: feat: support vision mode
 - Updated dependencies [a85ef50]
-  - @ui-tars/action-parser@1.2.2
+  - @neura-desktop/action-parser@1.2.2
 
 ## 1.1.6-beta.10
 
@@ -309,7 +309,7 @@
 
 ### Patch Changes
 
-- @ui-tars/action-parser@1.2.2-beta.3
+- @neura-desktop/action-parser@1.2.2-beta.3
 
 ## 1.1.6-beta.3
 

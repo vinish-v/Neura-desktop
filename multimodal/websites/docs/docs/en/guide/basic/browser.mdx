@@ -11,7 +11,7 @@ In Agent TARS, we support three browser operation modes based on DOM, VLM, and a
 | Mode | Description |
 | --- | --- |
 | `dom` | Operates based on DOM analysis using [Browser Use](https://www.npmjs.com/@agent-infra/mcp-server-browser), the default mode in earlier versions of Agent TARS. |
-| `visual-grounding` | Operates with GUI-based agents ([UI-TARS](https://seed-tars.com/) / [Doubao 1.5 VL](https://www.volcengine.com/docs/82379/1554521)), without using DOM-related tools. |
+| `visual-grounding` | Operates with GUI-based agents ([Neura](https://seed-tars.com/) / [Doubao 1.5 VL](https://www.volcengine.com/docs/82379/1554521)), without using DOM-related tools. |
 | `hybrid` | Combines tools from both `visual-grounding` and `dom`. |
 
 > \* _All three modes include basic navigation tools for *`navigate`* and *`tab`*._
@@ -129,8 +129,8 @@ click(point='<point>339 607</point>')  # 3. Click Check button to complete
 
 Details of this parsing process and cross-model compatibility are more complex than they appear and are out of scope for this document.
 
-::: tip Comparison with UI-TARS-desktop
-If you’ve used UI-TARS-Desktop, you can understand this as a combination of the UI-TARS-desktop browser operator, navigation tools, and information extraction tools.  
+::: tip Comparison with Neura-desktop
+If you’ve used Neura-Desktop, you can understand this as a combination of the Neura-desktop browser operator, navigation tools, and information extraction tools.  
 :::
 
 ### Hybrid

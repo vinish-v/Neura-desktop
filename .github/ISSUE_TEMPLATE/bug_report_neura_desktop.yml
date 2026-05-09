@@ -1,0 +1,56 @@
+name: "🐛 Neura Desktop Bug Report"
+description: "Submit a bug report for the Neura Desktop App."
+title: "[Bug]: "
+type: Bug
+labels: ["Neura", "Bug"]
+body:
+- type: input
+  attributes:
+    label: Version
+    description: "Please provide the version of Neura Desktop you are using."
+    placeholder: "e.g., v0.1.0"
+  validations:
+    required: true
+- type: dropdown
+  attributes:
+    label: Model
+    description: "Select the VLM being used when this issue occurred."
+    options:
+      - Neura-1.5-7B
+      - Doubao-1.5-Neura
+      - Neura-2B-SFT
+      - Neura-7B-SFT
+      - Neura-7B-DPO
+      - Neura-72B-SFT
+      - Neura-72B-DPO
+  validations:
+    required: true
+- type: dropdown
+  attributes:
+    label: Deployment Method
+    description: "Select the deployment method for Neura Desktop."
+    options:
+      - Cloud
+      - Local
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: Issue Description
+    description: |
+      Describe the issue in detail, including what you were expecting to happen, what actually happened, and any relevant screenshots (if available).
+    placeholder: |
+      Example:
+      - Expected behavior: ...
+      - Actual behavior: ...
+      - Screenshots: <attach link or embed image>
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: Error Logs
+    description: |
+      Include any relevant logs (e.g., Help -> Open Log File) that might help diagnose the issue.
+    placeholder: "Paste your logs here."
+  validations:
+    required: false

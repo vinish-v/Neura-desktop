@@ -30,7 +30,7 @@ Tarko's Context, Memory, and Web UI are completely driven by a standard protocol
 
 🌟 **Open Source Adoption**
 
-Tarko powers the development of open source projects like Agent TARS and UI-TARS Desktop, which have gained over 15k Stars on GitHub.
+Tarko powers the development of open source projects like Agent TARS and Neura Desktop, which have gained over 15k Stars on GitHub.
 
 ## Quick Start
 
@@ -255,4 +255,4 @@ Contributions are welcome! Please read our [contributing guidelines](../../CONTR
 
 ## License
 
-Apache-2.0 - see [LICENSE](https://github.com/bytedance/UI-TARS-desktop/blob/main/LICENSE) for details.
+Apache-2.0 - see [LICENSE](https://github.com/neura-ai/neura-desktop/blob/main/LICENSE) for details.

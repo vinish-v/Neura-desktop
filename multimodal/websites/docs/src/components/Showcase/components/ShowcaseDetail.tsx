@@ -254,7 +254,7 @@ export const ShowcaseDetail: React.FC<ShowcaseDetailProps> = ({
                     </p>
                     <Button
                       as={Link}
-                      href="https://github.com/bytedance/UI-TARS-desktop/issues/842"
+                      href="https://github.com/neura-ai/neura-desktop/issues/842"
                       target="_blank"
                       className="bg-purple-600/80 hover:bg-purple-600 text-white text-sm w-full"
                       size="sm"

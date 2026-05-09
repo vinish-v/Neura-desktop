@@ -4,7 +4,7 @@
   <a href="https://npmjs.com/package/@agent-infra/search?activeTab=readme"><img src="https://img.shields.io/npm/v/@agent-infra/search?style=flat-square&colorA=564341&colorB=EDED91" alt="npm version" /></a>
   <a href="https://npmcharts.com/compare/@agent-infra/search?minimal=true"><img src="https://img.shields.io/npm/dm/@agent-infra/search.svg?style=flat-square&colorA=564341&colorB=EDED91" alt="downloads" /></a>
   <a href="https://nodejs.org/en/about/previous-releases"><img src="https://img.shields.io/node/v/@agent-infra/search.svg?style=flat-square&colorA=564341&colorB=EDED91" alt="node version"></a>
-  <a href="https://github.com/bytedance/open-agent/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&colorA=564341&colorB=EDED91" alt="license" /></a>
+  <a href="https://github.com/neura-ai/open-agent/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&colorA=564341&colorB=EDED91" alt="license" /></a>
 </p>
 
 An isomorphic search client that unifies multiple search providers into a single API.
@@ -80,7 +80,7 @@ const browserSearch = new SearchClient({
 
 // Use the appropriate client based on your needs
 const results = await bingSearch.search({
-  query: 'UI-TARS',
+  query: 'Neura',
 });
 ```
 
@@ -98,7 +98,7 @@ const client = new SearchClient({
 });
 
 const results = await client.search({
-  query: 'UI-TARS',
+  query: 'Neura',
 });
 ```
 
@@ -181,7 +181,7 @@ const client = new SearchClient({
 
 const results = await client.search(
   {
-    query: 'UI-TARS',
+    query: 'Neura',
     count: 5,
   },
   // Pass Bing-specific parameter via 2nd parameter
@@ -223,7 +223,7 @@ const client = new SearchClient({
 
 const results = await client.search(
   {
-    query: 'UI-TARS',
+    query: 'Neura',
     count: 5,
   },
   // BrowserSearch-specific parameters

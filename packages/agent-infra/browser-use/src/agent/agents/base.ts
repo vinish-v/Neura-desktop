@@ -112,6 +112,18 @@ export abstract class BaseAgent<T extends z.ZodType, M = unknown> {
 
   // Set whether to use structured output based on the model name
   private setWithStructuredOutput(): boolean {
+    const baseURL =
+      (this.chatLLM as { clientConfig?: { baseURL?: string } }).clientConfig
+        ?.baseURL || '';
+    const isOpenAICompatibleProvider =
+      baseURL &&
+      !/\/\/api\.openai\.com(?:\/|$)/i.test(baseURL) &&
+      !/\.openai\.azure\.com(?:\/|$)/i.test(baseURL);
+
+    if (isOpenAICompatibleProvider) {
+      return false;
+    }
+
     if (
       this.modelName === 'deepseek-reasoner' ||
       this.modelName === 'deepseek-r1' ||
@@ -130,7 +142,7 @@ export abstract class BaseAgent<T extends z.ZodType, M = unknown> {
   async invoke(inputMessages: BaseMessage[]): Promise<this['ModelOutput']> {
     // Use structured output
     if (this.withStructuredOutput) {
-      const structuredLlm = this.chatLLM.withStructuredOutput(
+      const structuredLlm = (this.chatLLM as any).withStructuredOutput(
         this.modelOutputSchema,
         {
           includeRaw: true,

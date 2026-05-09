@@ -1,0 +1,52 @@
+{
+  "name": "@neura-desktop/cli",
+  "version": "1.2.3",
+  "description": "CLI for Neura",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neura-ai/neura-desktop"
+  },
+  "bugs": {
+    "url": "https://github.com/neura-ai/neura-desktop/issues"
+  },
+  "bin": {
+    "neura-desktop": "./bin/index.js"
+  },
+  "keywords": [
+    "CLI",
+    "Neura"
+  ],
+  "scripts": {
+    "prepare": "npm run build",
+    "dev": "rslib build --watch",
+    "build": "rslib build",
+    "build:watch": "rslib build --watch",
+    "test": "vitest"
+  },
+  "license": "Apache-2.0",
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "dependencies": {
+    "commander": "^13.1.0",
+    "jimp": "1.6.0",
+    "js-yaml": "^4.1.0",
+    "@clack/prompts": "^0.10.0",
+    "@neura-desktop/operator-nut-js": "workspace:*",
+    "@neura-desktop/operator-adb": "workspace:*",
+    "@neura-desktop/sdk": "workspace:*",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "@rslib/core": "0.10.0",
+    "@common/configs": "workspace:*",
+    "@types/js-yaml": "^4.0.9",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.2"
+  }
+}

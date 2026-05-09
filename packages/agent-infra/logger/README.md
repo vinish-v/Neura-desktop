@@ -4,7 +4,7 @@
   <a href="https://npmjs.com/package/@agent-infra/logger?activeTab=readme"><img src="https://img.shields.io/npm/v/@agent-infra/logger?style=flat-square&colorA=564341&colorB=EDED91" alt="npm version" /></a>
   <a href="https://npmcharts.com/compare/@agent-infra/logger?minimal=true"><img src="https://img.shields.io/npm/dm/@agent-infra/logger.svg?style=flat-square&colorA=564341&colorB=EDED91" alt="downloads" /></a>
   <a href="https://nodejs.org/en/about/previous-releases"><img src="https://img.shields.io/node/v/@agent-infra/logger.svg?style=flat-square&colorA=564341&colorB=EDED91" alt="node version"></a>
-  <a href="https://github.com/bytedance/UI-TARS-desktop/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&colorA=564341&colorB=EDED91" alt="license" /></a>
+  <a href="https://github.com/neura-ai/neura-desktop/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&colorA=564341&colorB=EDED91" alt="license" /></a>
 </p>
 
 A tiny, powerful isomorphic logger for both Node.js and browser environments. built for **Agent Tars**.

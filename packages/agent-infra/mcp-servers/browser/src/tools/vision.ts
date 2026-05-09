@@ -80,7 +80,7 @@ const screenClickTool = defineTool({
       let y = args.y;
 
       if (Array.isArray(factors) && factors.length > 0) {
-        const actionParserModule = await import('@ui-tars/action-parser');
+        const actionParserModule = await import('@neura-desktop/action-parser');
         const { actionParser } =
           actionParserModule?.default ?? actionParserModule;
 

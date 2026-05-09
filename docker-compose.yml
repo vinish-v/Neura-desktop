@@ -1,0 +1,30 @@
+services:
+  neura-desktop-build:
+    build:
+      context: .
+    image: neura-neura-desktop:latest
+    environment:
+      VLM_PROVIDER: "NVIDIA NIM"
+      VLM_BASE_URL: "https://integrate.api.nvidia.com/v1"
+      VLM_API_KEY: "${VLM_API_KEY:-}"
+      NVIDIA_API_KEY: "${NVIDIA_API_KEY:-}"
+      NIM_API_KEY: "${NIM_API_KEY:-}"
+      VLM_MODEL_NAME: "${VLM_MODEL_NAME:-nvidia/nemotron-3-nano-omni-30b-a3b-reasoning}"
+    command: ["corepack", "pnpm", "run", "docker:build"]
+
+  neura-desktop-dev:
+    profiles: ["gui"]
+    build:
+      context: .
+    image: neura-neura-desktop:latest
+    environment:
+      DISPLAY: "${DISPLAY:-host.docker.internal:0.0}"
+      VLM_PROVIDER: "NVIDIA NIM"
+      VLM_BASE_URL: "https://integrate.api.nvidia.com/v1"
+      VLM_API_KEY: "${VLM_API_KEY:-}"
+      NVIDIA_API_KEY: "${NVIDIA_API_KEY:-}"
+      NIM_API_KEY: "${NIM_API_KEY:-}"
+      VLM_MODEL_NAME: "${VLM_MODEL_NAME:-nvidia/nemotron-3-nano-omni-30b-a3b-reasoning}"
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    command: ["sh", "-lc", "corepack pnpm run docker:prepare && corepack pnpm --filter neura-desktop run dev"]

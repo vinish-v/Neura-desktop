@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -17,7 +17,7 @@ export const DEFAULT_WEBUI_CONFIG: BaseAgentWebUIImplementation = {
   welcomTitle: 'A multimodal AI agent',
   welcomePrompts: [
     'Search for the latest GUI Agent papers',
-    'Find information about UI TARS',
+    'Find information about Neura',
     'Tell me the top 5 most popular projects on ProductHunt today',
     'Write hello world using python',
   ],

@@ -4,11 +4,11 @@
   "version": "1.1.3",
   "description": "MCP Servers benchmark with different transports and http-proxy",
   "license": "MIT",
-  "homepage": "https://github.com/bytedance/UI-TARS-desktop",
-  "bugs": "https://github.com/bytedance/UI-TARS-desktop/issues",
+  "homepage": "https://github.com/neura-ai/neura-desktop",
+  "bugs": "https://github.com/neura-ai/neura-desktop/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bytedance/UI-TARS-desktop.git",
+    "url": "https://github.com/neura-ai/neura-desktop.git",
     "directory": "packages/agent-infra/mcp-benchmark"
   },
   "scripts": {

@@ -4,16 +4,16 @@
   "description": "Action parser SDK for general action parser",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bytedance/UI-TARS-desktop"
+    "url": "https://github.com/neura-ai/neura-desktop"
   },
   "bugs": {
-    "url": "https://github.com/bytedance/UI-TARS-desktop/issues"
+    "url": "https://github.com/neura-ai/neura-desktop/issues"
   },
   "keywords": [
     "AI",
     "Action",
     "Parser",
-    "UI-TARS"
+    "Neura"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -33,7 +33,7 @@
     "registry": "https://registry.npmjs.org"
   },
   "dependencies": {
-    "@ui-tars/shared": "1.2.3",
+    "@neura-desktop/shared": "1.2.3",
     "@gui-agent/shared": "workspace:*",
     "@agent-infra/logger": "0.0.2-beta.2",
     "fast-xml-parser": "^4.3.2",

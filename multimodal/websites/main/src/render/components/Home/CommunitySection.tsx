@@ -19,7 +19,7 @@ export const CommunitySection: React.FC = () => {
           </p>
           <Button
             as="a"
-            href="https://github.com/bytedance/UI-TARS-desktop"
+            href="https://github.com/neura-ai/neura-desktop"
             target="_blank"
             className="bg-white text-black hover:bg-gray-200"
             startContent={<HiCode />}

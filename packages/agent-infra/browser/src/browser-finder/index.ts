@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Logger, defaultLogger } from '@agent-infra/logger';
 
-import { getAnyEdgeStable } from 'edge-paths';
 import { getAnyChromeStable } from './chrome-paths';
+import { getAnyEdgeStable } from './edge-paths';
 import { getAnyFirefoxStable } from './firefox-paths';
 
 import { BrowserType } from '../types';

@@ -8,7 +8,7 @@ issue:
 
 ## Summary
 
-Brief explanation of the proposed change for UI-TARS-desktop.
+Brief explanation of the proposed change for Neura Desktop.
 
 ## Basic example
 
@@ -16,7 +16,7 @@ If the proposal involves API changes or new component interactions, provide a co
 
 ## Motivation
 
-Why is this change essential for UI-TARS-desktop? What specific problems does it address? What limitations or user pain points will it resolve? Focus on objective technical reasons rather than subjective preferences.
+Why is this change essential for Neura Desktop? What specific problems does it address? What limitations or user pain points will it resolve? Focus on objective technical reasons rather than subjective preferences.
 
 ## Detailed design
 

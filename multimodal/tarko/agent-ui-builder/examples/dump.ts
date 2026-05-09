@@ -20,7 +20,7 @@ const builder = new AgentUIBuilder({
       modelConfig: {
         provider: 'volcengine',
         modelId: 'ep-20250905175225-hlrvd',
-        displayName: 'UI-TARS-2',
+        displayName: 'Neura-2',
         configuredAt: Date.now(),
       },
       agentInfo: {

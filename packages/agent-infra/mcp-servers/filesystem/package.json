@@ -1,7 +1,7 @@
 {
   "name": "@agent-infra/mcp-server-filesystem",
   "version": "1.2.29",
-  "mcpName": "io.github.bytedance/mcp-server-filesystem",
+  "mcpName": "io.github.neura-ai/mcp-server-filesystem",
   "description": "MCP server for filesystem access",
   "license": "MIT",
   "type": "module",
@@ -14,11 +14,11 @@
       "require": "./dist/server.cjs"
     }
   },
-  "homepage": "https://github.com/bytedance/UI-TARS-desktop",
-  "bugs": "https://github.com/bytedance/UI-TARS-desktop/issues",
+  "homepage": "https://github.com/neura-ai/neura-desktop",
+  "bugs": "https://github.com/neura-ai/neura-desktop/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bytedance/UI-TARS-desktop.git",
+    "url": "https://github.com/neura-ai/neura-desktop.git",
     "directory": "packages/agent-infra/mcp-servers/filesystem"
   },
   "bin": {

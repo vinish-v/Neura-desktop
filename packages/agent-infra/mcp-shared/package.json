@@ -3,11 +3,11 @@
   "version": "1.2.29",
   "description": "MCP shared",
   "license": "MIT",
-  "homepage": "https://github.com/bytedance/UI-TARS-desktop",
-  "bugs": "https://github.com/bytedance/UI-TARS-desktop/issues",
+  "homepage": "https://github.com/neura-ai/neura-desktop",
+  "bugs": "https://github.com/neura-ai/neura-desktop/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bytedance/UI-TARS-desktop.git",
+    "url": "https://github.com/neura-ai/neura-desktop.git",
     "directory": "packages/agent-infra/mcp-shared"
   },
   "main": "./dist/index.js",
@@ -35,7 +35,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "shx rm -rf dist && rslib build",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && rslib build",
     "prepare": "npm run build",
     "watch": "rslib build --watch"
   },

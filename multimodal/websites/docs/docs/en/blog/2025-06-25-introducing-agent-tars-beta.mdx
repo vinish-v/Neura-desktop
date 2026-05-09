@@ -90,7 +90,7 @@ In March, we open-sourced an early [technical preview](https://agent-tars.com/20
 
 > _\* You can find all these past moments on our [official Twitter](https://x.com/agent_tars)._
 
-After a period of iteration, on one hand, the Seed multimodal models were gradually enhanced with the successive releases of **[UI-TARS 1.5](https://seed-tars.com/1.5/)** and **[Doubao 1.5 VL](https://seed.bytedance.com/zh/tech/seed1_5_vl)**. On the other hand, we received a lot of feedback from the open-source community. Additionally, we faced challenges with the existing architecture struggling to support the project's long-term development, such as the Agent UI not being decoupled, making it difficult to support evaluation and independent use.
+After a period of iteration, on one hand, the Seed multimodal models were gradually enhanced with the successive releases of **[Neura 1.5](https://seed-tars.com/1.5/)** and **[Doubao 1.5 VL](https://seed.bytedance.com/zh/tech/seed1_5_vl)**. On the other hand, we received a lot of feedback from the open-source community. Additionally, we faced challenges with the existing architecture struggling to support the project's long-term development, such as the Agent UI not being decoupled, making it difficult to support evaluation and independent use.
 
 After a period of architectural design and iteration, we bring you the **Beta** version of **Agent TARS**. We will first introduce **Agent TARS** **CLI**, a **Multimodal** **AI Agent** tool designed to be "**available anytime, anywhere**".
 
@@ -246,7 +246,7 @@ await agentSnapshot.generate(runOptions);
 await agentSnapshot.replay(runOptions);
 ```
 
-This framework has already powered Agent TARS's [continuous integration](https://github.com/bytedance/UI-TARS-desktop/blob/85a0f62a222298daaa203e7757aaa91abf4209d5/multimodal/agent/snapshot/runner.ts), driving the testing of [@tarko/agent](https://www.npmjs.com/@tarko/agent), [@tarko/mcp-agent](https://www.npmjs.com/package/@tarko/mcp-agent), and [@magent-tars/core](https://www.npmjs.com/package/@agent-tars/core), currently helping us avoid at least 10+ issues in Beta development:
+This framework has already powered Agent TARS's [continuous integration](https://github.com/bytedance/Neura-desktop/blob/85a0f62a222298daaa203e7757aaa91abf4209d5/multimodal/agent/snapshot/runner.ts), driving the testing of [@tarko/agent](https://www.npmjs.com/@tarko/agent), [@tarko/mcp-agent](https://www.npmjs.com/package/@tarko/mcp-agent), and [@magent-tars/core](https://www.npmjs.com/package/@agent-tars/core), currently helping us avoid at least 10+ issues in Beta development:
 
 <br/ >
 
@@ -436,7 +436,7 @@ In the early preview version, Agent TARS adopted the same DOM Extraction approac
   </GridItem>
 </Grid>
 
-In Agent TARS Beta, we introduce a visual control solution based on [UI-TARS](https://seed-tars.com/). The logic for operating the Browser is closer to how humans understand screens. The VLM first sees the screen, then thinks and outputs specific actions to perform (such as clicking, dragging, etc.), ultimately completing browser control tasks.
+In Agent TARS Beta, we introduce a visual control solution based on [Neura](https://seed-tars.com/). The logic for operating the Browser is closer to how humans understand screens. The VLM first sees the screen, then thinks and outputs specific actions to perform (such as clicking, dragging, etc.), ultimately completing browser control tasks.
 
 ```bash
 click(point='<point>383 502</point>')  # 1. Activate input field
@@ -477,7 +477,7 @@ From the final released API, we provide three operation methods:
 | Term | Introduction |
 | --- | --- |
 | `dom` | Operation capabilities based on DOM analysis [Browser Use](https://www.npmjs.com/@agent-infra/mcp-server-browser), which was the approach in early versions of Agent TARS. |
-| `visual-grounding` | Operation capabilities based on GUI Agent ([UI-TARS](https://seed-tars.com/) / [Doubao 1.5 VL](https://www.volcengine.com/docs/82379/1554521)), without DOM-related tools. |
+| `visual-grounding` | Operation capabilities based on GUI Agent ([Neura](https://seed-tars.com/) / [Doubao 1.5 VL](https://www.volcengine.com/docs/82379/1554521)), without DOM-related tools. |
 | `hybrid` | Operation capabilities including both `visual-grounding` and `dom` |
 
 For how to use and more details, please visit [Browser Operation](/guide/basic/browser).
@@ -486,7 +486,7 @@ For how to use and more details, please visit [Browser Operation](/guide/basic/b
 
 ### Better Cross-Model Compatibility
 
-In Agent TARS's early preview version, we only supported Claude 3.7, but we still received numerous requests from the community for compatibility with various models. We initiated a Discussion about [Model Compatibility #377](https://github.com/bytedance/UI-TARS-desktop/discussions/377), but due to architecture limitations at that time, we couldn't quickly achieve good model compatibility.
+In Agent TARS's early preview version, we only supported Claude 3.7, but we still received numerous requests from the community for compatibility with various models. We initiated a Discussion about [Model Compatibility #377](https://github.com/bytedance/Neura-desktop/discussions/377), but due to architecture limitations at that time, we couldn't quickly achieve good model compatibility.
 
 Finally, starting from Beta, we completely rewrote the Model Provider layer implementation. After actual testing, we can finally tell you that we've brought better model compatibility. Now, Agent TARS can run on Model Providers such as Volcengine, Anthropic, and OpenAI.
 
@@ -527,7 +527,7 @@ Thanks to the [Agent Event Stream](#agent-event-stream) introduced in the new ve
 
 #### GUI Grounding Transition
 
-This design was first introduced in the release of [UI TARS 1.5](https://seed-tars.com/1.5/). Starting from Agent TARS Beta, Agent TARS supports GUI Grounding, and the process includes "real-time mouse tracking":
+This design was first introduced in the release of [Neura 1.5](https://seed-tars.com/1.5/). Starting from Agent TARS Beta, Agent TARS supports GUI Grounding, and the process includes "real-time mouse tracking":
 
 <VideoPanel
   src="https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/docs/videos/flight.mp4"
@@ -718,7 +718,7 @@ With just one model, Doubao 1.5 VL, we completed writing a game, then "played" i
   autoPlay
 />
 
-For Agent TARS, this is a very valuable beginning. From the earliest UI-TARS-desktop, GUI Agent was the only first-class citizen, but now, GUI Agent is no longer an isolated entity, playing its role in an integrated environment!
+For Agent TARS, this is a very valuable beginning. From the earliest Neura-desktop, GUI Agent was the only first-class citizen, but now, GUI Agent is no longer an isolated entity, playing its role in an integrated environment!
 
 <br />
 

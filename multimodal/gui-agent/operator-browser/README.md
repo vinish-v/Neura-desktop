@@ -4,5 +4,5 @@ WIP
 
 ## Roadmap
 
-- [x] Support UI-TARS and Seed-1.5 VL Model
+- [x] Support Neura and Seed-1.5 VL Model
 - [ ] Support Claude Model

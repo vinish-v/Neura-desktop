@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -19,11 +19,11 @@ export interface GUIAgentConfig<TOperator> {
     baseURL: string;
     id: string;
     apiKey: string; // @secretlint-disable-line
-    uiTarsVersion?:
-      | 'ui-tars-1.0'
-      | 'ui-tars-1.5'
-      | 'doubao-1.5-ui-tars-15b'
-      | 'doubao-1.5-ui-tars-20b';
+    neuraModelVersion?:
+      | 'neura-desktop-1.0'
+      | 'neura-desktop-1.5'
+      | 'doubao-1.5-neura-desktop-15b'
+      | 'doubao-1.5-neura-desktop-20b';
   };
   // ===== Optional =====
   systemPrompt?: string;

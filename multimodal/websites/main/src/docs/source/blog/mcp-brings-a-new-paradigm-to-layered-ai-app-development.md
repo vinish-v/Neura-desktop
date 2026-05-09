@@ -58,7 +58,7 @@ Three examples showcasing MCP's role in AI Agent applications:
 | :------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------ |
 | Analyze a stock technically, then buy 3 shares at market price | [Replay](https://sf16-sg.tiktokcdn.com/obj/eden-sg/zyha-pb/ljhwZthlaukjlkulzlp/report_1742741107345.html) <img width="500" src="https://sf16-sg.tiktokcdn.com/obj/eden-sg/zyha-pb/ljhwZthlaukjlkulzlp/202503252346944.png"> | [Broker MCP](https://github.com/longportapp/openapi/tree/main/mcp), [Filesystem MCP](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem) | Uses simulated trading account. |
 | What are my machine's CPU, memory, and network speeds?         | [Replay](https://sf16-sg.tiktokcdn.com/obj/eden-sg/zyha-pb/ljhwZthlaukjlkulzlp/report_1742745014696.html) <img width="500" src="https://sf16-sg.tiktokcdn.com/obj/eden-sg/zyha-pb/ljhwZthlaukjlkulzlp/202503252346946.png"> | [CLI MCP](https://github.com/g0t4/mcp-server-commands), [Code Exec MCP](https://github.com/formulahendry/mcp-server-code-runner)                               |                                 |
-| Find top 5 upvoted products on ProductHunt                     | [Replay](https://sf16-sg.tiktokcdn.com/obj/eden-sg/zyha-pb/ljhwZthlaukjlkulzlp/report_1742745636585.html) <img width="500" src="https://sf16-sg.tiktokcdn.com/obj/eden-sg/zyha-pb/ljhwZthlaukjlkulzlp/202503252346947.png"> | [Browser MCP](https://github.com/bytedance/UI-TARS-desktop/tree/fb2932afbdd54da757b9fae61e888fc8804e648f/packages/agent-infra/mcp-servers/browser)             |                                 |
+| Find top 5 upvoted products on ProductHunt                     | [Replay](https://sf16-sg.tiktokcdn.com/obj/eden-sg/zyha-pb/ljhwZthlaukjlkulzlp/report_1742745636585.html) <img width="500" src="https://sf16-sg.tiktokcdn.com/obj/eden-sg/zyha-pb/ljhwZthlaukjlkulzlp/202503252346947.png"> | [Browser MCP](https://github.com/neura-ai/neura-desktop/tree/fb2932afbdd54da757b9fae61e888fc8804e648f/packages/agent-infra/mcp-servers/browser)             |                                 |
 
 > Current MCP customization is closed; third-party MCP Servers were manually mounted for testing.
 > More: [https://agent-tars.com/showcase](https://agent-tars.com/showcase)
@@ -131,7 +131,7 @@ This layering lets Agent developers compose tools like building blocks.
 
 ### Design Overview
 
-The [MCP Browser Tool](https://github.com/bytedance/UI-TARS-desktop/tree/main/packages/agent-infra/mcp-servers/browser) exemplifies the implementation. To ensure out-of-box usability (avoiding Node.js/UV dependencies per [issue#64](https://github.com/modelcontextprotocol/servers/issues/64)), we categorize tools as:
+The [MCP Browser Tool](https://github.com/neura-ai/neura-desktop/tree/main/packages/agent-infra/mcp-servers/browser) exemplifies the implementation. To ensure out-of-box usability (avoiding Node.js/UV dependencies per [issue#64](https://github.com/modelcontextprotocol/servers/issues/64)), we categorize tools as:
 
 - **Built-in MCP Servers**: Fully MCP-compliant, supporting both Stdio and function calls ("MCP-standardized Function Calls").
 - **Extended MCP Servers**: For advanced users with Npm/UV environments.
@@ -395,7 +395,7 @@ const response = await openai.chat.completions.create({
 });
 ```
 
-At this point, the entire MCP workflow has been fully implemented, covering all aspects from Server configuration, Client integration to Agent connectivity. More MCP details/code have been open-sourced on GitHub: [Agent Integration](https://github.com/bytedance/UI-TARS-desktop/blob/fb2932afbdd54da757b9fae61e888fc8804e648f/apps/agent-tars/src/main/llmProvider/index.ts#L89-L91), [mcp-client](https://github.com/bytedance/UI-TARS-desktop/tree/main/packages/agent-infra/mcp-client), [mcp-servers](https://github.com/bytedance/UI-TARS-desktop/tree/main/packages/agent-infra/mcp-servers)
+At this point, the entire MCP workflow has been fully implemented, covering all aspects from Server configuration, Client integration to Agent connectivity. More MCP details/code have been open-sourced on GitHub: [Agent Integration](https://github.com/neura-ai/neura-desktop/blob/fb2932afbdd54da757b9fae61e888fc8804e648f/apps/agent-tars/src/main/llmProvider/index.ts#L89-L91), [mcp-client](https://github.com/neura-ai/neura-desktop/tree/main/packages/agent-infra/mcp-client), [mcp-servers](https://github.com/neura-ai/neura-desktop/tree/main/packages/agent-infra/mcp-servers)
 
 ---
 

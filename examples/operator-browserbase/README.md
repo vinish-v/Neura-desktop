@@ -28,14 +28,14 @@ cp .env.example .env.local
 
 You'll need to set up your API keys:
 
-1. Get your UI-TARS Service from [UI-TARS](https://github.com/bytedance/UI-TARS)
+1. Get your Neura Service from [Neura](https://github.com/neura-ai/Neura)
 2. Get your Browserbase API key and project ID from [Browserbase](https://www.browserbase.com)
 
 Update `.env.local` with your API keys:
 
-- `UI_TARS_BASE_URL`: Your UI-TARS Base Url
-- `UI_TARS_API_KEY`: Your UI-TARS API Key
-- `UI_TARS_MODEL`: Your UI-TARS Model
+- `NEURA_BASE_URL`: Your Neura Base Url
+- `NEURA_API_KEY`: Your Neura API Key
+- `NEURA_MODEL`: Your Neura Model
 - `BROWSERBASE_API_KEY`: Your Browserbase API key
 - `BROWSERBASE_PROJECT_ID`: Your Browserbase project ID
 

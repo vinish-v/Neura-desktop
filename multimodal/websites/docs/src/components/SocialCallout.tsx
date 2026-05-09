@@ -24,7 +24,7 @@ export interface SocialCalloutProps {
 
   /**
    * Custom GitHub repository URL
-   * @default "https://github.com/bytedance/UI-TARS-desktop"
+   * @default "https://github.com/neura-ai/neura-desktop"
    */
   githubUrl?: string;
 
@@ -49,7 +49,7 @@ export function SocialCallout({
   className = '',
   showGitHub = true,
   showTwitter = true,
-  githubUrl = 'https://github.com/bytedance/UI-TARS-desktop',
+  githubUrl = 'https://github.com/neura-ai/neura-desktop',
   twitterUrl = 'https://x.com/agent_tars',
   title,
   description,

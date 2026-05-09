@@ -88,7 +88,7 @@ import { CgTerminal } from 'react-icons/cg';
 
 > _\* 这些过去的时刻，你都可以在我们的[官方推特](https://x.com/agent_tars)中找到。_
 
-在一段时间的迭代后，一方面，Seed 多模态模型逐步增强，如 **[UI-TARS 1.5](https://seed-tars.com/1.5/)** 和 **[Doubao 1.5 VL](https://seed.bytedance.com/zh/tech/seed1_5_vl)** 的相继发布，另一方面，在开源社区上我们收到了了较多的反馈，此外，我们也面临现有架构难以支撑项目长期发展的挑战，如 Agent UI 没有解耦，难以支撑评测和独立使用。
+在一段时间的迭代后，一方面，Seed 多模态模型逐步增强，如 **[Neura 1.5](https://seed-tars.com/1.5/)** 和 **[Doubao 1.5 VL](https://seed.bytedance.com/zh/tech/seed1_5_vl)** 的相继发布，另一方面，在开源社区上我们收到了了较多的反馈，此外，我们也面临现有架构难以支撑项目长期发展的挑战，如 Agent UI 没有解耦，难以支撑评测和独立使用。
 
 在经过一段时间的架构设计和迭代后，我们带来了 **Agent TARS** 的 **Beta** 版本，我们将首先为你推出 **Agent TARS** **CLI**，一款旨在让你 "**随时随地可用**" 的 **Multimodal** **AI Agent** 工具。
 
@@ -235,7 +235,7 @@ await agentSnapshot.generate(runOptions);
 await agentSnapshot.replay(runOptions);
 ```
 
-这一框架已经驱动了 Agent TARS 的 [持续集成](https://github.com/bytedance/UI-TARS-desktop/blob/85a0f62a222298daaa203e7757aaa91abf4209d5/multimodal/agent/snapshot/runner.ts)，驱动了 [@tarko/agent](https://www.npmjs.com/@tarko/agent)、[@tarko/mcp-agent](https://www.npmjs.com/package/@tarko/mcp-agent)、[@magent-tars/core](https://www.npmjs.com/package/@agent-tars/core) 的测试，目前帮助我们在 Beta 的开发中至少规避了 10+ Issues：
+这一框架已经驱动了 Agent TARS 的 [持续集成](https://github.com/bytedance/Neura-desktop/blob/85a0f62a222298daaa203e7757aaa91abf4209d5/multimodal/agent/snapshot/runner.ts)，驱动了 [@tarko/agent](https://www.npmjs.com/@tarko/agent)、[@tarko/mcp-agent](https://www.npmjs.com/package/@tarko/mcp-agent)、[@magent-tars/core](https://www.npmjs.com/package/@agent-tars/core) 的测试，目前帮助我们在 Beta 的开发中至少规避了 10+ Issues：
 
 <br/ >
 
@@ -423,7 +423,7 @@ async function main() {
   </GridItem>
 </Grid>
 
-在 Agent TARS Beta 中，我们带来了基于 [UI-TARS](https://seed-tars.com/) 的视觉控制方案，操作 Browser 的逻辑和人类理解屏幕的逻辑更接近，VLM 首先看到屏幕，接着通过思考、输出具体要点击的操作（如点击、拖拽等），最终完成浏览器操控任务。
+在 Agent TARS Beta 中，我们带来了基于 [Neura](https://seed-tars.com/) 的视觉控制方案，操作 Browser 的逻辑和人类理解屏幕的逻辑更接近，VLM 首先看到屏幕，接着通过思考、输出具体要点击的操作（如点击、拖拽等），最终完成浏览器操控任务。
 
 ```bash
 click(point='<point>383 502</point>')  # 1. Activate input field
@@ -464,7 +464,7 @@ Open https://2captcha.com/demo/normal and pass it
 | 术语 | 介绍 |
 | --- | --- |
 | `dom` | 操作能力基于 DOM 分析的 [Browser Use](https://www.npmjs.com/@agent-infra/mcp-server-browser)，在 Agent TARS 早期版本为此方案。 |
-| `visual-grounding` | 操作能力基于 GUI Agent（[UI-TARS](https://seed-tars.com/) / [Doubao 1.5 VL](https://www.volcengine.com/docs/82379/1554521)），无 DOM 相关的工具。 |
+| `visual-grounding` | 操作能力基于 GUI Agent（[Neura](https://seed-tars.com/) / [Doubao 1.5 VL](https://www.volcengine.com/docs/82379/1554521)），无 DOM 相关的工具。 |
 | `hybrid` | 操作能力同时包含 `visual-grounding` 与 `dom` |
 
 有关如何使用和更多细节，请移步 [Browser Operation](/zh/guide/basic/browser)。
@@ -473,7 +473,7 @@ Open https://2captcha.com/demo/normal and pass it
 
 ### 更好的跨模型兼容性
 
-在 Agent TARS 的早期预览版本中，我们只支持 Claude 3.7，但仍然受到社区对各种模型兼容的大量请求，我们也发起了关于 [Model Compatibility #377](https://github.com/bytedance/UI-TARS-desktop/discussions/377) 的 Discussion，受限于当时的架构，我们并没有很快地完成一个很好的模型兼容。
+在 Agent TARS 的早期预览版本中，我们只支持 Claude 3.7，但仍然受到社区对各种模型兼容的大量请求，我们也发起了关于 [Model Compatibility #377](https://github.com/bytedance/Neura-desktop/discussions/377) 的 Discussion，受限于当时的架构，我们并没有很快地完成一个很好的模型兼容。
 
 终于，从 Beta 开始，我们完全重写了 Model Provider 层的实现，通过实际的测试之后，我们终于可以告诉我们带来了更好的模型兼容性，现在的 Agent TARS，可以在 Volcengine、Anthorpic、OpenAI 等 Model Provider 上运行。
 
@@ -516,7 +516,7 @@ Open https://2captcha.com/demo/normal and pass it
 
 #### GUI Grounding Transition
 
-这一设计最早我们在 [UI TARS 1.5](https://seed-tars.com/1.5/) 的发布中引入，从 Agent TARS Beta 开始，Agent TARS 支持了 GUI Groundig，GUI Grounding 的过程也会有 “实时鼠标追踪”：
+这一设计最早我们在 [Neura 1.5](https://seed-tars.com/1.5/) 的发布中引入，从 Agent TARS Beta 开始，Agent TARS 支持了 GUI Groundig，GUI Grounding 的过程也会有 “实时鼠标追踪”：
 
 <VideoPanel
   src="https://lf3-static.bytednsdoc.com/obj/eden-cn/zyha-aulnh/ljhwZthlaukjlkulzlp/docs/videos/flight.mp4"
@@ -703,7 +703,7 @@ select appropriate width, height, query as needed.
   autoPlay
 />
 
-对于 Agent TARS 来说，这是一个非常有价值的开始，从 UI-TARS-desktop 最早开始，GUI Agent 作为一个唯一的一等公民，但现在开始，GUI Agent 不再是一个孤立的个体，他在一个融合的环境里发挥了作用！
+对于 Agent TARS 来说，这是一个非常有价值的开始，从 Neura-desktop 最早开始，GUI Agent 作为一个唯一的一等公民，但现在开始，GUI Agent 不再是一个孤立的个体，他在一个融合的环境里发挥了作用！
 
 <br />
 

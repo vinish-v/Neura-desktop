@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { AgentOptions, LogLevel, AgentAppConfig } from '@tarko/interface';
@@ -12,7 +12,7 @@ export default {
     id: process.env.OMNI_TARS_MODEL_ID,
     baseURL: process.env.OMNI_TARS_BASE_URL,
     apiKey: process.env.OMNI_TARS_API_KEY,
-    displayName: 'UI-TARS-2',
+    displayName: 'Neura-2',
     /** aws */
     // provider: 'azure-openai',
     // id: 'aws_sdk_claude4_sonnet',
@@ -91,7 +91,7 @@ export default {
     welcomTitle: 'Omni Agent',
     welcomePrompts: [
       'Search for the latest GUI Agent papers',
-      'Find information about UI TARS',
+      'Find information about Neura',
       'Tell me the top 5 most popular projects on ProductHunt today',
       'Please book me the earliest flight from Hangzhou to Shenzhen on 10.1',
       'What is Agent TARS',

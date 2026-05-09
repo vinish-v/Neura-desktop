@@ -53,6 +53,10 @@ RULES of ANSWERING THE TASK:
   - Include relevant numerical data when available, but do NOT make up any numbers
   - Include exact urls when available, but do NOT make up any urls
   - Format the final answer in a user-friendly way
+  - For a brief latest-news request, accept completion from a search page only when the visible context includes clear Top Stories/news cards with source, headline, and recency, and the answer summarizes those visible items
+  - For articles, detailed summaries, top result inspection, ranked lists, verification, source-backed research, or detailed extraction, reject completion if the context only shows a search results page, snippets, or a landing page without the actual source content
+  - Accept completion for source-backed/detail tasks only when the destination page/content itself is visible in the context and enough information has been extracted to answer the user
+  - If the agent looped or repeated an action without changing state, set is_valid=false and suggest a concrete alternative in reason
 
 SPECIAL CASES:
 1. If the task is unclear defined, you can let it pass. But if something is missing or the image does not show what was requested, do NOT let it pass

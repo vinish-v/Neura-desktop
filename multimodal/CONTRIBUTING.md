@@ -10,7 +10,7 @@
 ### 1.2 Setting Up Development Environment
 
 ```bash
-git clone https://github.com/bytedance/UI-TARS-desktop
+git clone https://github.com/neura-ai/neura-desktop
 cd multimodal
 pnpm bootstrap
 ```
@@ -67,7 +67,7 @@ When you're working on lower-level core packages (such as `@tarko/agent`), it's 
 pnpm dev:core
 ```
 
-This will start the development server with the core packages already running by default, rather than waiting for changes to trigger their builds. Since some higher-level packages bundle these core dependencies (see [#745](https://github.com/bytedance/UI-TARS-desktop/pull/745)), this approach makes debugging much easier by ensuring the core packages are built and ready immediately.
+This will start the development server with the core packages already running by default, rather than waiting for changes to trigger their builds. Since some higher-level packages bundle these core dependencies (see [#745](https://github.com/neura-ai/neura-desktop/pull/745)), this approach makes debugging much easier by ensuring the core packages are built and ready immediately.
 
 You can also specify other packages to watch:
 
@@ -86,25 +86,25 @@ Note that package matching is based on the package name in package.json, not the
 Use the following command to run Agent TARS, replacing the path with your local CLI path:
 
 ```bash
-/path/to/UI-TARS-desktop/multimodal/agent-tars-cli/bin/cli.js \
+/path/to/Neura Desktop/multimodal/agent-tars-cli/bin/cli.js \
 --provider=foo \
 --model=bar \
 --apiKey=baz \
---share-provider=https://aipa.bytedance.net/api/file-upload
+--share-provider=https://aipa.neura-ai.net/api/file-upload
 ```
 
-Make sure to replace `/path/to/UI-TARS-desktop/multimodal/agent-tars-cli/bin/cli.js` with the actual path on your system.
+Make sure to replace `/path/to/Neura Desktop/multimodal/agent-tars-cli/bin/cli.js` with the actual path on your system.
 
 ### 2.6 Running Agent TARS in Headless Mode
 
 To run Agent TARS in headless mode, use the same command with the `serve` option:
 
 ```bash
-/path/to/UI-TARS-desktop/multimodal/agent-tars-cli/bin/cli.js \
+/path/to/Neura Desktop/multimodal/agent-tars-cli/bin/cli.js \
 --provider=foo \
 --model=bar \
 --apiKey=baz \
---share-provider=https://aipa.bytedance.net/api/file-upload
+--share-provider=https://aipa.neura-ai.net/api/file-upload
 ```
 
 Once running, you can interact with the Agent TARS Server via HTTP APIs:

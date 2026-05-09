@@ -30,7 +30,7 @@ async function buildReadability(): Promise<void> {
     await fs.writeFile(
       constantsPath,
       `/*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
       

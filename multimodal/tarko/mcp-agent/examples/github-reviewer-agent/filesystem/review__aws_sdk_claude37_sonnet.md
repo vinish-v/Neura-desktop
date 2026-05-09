@@ -104,6 +104,6 @@ This is a well-targeted PR that effectively addresses the UI flickering issue by
 
 The solution demonstrates good understanding of React rendering behavior and the potential performance implications of animation libraries. By simplifying the component structure and removing the animation-related code that was causing the flickering, the PR successfully achieves its goal without introducing new issues.
 
-The changes align with best practices for React performance optimization, particularly the principle of avoiding unnecessary re-renders and layout calculations. This fix should result in a smoother user experience with the UI-TARS-desktop application.
+The changes align with best practices for React performance optimization, particularly the principle of avoiding unnecessary re-renders and layout calculations. This fix should result in a smoother user experience with the Neura Desktop application.
 
 **Recommendation**: Approve and merge the PR as it successfully resolves the reported issue with minimal changes to the codebase.

@@ -1,14 +1,14 @@
 /*
- * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BrowserFinder } from '..';
-import { getAnyEdgeStable } from 'edge-paths';
+import { getAnyEdgeStable } from './edge-paths';
 import { getAnyChromeStable } from './chrome-paths';
 import { getAnyFirefoxStable } from './firefox-paths';
 
-vi.mock('edge-paths');
+vi.mock('./edge-paths');
 vi.mock('./chrome-paths');
 vi.mock('./firefox-paths');
 

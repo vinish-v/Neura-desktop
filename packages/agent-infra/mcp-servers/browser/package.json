@@ -1,15 +1,15 @@
 {
   "name": "@agent-infra/mcp-server-browser",
   "version": "1.2.29",
-  "mcpName": "io.github.bytedance/mcp-server-browser",
+  "mcpName": "io.github.neura-ai/mcp-server-browser",
   "description": "MCP server for browser use access",
   "license": "MIT",
-  "homepage": "https://github.com/bytedance/UI-TARS-desktop",
-  "bugs": "https://github.com/bytedance/UI-TARS-desktop/issues",
+  "homepage": "https://github.com/neura-ai/neura-desktop",
+  "bugs": "https://github.com/neura-ai/neura-desktop/issues",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bytedance/UI-TARS-desktop.git",
+    "url": "https://github.com/neura-ai/neura-desktop.git",
     "directory": "packages/agent-infra/mcp-servers/browser"
   },
   "bin": {
@@ -50,7 +50,7 @@
     "@agent-infra/logger": "workspace:*",
     "@agent-infra/browser-context": "0.1.2",
     "@modelcontextprotocol/sdk": "~1.15.1",
-    "@ui-tars/action-parser": "workspace:^",
+    "@neura-desktop/action-parser": "workspace:^",
     "mcp-http-server": "workspace:^",
     "puppeteer-core": "24.7.2"
   },

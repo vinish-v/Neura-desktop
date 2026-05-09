@@ -5,16 +5,16 @@
   "description": "Electron build toolkits",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bytedance/UI-TARS-desktop"
+    "url": "https://github.com/neura-ai/neura-desktop"
   },
   "bugs": {
-    "url": "https://github.com/bytedance/UI-TARS-desktop/issues"
+    "url": "https://github.com/neura-ai/neura-desktop/issues"
   },
   "keywords": [
     "AI",
     "SDK",
     "Operator",
-    "UI-TARS"
+    "Neura"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -23,7 +23,7 @@
   "scripts": {
     "dev": "rslib build --watch",
     "prepare": "npm run build",
-    "build": "rslib build",
+    "build": "rslib build && node scripts/write-dts.cjs",
     "build:watch": "rslib build --watch",
     "test:browser": "vitest --environment happy-dom",
     "test": "vitest --environment happy-dom && vitest --environment node"

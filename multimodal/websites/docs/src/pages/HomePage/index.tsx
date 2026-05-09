@@ -285,7 +285,7 @@ const HomePageContent = () => {
         transition={{ delay: 0.5, duration: 0.6 }}
       >
         <Link
-          href="https://github.com/bytedance/UI-TARS-desktop"
+          href="https://github.com/neura-ai/neura-desktop"
           className="text-white hover:text-primary transition-colors duration-300"
           target="_blank"
           rel="noopener noreferrer"
