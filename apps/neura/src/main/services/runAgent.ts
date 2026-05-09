@@ -282,6 +282,7 @@ export const runAgent = async (
         mime: screenshotContext?.mime || 'image/jpeg',
         width: screenshotContext?.size?.width,
         height: screenshotContext?.size?.height,
+        scaleFactor: screenshotContext?.scaleFactor,
       });
     }
     const url = getPageUrlFromConversation(latestConversation);

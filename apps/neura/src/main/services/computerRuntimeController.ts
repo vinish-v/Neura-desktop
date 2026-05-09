@@ -13,6 +13,7 @@ import type {
   ComputerRuntimeState,
   ComputerRuntimeStatus,
 } from '@main/store/types';
+import { localDesktopMirror } from './localDesktopMirror';
 
 type RuntimeStartInput = {
   mode: ComputerRuntimeMode;
@@ -47,8 +48,32 @@ const modeSubtitle = (mode: ComputerRuntimeMode) => {
       return 'Terminal';
     case 'desktop':
       return 'Desktop';
+    case 'rdp':
+      return 'Remote desktop';
     default:
       return 'Computer';
+  }
+};
+
+const syncLiveMirror = (mode?: ComputerRuntimeMode, status?: ComputerRuntimeStatus) => {
+  if (
+    mode === 'desktop' &&
+    status !== 'completed' &&
+    status !== 'failed' &&
+    status !== 'idle'
+  ) {
+    localDesktopMirror.start((frame) => {
+      ComputerRuntimeController.frame(frame, { fromLiveMirror: true });
+    });
+    return;
+  }
+
+  if (mode && mode !== 'desktop') {
+    localDesktopMirror.stop();
+  }
+
+  if (status === 'completed' || status === 'failed' || status === 'idle') {
+    localDesktopMirror.stop();
   }
 };
 
@@ -141,6 +166,7 @@ export class ComputerRuntimeController {
         input.activity || runtime.subtitle,
       ),
     });
+    syncLiveMirror(runtime.mode, runtime.status);
     return store.getState().computerRuntime;
   }
 
@@ -153,22 +179,37 @@ export class ComputerRuntimeController {
           : input.status
             ? eventForStatus(input.status)
             : null;
-    return patchRuntime(
+    const updated = patchRuntime(
       input,
       eventType || undefined,
       input.activity || input.display,
     );
+    syncLiveMirror(updated?.mode || input.mode, updated?.status || input.status);
+    return updated;
   }
 
-  static frame(frame: Omit<ComputerRuntimeFrame, 'updatedAt'>) {
+  static frame(
+    frame: Omit<ComputerRuntimeFrame, 'updatedAt'>,
+    options: { fromLiveMirror?: boolean } = {},
+  ) {
     return patchRuntime(
-      {
-        latestFrame: {
+      (runtime) => {
+        const nextFrame = {
           ...frame,
           updatedAt: Date.now(),
-        },
-        status: 'running',
-      } as RuntimeUpdateInput & { latestFrame: ComputerRuntimeFrame },
+        };
+        return {
+          ...runtime,
+          frame: nextFrame,
+          latestFrame: nextFrame,
+          status:
+            options.fromLiveMirror &&
+            (runtime.status === 'waiting' || runtime.status === 'paused')
+              ? runtime.status
+              : 'running',
+          updatedAt: Date.now(),
+        };
+      },
       'runtime.frame',
       'Frame updated',
     );
@@ -185,6 +226,11 @@ export class ComputerRuntimeController {
             display: output.command || runtime.display,
             cwd: output.cwd || runtime.cwd,
             status: output.failed ? 'failed' : 'running',
+            terminal: {
+              kind: 'terminal',
+              ...output,
+              updatedAt: Date.now(),
+            },
             latestOutput: {
               kind: 'terminal',
               ...output,
@@ -219,6 +265,7 @@ export class ComputerRuntimeController {
   }
 
   static reset() {
+    localDesktopMirror.stop();
     store.setState({ computerRuntime: null });
   }
 }

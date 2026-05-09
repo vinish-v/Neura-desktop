@@ -47,7 +47,29 @@ const takeoverKeyMap: Record<string, Key> = {
   arrowdown: Key.Down,
   arrowleft: Key.Left,
   arrowright: Key.Right,
+  pagedown: Key.PageDown,
+  pageup: Key.PageUp,
+  home: Key.Home,
+  end: Key.End,
 };
+
+const takeoverHotkeyMap: Record<string, Key> = {
+  ...takeoverKeyMap,
+  ctrl: process.platform === 'darwin' ? Key.LeftCmd : Key.LeftControl,
+  control: process.platform === 'darwin' ? Key.LeftCmd : Key.LeftControl,
+  shift: Key.LeftShift,
+  alt: Key.LeftAlt,
+  meta: process.platform === 'darwin' ? Key.LeftCmd : Key.LeftWin,
+  cmd: process.platform === 'darwin' ? Key.LeftCmd : Key.LeftWin,
+  command: process.platform === 'darwin' ? Key.LeftCmd : Key.LeftWin,
+  win: Key.LeftWin,
+};
+
+const getTakeoverHotkeys = (value: string) =>
+  value
+    .split(/[\s+]+/)
+    .map((part) => takeoverHotkeyMap[part.toLowerCase()])
+    .filter(Boolean);
 
 const formatRunSummary = (
   run: NonNullable<ReturnType<typeof TaskRunRegistry.list>[number]>,
@@ -241,9 +263,10 @@ export const agentRoute = t.router({
     }),
   computerTakeoverInput: t.procedure
     .input<
-      | { type: 'click'; x: number; y: number }
+      | { type: 'click' | 'double_click' | 'right_click'; x: number; y: number }
+      | { type: 'scroll'; x: number; y: number; direction: 'up' | 'down' }
       | { type: 'text'; text: string }
-      | { type: 'key'; key: string }
+      | { type: 'key' | 'hotkey'; key: string }
     >()
     .handle(async ({ input }) => {
       const runtime = store.getState().computerRuntime;
@@ -282,9 +305,41 @@ export const agentRoute = t.router({
         throw new Error('Terminal takeover supports keyboard input only.');
       }
 
+      const guiAgent = GUIAgentManager.getInstance().getAgent();
+      if (guiAgent) {
+        await guiAgent.executeTakeoverInput(input, {
+          width: runtime.latestFrame?.width,
+          height: runtime.latestFrame?.height,
+          scaleFactor: runtime.latestFrame?.scaleFactor,
+        });
+        return { ok: true };
+      }
+
       if (input.type === 'click') {
         await mouse.move(straightTo(new Point(input.x, input.y)));
         await mouse.click(MouseButton.LEFT);
+        return { ok: true };
+      }
+
+      if (input.type === 'double_click') {
+        await mouse.move(straightTo(new Point(input.x, input.y)));
+        await mouse.doubleClick(MouseButton.LEFT);
+        return { ok: true };
+      }
+
+      if (input.type === 'right_click') {
+        await mouse.move(straightTo(new Point(input.x, input.y)));
+        await mouse.click(MouseButton.RIGHT);
+        return { ok: true };
+      }
+
+      if (input.type === 'scroll') {
+        await mouse.move(straightTo(new Point(input.x, input.y)));
+        if (input.direction === 'up') {
+          await mouse.scrollUp(500);
+        } else {
+          await mouse.scrollDown(500);
+        }
         return { ok: true };
       }
 
@@ -295,13 +350,27 @@ export const agentRoute = t.router({
         return { ok: true };
       }
 
-      const key = takeoverKeyMap[input.key.toLowerCase()];
-      if (!key) {
-        throw new Error(`Unsupported takeover key: ${input.key}`);
+      if (input.type === 'key' || input.type === 'hotkey') {
+        if (input.type === 'hotkey') {
+          const keys = getTakeoverHotkeys(input.key);
+          if (!keys.length) {
+            throw new Error(`Unsupported takeover hotkey: ${input.key}`);
+          }
+          await keyboard.pressKey(...keys);
+          await keyboard.releaseKey(...[...keys].reverse());
+          return { ok: true };
+        }
+
+        const key = takeoverKeyMap[input.key.toLowerCase()];
+        if (!key) {
+          throw new Error(`Unsupported takeover key: ${input.key}`);
+        }
+        await keyboard.pressKey(key);
+        await keyboard.releaseKey(key);
+        return { ok: true };
       }
-      await keyboard.pressKey(key);
-      await keyboard.releaseKey(key);
-      return { ok: true };
+
+      throw new Error(`Unsupported takeover input: ${input.type}`);
     }),
   pauseRun: t.procedure.input<void>().handle(async () => {
     const guiAgent = GUIAgentManager.getInstance().getAgent();

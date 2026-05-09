@@ -198,6 +198,35 @@ describe('local computer actor planner', () => {
     });
   });
 
+  it('builds a local browser mirror plan for browser tasks', async () => {
+    const plan = await buildLocalComputerPlan(
+      'latest TN news',
+      settings,
+    );
+
+    expect(plan).toMatchObject({
+      canHandle: true,
+      steps: [
+        {
+          actor: 'process_worker',
+          tool: 'run_command',
+          purpose: 'Open or focus the default local browser before visual interaction.',
+        },
+        {
+          actor: 'visual_worker',
+          tool: 'gui_agent',
+          inputs: {
+            content: expect.stringContaining(
+              'Use the visible local browser window to complete this web task.',
+            ),
+          },
+        },
+      ],
+    });
+    expect(plan.steps[0].inputs.command).toContain('Start-Process -FilePath $url');
+    expect(plan.steps[0].inputs.command).toContain('latest%20TN%20news');
+  });
+
   it('parses open-app-then-send phrasing as one verified messaging task', async () => {
     await expect(
       buildLocalComputerPlan(

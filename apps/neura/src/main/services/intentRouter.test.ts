@@ -41,11 +41,12 @@ describe('intent router run modes', () => {
     });
   });
 
-  it('routes current weather questions to browser tools instead of direct chat', async () => {
+  it('routes current weather questions to the local live desktop browser', async () => {
     await expect(
       route("what's the weather today in Mumbai?"),
     ).resolves.toMatchObject({
-      operator: Operator.LocalBrowser,
+      runMode: 'gui_computer',
+      operator: Operator.LocalComputer,
       taskType: 'browser_research',
     });
   });
@@ -105,11 +106,12 @@ describe('intent router run modes', () => {
     });
   });
 
-  it('routes research/news tasks to the autonomous browser executor', async () => {
+  it('routes research/news tasks to the local live desktop browser', async () => {
     await expect(
       route('latest AI news and summarize the top article'),
     ).resolves.toMatchObject({
-      runMode: 'executor_browser',
+      runMode: 'gui_computer',
+      operator: Operator.LocalComputer,
       requiresValidation: true,
       complexity: 'research',
       taskType: 'browser_research',
@@ -117,19 +119,20 @@ describe('intent router run modes', () => {
     });
   });
 
-  it('routes structured webpage extraction to the autonomous browser executor', async () => {
+  it('routes structured webpage extraction to the local live desktop browser', async () => {
     await expect(
       route('extract table from this website https://example.com'),
     ).resolves.toMatchObject({
-      runMode: 'executor_browser',
+      runMode: 'gui_computer',
+      operator: Operator.LocalComputer,
       requiresValidation: true,
     });
   });
 
-  it('keeps simple browser open tasks on the browser GUI path', async () => {
+  it('keeps simple browser open tasks on the local live desktop path', async () => {
     await expect(route('open YouTube')).resolves.toMatchObject({
-      runMode: 'gui_browser',
-      operator: Operator.LocalBrowser,
+      runMode: 'gui_computer',
+      operator: Operator.LocalComputer,
     });
   });
 

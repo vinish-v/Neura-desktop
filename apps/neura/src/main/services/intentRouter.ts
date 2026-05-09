@@ -139,6 +139,22 @@ function inferRunMetadata(
     };
   }
 
+  if (
+    operator === Operator.LocalComputer &&
+    (mode === 'browser' || mode === 'mixed')
+  ) {
+    const needsValidation = needsResearchVerification(normalized);
+    return {
+      runMode: 'gui_computer',
+      requiresValidation: needsValidation,
+      complexity: needsValidation
+        ? 'research'
+        : mode === 'mixed'
+          ? 'multi_step'
+          : 'simple',
+    };
+  }
+
   if (wideResearchPattern.test(normalized)) {
     return {
       runMode: 'wide_research',
@@ -219,11 +235,14 @@ function inferSemanticIntent(
   } else if (runMode === 'executor_browser') {
     taskType = 'browser_research';
     requiredTools.push('browser', 'extract_page');
-  } else if (runMode === 'gui_browser') {
+  } else if (
+    runMode === 'gui_browser' ||
+    (runMode === 'gui_computer' && (mode === 'browser' || mode === 'mixed'))
+  ) {
     taskType = needsResearchVerification(normalized)
       ? 'browser_research'
       : 'browser_navigation';
-    requiredTools.push('browser');
+    requiredTools.push(runMode === 'gui_computer' ? 'desktop_browser' : 'browser');
   } else if (runMode === 'artifact_workflow') {
     taskType = 'artifact';
     requiredTools.push('artifact_studio');
@@ -298,9 +317,13 @@ function deterministicRuleDecision(instructions: string): BaseIntentDecision {
     };
   }
 
+  const mode = modeFromSharedSurface(sharedIntent.surface);
   return {
-    mode: modeFromSharedSurface(sharedIntent.surface),
-    operator: operatorFromSharedFirstOperator(sharedIntent.firstOperator),
+    mode,
+    operator:
+      sharedIntent.firstOperator === 'browser'
+        ? Operator.LocalComputer
+        : operatorFromSharedFirstOperator(sharedIntent.firstOperator),
     confidence: sharedIntent.confidence,
     source: 'rules',
     reason: sharedIntent.reason,
@@ -327,7 +350,10 @@ function applySafetyOverrides(
     return {
       ...decision,
       mode: modeFromSharedSurface(sharedIntent.surface),
-      operator: operatorFromSharedFirstOperator(sharedIntent.firstOperator),
+      operator:
+        sharedIntent.firstOperator === 'browser'
+          ? Operator.LocalComputer
+          : operatorFromSharedFirstOperator(sharedIntent.firstOperator),
       confidence: Math.max(decision.confidence, sharedIntent.confidence),
       reason: `${decision.reason}; deterministic override: ${sharedIntent.reason}`,
     };
@@ -366,6 +392,15 @@ function operatorFromFirstOperator(
 
   return initialOperatorForMode(fallbackMode);
 }
+
+const applyLocalLiveMirrorOperator = (decision: BaseIntentDecision) =>
+  decision.operator === Operator.LocalBrowser
+    ? {
+        ...decision,
+        operator: Operator.LocalComputer,
+        reason: `${decision.reason}; local live mirror uses the desktop browser`,
+      }
+    : decision;
 
 function parseLlmDecision(raw: string): Partial<BaseIntentDecision> | null {
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
@@ -541,13 +576,19 @@ export async function routeIntent({
 
   const llmDecision = await classifyWithLlm(instructions, settings);
   if (llmDecision) {
-    const enriched = enrichDecision(instructions, llmDecision);
+    const enriched = enrichDecision(
+      instructions,
+      applyLocalLiveMirrorOperator(llmDecision),
+    );
     logger.info('[IntentRouter] llm decision', enriched);
     return enriched;
   }
 
   // Fallback if LLM fails or is not configured
-  const enriched = enrichDecision(instructions, ruleDecision);
+  const enriched = enrichDecision(
+    instructions,
+    applyLocalLiveMirrorOperator(ruleDecision),
+  );
   logger.info('[IntentRouter] fallback decision', enriched);
   return enriched;
 }

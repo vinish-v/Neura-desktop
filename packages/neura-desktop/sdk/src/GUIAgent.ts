@@ -33,6 +33,7 @@ import {
   toVlmModelFormat,
 } from './utils';
 import {
+  DEFAULT_FACTORS,
   INTERNAL_ACTION_SPACES_ENUM,
   MAX_SNAPSHOT_ERR_CNT,
   SYSTEM_PROMPT,
@@ -120,6 +121,18 @@ const isHumanVerificationPage = (domText?: string) => {
 
 const HUMAN_VERIFICATION_MESSAGE =
   'This page requires human verification. Use Take over to complete the CAPTCHA, then send "done" so Neura can continue.';
+
+type TakeoverInput =
+  | { type: 'click' | 'double_click' | 'right_click'; x: number; y: number }
+  | { type: 'scroll'; x: number; y: number; direction: 'up' | 'down' }
+  | { type: 'text'; text: string }
+  | { type: 'key' | 'hotkey'; key: string };
+
+type TakeoverScreen = {
+  width?: number;
+  height?: number;
+  scaleFactor?: number;
+};
 
 const isSearchResultsPage = (domText?: string) => {
   const text = domText || '';
@@ -1292,6 +1305,113 @@ export class GUIAgent<T extends Operator> extends BaseGUIAgent<
 
   public stop() {
     this.isStopped = true;
+  }
+
+  public async executeTakeoverInput(
+    input: TakeoverInput,
+    screen: TakeoverScreen = {},
+  ) {
+    const screenWidth = screen.width || 1;
+    const screenHeight = screen.height || 1;
+    const scaleFactor = screen.scaleFactor || 1;
+
+    let action_type = '';
+    let action_inputs: Record<string, string> = {};
+
+    if (
+      input.type === 'click' ||
+      input.type === 'double_click' ||
+      input.type === 'right_click'
+    ) {
+      const box = `[${input.x}, ${input.y}, ${input.x}, ${input.y}]`;
+      action_type =
+        input.type === 'double_click'
+          ? 'left_double'
+          : input.type === 'right_click'
+            ? 'right_single'
+            : 'click';
+      action_inputs = { start_box: box };
+    } else if (input.type === 'scroll') {
+      action_type = 'scroll';
+      action_inputs = {
+        start_box: `[${input.x}, ${input.y}, ${input.x}, ${input.y}]`,
+        direction: input.direction,
+      };
+    } else if (input.type === 'text') {
+      action_type = 'type';
+      action_inputs = { content: input.text };
+    } else {
+      action_type = 'hotkey';
+      action_inputs = { key: input.key };
+    }
+
+    await this.operator.execute({
+      prediction: `${action_type}(${JSON.stringify(action_inputs)})`,
+      parsedPrediction: {
+        reflection: null,
+        thought: 'User takeover input.',
+        action_type,
+        action_inputs,
+      },
+      screenWidth,
+      screenHeight,
+      scaleFactor,
+      factors: DEFAULT_FACTORS,
+    });
+
+    await sleep(150);
+    await this.emitTakeoverFrame();
+  }
+
+  private async emitTakeoverFrame() {
+    const snapshot = await this.operator.screenshot();
+    const { width, height, mime } = await Jimp.fromBuffer(
+      Buffer.from(replaceBase64Prefix(snapshot.base64), 'base64'),
+    ).catch((error) => {
+      this.logger.error('[GUIAgent] takeover screenshot error', error);
+      return {
+        width: null,
+        height: null,
+        mime: '',
+      };
+    });
+
+    if (!snapshot.base64 || !width || !height) {
+      return;
+    }
+
+    const now = Date.now();
+    await this.config.onData?.({
+      data: {
+        version: ShareVersion.V1,
+        systemPrompt: this.systemPrompt,
+        instruction: '',
+        modelName: this.model.modelName,
+        status: StatusEnum.PAUSE,
+        logTime: now,
+        conversations: [
+          {
+            from: 'human',
+            value: IMAGE_PLACEHOLDER,
+            screenshotBase64: snapshot.base64,
+            domText: snapshot.domText,
+            screenshotContext: {
+              size: {
+                width,
+                height,
+              },
+              mime,
+              scaleFactor: snapshot.scaleFactor,
+            },
+            timing: {
+              start: now,
+              end: now,
+              cost: 0,
+            },
+          },
+        ],
+      },
+    });
   }
 
   private buildSystemPrompt() {

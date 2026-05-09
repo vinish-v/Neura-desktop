@@ -2,7 +2,7 @@
  * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Check,
@@ -183,6 +183,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
   const [currentIndex, setCurrentIndex] = useState(0);
   const { taskState, computerRuntime } = useStore();
   const [takeoverBusy, setTakeoverBusy] = useState(false);
+  const frameRef = useRef<HTMLDivElement>(null);
 
   const imageEntries = useMemo(() => {
     return messages
@@ -265,7 +266,16 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
   };
 
   const currentEntry = imageEntries[currentIndex];
-  const mime = currentEntry?.message?.screenshotContext?.mime || 'image/png';
+  const liveFrame = computerRuntime?.frame || computerRuntime?.latestFrame;
+  const liveFrameSrc = liveFrame?.dataUrl;
+  const replayFrameSrc = currentEntry?.imageData
+    ? `data:${currentEntry?.message?.screenshotContext?.mime || 'image/png'};base64,${currentEntry.imageData}`
+    : '';
+  const frameImageSrc = liveFrameSrc || replayFrameSrc;
+  const activeFrameSize =
+    liveFrame?.width && liveFrame?.height
+      ? { width: liveFrame.width, height: liveFrame.height }
+      : currentEntry?.message?.screenshotContext?.size;
   const currentAction =
     currentEntry?.actions.find((action) => action.type !== 'screenshot') ||
     allActions[allActions.length - 1];
@@ -285,9 +295,10 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
     return null;
   }, [messages, taskState?.completionProof?.evidence]);
   const commandFrame =
-    runtimeOutputToCommandFrame(computerRuntime?.latestOutput) ||
-    parsedCommandFrame;
-  const hasVisualFrame = Boolean(currentEntry?.imageData);
+    runtimeOutputToCommandFrame(
+      computerRuntime?.terminal || computerRuntime?.latestOutput,
+    ) || parsedCommandFrame;
+  const hasVisualFrame = Boolean(frameImageSrc);
   const shouldShowCommandFrame =
     Boolean(commandFrame) &&
     (computerRuntime?.mode === 'terminal' ||
@@ -391,21 +402,75 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
     }
   };
 
+  const getFramePoint = (
+    event:
+      | React.MouseEvent<HTMLImageElement>
+      | React.WheelEvent<HTMLImageElement>,
+  ) => {
+    if (!takeoverEnabled || !activeFrameSize) {
+      return null;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = Math.round(
+      ((event.clientX - rect.left) / rect.width) * activeFrameSize.width,
+    );
+    const y = Math.round(
+      ((event.clientY - rect.top) / rect.height) * activeFrameSize.height,
+    );
+    return { x, y };
+  };
+
   const forwardFrameClick = async (
     event: React.MouseEvent<HTMLImageElement>,
   ) => {
-    if (!takeoverEnabled || !currentEntry?.message?.screenshotContext?.size) {
+    const point = getFramePoint(event);
+    if (!point) {
       return;
     }
-    const rect = event.currentTarget.getBoundingClientRect();
-    const size = currentEntry.message.screenshotContext.size;
-    const x = Math.round(
-      ((event.clientX - rect.left) / rect.width) * size.width,
-    );
-    const y = Math.round(
-      ((event.clientY - rect.top) / rect.height) * size.height,
-    );
-    await api.computerTakeoverInput({ type: 'click', x, y });
+    frameRef.current?.focus();
+    event.preventDefault();
+    event.stopPropagation();
+    await api.computerTakeoverInput({ type: 'click', ...point });
+  };
+
+  const forwardFrameDoubleClick = async (
+    event: React.MouseEvent<HTMLImageElement>,
+  ) => {
+    const point = getFramePoint(event);
+    if (!point) {
+      return;
+    }
+    frameRef.current?.focus();
+    event.preventDefault();
+    event.stopPropagation();
+    await api.computerTakeoverInput({ type: 'double_click', ...point });
+  };
+
+  const forwardFrameContextMenu = async (
+    event: React.MouseEvent<HTMLImageElement>,
+  ) => {
+    const point = getFramePoint(event);
+    if (!point) {
+      return;
+    }
+    frameRef.current?.focus();
+    event.preventDefault();
+    event.stopPropagation();
+    await api.computerTakeoverInput({ type: 'right_click', ...point });
+  };
+
+  const forwardFrameWheel = async (event: React.WheelEvent<HTMLImageElement>) => {
+    const point = getFramePoint(event);
+    if (!point) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    await api.computerTakeoverInput({
+      type: 'scroll',
+      ...point,
+      direction: event.deltaY < 0 ? 'up' : 'down',
+    });
   };
 
   const forwardTakeoverKey = async (
@@ -415,8 +480,22 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
       return;
     }
 
-    const hasModifier = event.ctrlKey || event.metaKey || event.altKey;
-    if (hasModifier) {
+    const modifierParts = [
+      event.ctrlKey ? 'ctrl' : '',
+      event.metaKey ? 'meta' : '',
+      event.altKey ? 'alt' : '',
+      event.shiftKey ? 'shift' : '',
+    ].filter(Boolean);
+    if (
+      modifierParts.length > 0 &&
+      !['Control', 'Meta', 'Alt', 'Shift'].includes(event.key)
+    ) {
+      event.preventDefault();
+      const key = event.key === ' ' ? 'space' : event.key.toLowerCase();
+      await api.computerTakeoverInput({
+        type: 'hotkey',
+        key: [...modifierParts, key].join('+'),
+      });
       return;
     }
 
@@ -442,6 +521,20 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
       event.preventDefault();
       await api.computerTakeoverInput({ type: 'key', key: event.key });
     }
+  };
+
+  const forwardTakeoverPaste = async (
+    event: React.ClipboardEvent<HTMLDivElement>,
+  ) => {
+    if (!takeoverEnabled) {
+      return;
+    }
+    const text = event.clipboardData.getData('text');
+    if (!text) {
+      return;
+    }
+    event.preventDefault();
+    await api.computerTakeoverInput({ type: 'text', text });
   };
 
   const renderSlider = () => (
@@ -561,19 +654,29 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
             </span>
           </div>
           <div
+            ref={frameRef}
             className="relative flex min-h-[220px] flex-1 items-center justify-center bg-black outline-none"
             tabIndex={takeoverEnabled ? 0 : -1}
             onKeyDown={forwardTakeoverKey}
+            onPaste={forwardTakeoverPaste}
+            onMouseDown={() => frameRef.current?.focus()}
           >
             {shouldShowCommandFrame && commandFrame ? (
               renderCommandFrame(commandFrame)
-            ) : currentEntry ? (
+            ) : frameImageSrc ? (
               <motion.img
-                key={currentEntry.originalIndex}
-                src={`data:${mime};base64,${currentEntry.imageData}`}
-                alt={`Neura computer frame ${currentEntry.originalIndex + 1}`}
+                key={
+                  liveFrameSrc
+                    ? 'live-desktop-frame'
+                    : `replay-${currentEntry?.originalIndex || 0}`
+                }
+                src={frameImageSrc}
+                alt="Neura computer live frame"
                 className="block max-h-full max-w-full select-none object-contain"
                 onClick={forwardFrameClick}
+                onDoubleClick={forwardFrameDoubleClick}
+                onContextMenu={forwardFrameContextMenu}
+                onWheel={forwardFrameWheel}
                 draggable={false}
                 initial={{ opacity: 0, scale: 0.985 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -585,7 +688,9 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
           </div>
         </div>
 
-        <div className="mt-3">{renderSlider()}</div>
+        {imageEntries.length > 1 ? (
+          <div className="mt-3">{renderSlider()}</div>
+        ) : null}
 
         {finalAnswer ? (
           <div className="mt-4 max-h-[34vh] overflow-y-auto rounded-lg border border-emerald-400/20 bg-emerald-400/[0.045] p-4">

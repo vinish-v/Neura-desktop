@@ -133,7 +133,7 @@ export type TaskState = {
 
 export type TaskRunRecord = TaskState;
 
-export type ComputerRuntimeMode = 'browser' | 'terminal' | 'desktop';
+export type ComputerRuntimeMode = 'browser' | 'terminal' | 'desktop' | 'rdp';
 
 export type ComputerRuntimeStatus =
   | 'idle'
@@ -154,9 +154,13 @@ export type ComputerRuntimeEventType =
   | 'runtime.failed';
 
 export type ComputerRuntimeFrame = {
+  dataUrl?: string;
   mime?: string;
   width?: number;
   height?: number;
+  scaleFactor?: number;
+  sourceId?: string;
+  sourceName?: string;
   updatedAt: number;
 };
 
@@ -188,6 +192,8 @@ export type ComputerRuntimeState = {
   activity?: string;
   currentUrl?: string;
   cwd?: string;
+  frame?: ComputerRuntimeFrame;
+  terminal?: ComputerRuntimeOutput;
   latestFrame?: ComputerRuntimeFrame;
   latestOutput?: ComputerRuntimeOutput;
   activeProcessId?: string;

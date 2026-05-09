@@ -122,6 +122,7 @@ export class NutJSElectronOperator extends NutJSOperator {
       mime: 'image/jpeg',
       width: physicalSize.width,
       height: physicalSize.height,
+      scaleFactor,
     });
 
     return {

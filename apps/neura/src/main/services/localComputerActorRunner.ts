@@ -31,6 +31,8 @@ import { validateCompletionProof } from './completionValidation';
 import { executeNativeComputerTool } from './nativeComputerTools';
 import { TaskRunRegistry } from './taskRunRegistry';
 import { ComputerRuntimeController } from './computerRuntimeController';
+import { buildInitialBrowserUrl } from './autonomousBrowserRunner';
+import { inferInitialBrowserUrl } from './initialBrowserNavigation';
 
 type RunnerArgs = {
   instructions: string;
@@ -70,6 +72,9 @@ const allowedNativeTools = new Set([
 
 const visualAppPattern =
   /\b(click|type|press|focus|send|message|text|dm|open|launch|start|desktop window|screen|visible|mouse|\.exe\b)\b/i;
+
+const browserMirrorPattern =
+  /\b(website|web site|webpage|web page|browser|chrome|edge|google|bing|duckduckgo|search|look up|lookup|find online|go to|navigate|visit|open site|open website|url|youtube|gmail|github|amazon|flipkart|latest|news|headline|headlines|today|current|recent|weather|price|article|page|online)\b|https?:\/\/|www\./i;
 
 const localAppRequestPattern =
   /\b(open|launch|start|focus)\s+(.+?)(?:\s+(?:and|then|to|for|with)\b|$)/i;
@@ -135,6 +140,33 @@ const buildLocalAppLaunchCommand = (appName: string) =>
     '}',
     'Start-Sleep -Seconds 3',
     '"Launch/focus requested: $raw"',
+  ].join('\n');
+
+const normalizeLaunchUrl = (url: string) =>
+  /^https?:\/\//i.test(url) ? url : `https://${url}`;
+
+const buildBrowserMirrorLaunchUrl = (instructions: string) => {
+  const directUrl = inferInitialBrowserUrl(instructions);
+  return normalizeLaunchUrl(directUrl || buildInitialBrowserUrl(instructions));
+};
+
+const buildBrowserMirrorLaunchCommand = (instructions: string) => {
+  const url = buildBrowserMirrorLaunchUrl(instructions);
+  return [
+    `$url = ${psSingleQuote(url)}`,
+    'Start-Process -FilePath $url',
+    'Start-Sleep -Seconds 3',
+    '"Launch/focus requested: default browser $url"',
+  ].join('\n');
+};
+
+const buildBrowserMirrorVisualInstruction = (instructions: string) =>
+  [
+    instructions,
+    'Use the visible local browser window to complete this web task.',
+    'If the browser is not visible, open or focus the default browser first.',
+    'For search/current-information tasks, use the visible search results or source pages to produce a complete final answer.',
+    'If a page asks for CAPTCHA or human verification, call_user and wait for takeover instead of clicking it automatically.',
   ].join('\n');
 
 const buildLocalAppVisualInstruction = (
@@ -490,6 +522,39 @@ export async function buildLocalComputerPlan(
   const deterministic = buildDeterministicLocalComputerPlan(instructions);
   if (deterministic) {
     return deterministic;
+  }
+
+  if (
+    browserMirrorPattern.test(instructions) &&
+    !/\b(send|message|text|dm)\b/i.test(instructions)
+  ) {
+    return {
+      canHandle: true,
+      reason: 'Open the local browser in the live desktop mirror, then complete the web task visibly.',
+      steps: [
+        {
+          id: 'launch-local-browser',
+          actor: 'process_worker',
+          tool: 'run_command',
+          inputs: { command: buildBrowserMirrorLaunchCommand(instructions) },
+          purpose: 'Open or focus the default local browser before visual interaction.',
+          verification:
+            'Launch/focus command returns and the visual worker verifies browser state.',
+        },
+        {
+          id: 'visual-browser-execution',
+          actor: 'visual_worker',
+          tool: 'gui_agent',
+          inputs: {
+            content: buildBrowserMirrorVisualInstruction(instructions),
+          },
+          purpose:
+            'Use the mirrored local browser UI to complete the requested web task.',
+          verification:
+            'Validator requires a final answer backed by visible browser evidence or a blocked/user-needed state.',
+        },
+      ],
+    };
   }
 
   if (visualAppPattern.test(instructions)) {
