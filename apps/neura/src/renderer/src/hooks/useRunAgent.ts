@@ -62,8 +62,9 @@ export const useRunAgent = () => {
     history: ConversationWithSoM[],
     callback: () => void = () => {},
     displayValue = value,
+    operatorOverride?: Operator,
   ) => {
-    const operator = settings.operator;
+    const operator = operatorOverride || settings.operator;
     if (
       (operator === Operator.LocalBrowser ||
         operator === Operator.LocalComputer) &&

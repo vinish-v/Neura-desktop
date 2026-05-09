@@ -10,6 +10,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@renderer/components/ui/button';
 import { Textarea } from '@renderer/components/ui/textarea';
 import { MotionPanel, panelMotion } from '@renderer/components/magic/PremiumSurface';
+import { toast } from 'sonner';
 
 import { useSession } from '../../hooks/useSession';
 import { classifyInteractionForInstructions } from '../../utils/operatorRouting';
@@ -55,22 +56,34 @@ const Home = () => {
       return;
     }
 
-    setStarting(true);
-    const route = classifyInteractionForInstructions(instructions);
-    const operator = route.operator;
-    const session = await createSession(instructions, {
-      operator,
-    });
-
-    navigate('/local', {
-      state: {
+    try {
+      setStarting(true);
+      const route = classifyInteractionForInstructions(instructions);
+      const operator = route.operator;
+      const session = await createSession(instructions, {
         operator,
-        sessionId: session?.id,
-        from: 'home',
-        initialPrompt: instructions,
-        initialMode: route.mode,
-      },
-    });
+      });
+
+      if (!session?.id) {
+        toast.error('Could not create a task session. Please try again.');
+        return;
+      }
+
+      navigate('/local', {
+        state: {
+          operator,
+          sessionId: session.id,
+          from: 'home',
+          initialPrompt: instructions,
+          initialMode: route.mode,
+        },
+      });
+    } catch (error) {
+      console.error('startUnifiedNeura', error);
+      toast.error('Could not start the task. Please try again.');
+    } finally {
+      setStarting(false);
+    }
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
