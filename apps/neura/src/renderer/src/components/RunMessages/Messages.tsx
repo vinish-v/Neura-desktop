@@ -69,8 +69,16 @@ const getError = (text: string) => {
     const parsed = JSON.parse(text);
     if (parsed && typeof parsed === 'object' && parsed.status) {
       const errorStatus = ErrorStatusEnum[parsed.status] || 'Error';
+      const message = String(parsed.message || '');
+      if (/no executable action|could not produce a valid next action/i.test(message)) {
+        return {
+          message: 'User action needed',
+          stack:
+            'Neura could not safely continue from the current page. Use Take over to complete any human verification or give a more direct instruction.',
+        };
+      }
       error = {
-        message: `${errorStatus}: ${parsed.message}`,
+        message: `${errorStatus}: ${message}`,
         stack: parsed.stack || text,
       };
     } else {

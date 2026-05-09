@@ -107,6 +107,20 @@ const extractUrlFromDomText = (domText?: string) =>
 const extractTitleFromDomText = (domText?: string) =>
   domText?.match(/^Title:\s*(.+)$/im)?.[1]?.trim() || '';
 
+const isHumanVerificationPage = (domText?: string) => {
+  const text = domText || '';
+  const url = extractUrlFromDomText(text);
+  const title = extractTitleFromDomText(text);
+  const combined = `${url}\n${title}\n${text}`;
+
+  return /google\.[^/\s]+\/sorry\/index|recaptcha|captcha|i'?m not a robot|unusual traffic|automated queries|verify you are human|human verification/i.test(
+    combined,
+  );
+};
+
+const HUMAN_VERIFICATION_MESSAGE =
+  'This page requires human verification. Use Take over to complete the CAPTCHA, then send "done" so Neura can continue.';
+
 const isSearchResultsPage = (domText?: string) => {
   const text = domText || '';
   const url = extractUrlFromDomText(text);
@@ -577,6 +591,47 @@ export class GUIAgent<T extends Operator> extends BaseGUIAgent<
           });
         }
 
+        if (isHumanVerificationPage(snapshot.domText)) {
+          logger.warn('[GUIAgent] human verification page detected', {
+            url: extractUrlFromDomText(snapshot.domText),
+            title: extractTitleFromDomText(snapshot.domText),
+          });
+          end = Date.now();
+          const message: Message = {
+            from: 'gpt',
+            value: HUMAN_VERIFICATION_MESSAGE,
+            timing: {
+              start,
+              end,
+              cost: end - start,
+            },
+            screenshotContext: {
+              size: {
+                width,
+                height,
+              },
+              scaleFactor: snapshot.scaleFactor,
+            },
+            predictionParsed: [
+              {
+                reflection: null,
+                thought: 'Human verification is required before continuing.',
+                action_type: INTERNAL_ACTION_SPACES_ENUM.CALL_USER,
+                action_inputs: {},
+              },
+            ],
+          };
+          data.conversations.push(message);
+          data.status = StatusEnum.CALL_USER;
+          await onData?.({
+            data: {
+              ...data,
+              conversations: [message],
+            },
+          });
+          break;
+        }
+
         const plannerStrategy = plannerModel
           ? await plannerModel
               .invokeText({
@@ -769,7 +824,7 @@ export class GUIAgent<T extends Operator> extends BaseGUIAgent<
           await onData?.({
             data: {
               ...data,
-              conversations: data.conversations.slice(-2),
+              conversations: data.conversations.slice(-2, -1),
             },
           });
 
@@ -779,7 +834,7 @@ export class GUIAgent<T extends Operator> extends BaseGUIAgent<
               error: this.guiAgentErrorParser(
                 ErrorStatusEnum.UNKNOWN_ERROR,
                 new Error(
-                  'The model returned thoughts but no executable action. Try the task again or use a more direct instruction.',
+                  'Neura could not produce a valid next action. Use Take over if the page needs manual input, or try a more direct instruction.',
                 ),
               ),
             });

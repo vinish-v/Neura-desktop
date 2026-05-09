@@ -292,6 +292,8 @@ export const runAgent = async (
           ? 'running'
           : status === StatusEnum.PAUSE
             ? 'paused'
+            : status === StatusEnum.CALL_USER
+              ? 'waiting'
             : status === StatusEnum.ERROR
               ? 'failed'
               : status === StatusEnum.END

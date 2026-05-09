@@ -87,6 +87,11 @@ const RunMessages = () => {
   };
 
   const renderChatList = () => {
+    const isInternalAutomationCorrection = (value?: string) =>
+      /previous response was not executable|authorized benign UI automation|Action Space|previous action had invalid coordinates|browser state has not changed after repeated actions/i.test(
+        value || '',
+      );
+
     return (
       <div className="flex-1 w-full px-12 py-0 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400">
         <div ref={containerRef}>
@@ -97,6 +102,10 @@ const RunMessages = () => {
           <TaskRunPanel taskState={taskState} />
 
           {chatMessages?.map((message, idx) => {
+            if (isInternalAutomationCorrection(message?.value)) {
+              return null;
+            }
+
             if (message?.from === 'human') {
               if (message?.value === IMAGE_PLACEHOLDER) {
                 // screen shot
