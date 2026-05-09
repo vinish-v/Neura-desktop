@@ -24,10 +24,27 @@ const keepModules = new Set([
   '@computer-use/mac-screen-capture-permissions',
 ]);
 const needSubDependencies = ['@computer-use/node-mac-permissions', 'sharp'];
-const ignorePattern = new RegExp(
-  `^/node_modules/(?!${[...keepModules].join('|')})`,
+
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const getNodeModuleEntryName = (moduleName: string) =>
+  moduleName.startsWith('@') ? moduleName.split('/')[0] : moduleName;
+
+const keepNodeModuleEntries = new Set(
+  [...keepModules].map(getNodeModuleEntryName),
 );
-const unpack = `**/node_modules/{@img,${[...keepModules].join(',')}}/**/*`;
+const keepNodeModulePaths = new Set([
+  ...keepModules,
+]);
+const nativeUnpackEntries = new Set(['@img', '@computer-use', 'sharp']);
+
+const ignorePattern = new RegExp(
+  `^/node_modules/(?!(${[...keepNodeModulePaths]
+    .map(escapeRegExp)
+    .join('|')})(?:/|$))`,
+);
+const unpack = `**/node_modules/{${[...nativeUnpackEntries].join(',')}}/**/*`;
 
 const keepLanguages = new Set(['en', 'en_GB', 'en-US', 'en_US']);
 const noopAfterCopy = (
@@ -70,7 +87,7 @@ const readDependencyNames = (moduleRoot: string) => {
 
 const resolveModuleRoot = (projectRoot: string, name: string) => {
   try {
-    return getModuleRoot(projectRoot, name);
+    return fs.realpathSync(getModuleRoot(projectRoot, name));
   } catch {
     let current = projectRoot;
     while (true) {
@@ -79,7 +96,7 @@ const resolveModuleRoot = (projectRoot: string, name: string) => {
         fs.existsSync(candidate) &&
         fs.existsSync(path.join(candidate, 'package.json'))
       ) {
-        return candidate;
+        return fs.realpathSync(candidate);
       }
 
       const parent = path.dirname(current);
@@ -168,7 +185,7 @@ async function cleanSources(
     )),
     ...(await readdir(path.join(buildPath, 'node_modules')).then((items) =>
       items
-        .filter((item) => !keepModules.has(item))
+        .filter((item) => !keepNodeModuleEntries.has(item))
         .map((item) => rimraf(path.join(buildPath, 'node_modules', item))),
     )),
   ]);
@@ -183,17 +200,22 @@ async function cleanSources(
   await Promise.all(
     runtimeModules.map((runtimeModule) => {
       // Check is exist
-      if (
-        fs.existsSync(path.join(buildPath, 'node_modules', runtimeModule.name))
-      ) {
+      const destination = path.join(
+        buildPath,
+        'node_modules',
+        runtimeModule.name,
+      );
+
+      if (fs.existsSync(destination)) {
         // eslint-disable-next-line array-callback-return
         return;
       }
 
       if (fs.existsSync(runtimeModule.path)) {
+        fs.mkdirSync(path.dirname(destination), { recursive: true });
         return cp(
           runtimeModule.path,
-          path.join(buildPath, 'node_modules', runtimeModule.name),
+          destination,
           copyRuntimeModule(runtimeModule.path),
         );
       }
