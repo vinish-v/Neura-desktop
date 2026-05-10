@@ -156,6 +156,21 @@ describe('local computer actor planner', () => {
         },
       ],
     });
+
+    expect(
+      buildDeterministicLocalComputerPlan(
+        'create a folder on desktop names samem',
+      ),
+    ).toMatchObject({
+      canHandle: true,
+      steps: [
+        {
+          actor: 'file_worker',
+          tool: 'create_folder',
+          inputs: { path: '~/Desktop/samem' },
+        },
+      ],
+    });
   });
 
   it('builds a visual-worker plan for desktop app tasks', async () => {
@@ -246,5 +261,15 @@ describe('local computer actor planner', () => {
         },
       ],
     });
+    const plan = await buildLocalComputerPlan(
+      'open ChatClient and send hello there to Alex',
+      settings,
+    );
+    expect(plan.steps[1].inputs.content).toContain(
+      'First use the app search/new chat control to search for "Alex".',
+    );
+    expect(plan.steps[1].inputs.content).toContain(
+      'Never type "hello there" into search, another chat, or the desktop.',
+    );
   });
 });

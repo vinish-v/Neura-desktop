@@ -148,9 +148,10 @@ const buildLocalAppVisualInstruction = (
     return [
       `Use ${targetApp} to send exactly "${parsed.message}" to "${parsed.recipient}".`,
       `${targetApp} should already be launching, but if it is not visible, open or focus it first.`,
-      `Search/select the chat or contact for "${parsed.recipient}" before typing.`,
-      `Only type "${parsed.message}" after the chat input for "${parsed.recipient}" is visibly focused.`,
-      'If the app/contact is not visible or cannot be found, call_user instead of typing anywhere else.',
+      `First use the app search/new chat control to search for "${parsed.recipient}".`,
+      `Click the matching contact/chat for "${parsed.recipient}" and verify the chat header or selected conversation shows that name.`,
+      `Only after that verification, focus the message composer, type exactly "${parsed.message}", and send it.`,
+      `Never type "${parsed.message}" into search, another chat, or the desktop. If the app/contact/input is not visible or cannot be verified, call_user instead of typing.`,
     ].join('\n');
   }
 
@@ -170,7 +171,7 @@ const quotedValue = (value: string) =>
 const cleanFolderName = (value: string) =>
   value
     .replace(/\b(on|in|at)\s+(?:my\s+)?(?:desktop|downloads?|documents?)\b.*$/i, '')
-    .replace(/^(?:called|named)\s+/i, '')
+    .replace(/^(?:called|named|name|names|as)\s+/i, '')
     .replace(/[<>:"/\\|?*]/g, '')
     .trim()
     .replace(/^["'`]|["'`]$/g, '');
@@ -182,14 +183,14 @@ const extractRequestedFolderName = (value: string) => {
   }
 
   const named = value.match(
-    /\b(?:called|named)\s+([a-z0-9][\w .-]{0,120})/i,
+    /\b(?:called|named|name|names|as)\s+([a-z0-9][\w .-]{0,120})/i,
   )?.[1];
   if (named) {
     return cleanFolderName(named);
   }
 
   const afterFolder = value.match(
-    /\b(?:folder|directory|dir)\s+(?:called|named)?\s*([a-z0-9][\w .-]{0,120})/i,
+    /\b(?:folder|directory|dir)\s+(?:called|named|name|names|as)?\s*([a-z0-9][\w .-]{0,120})/i,
   )?.[1];
   if (!afterFolder) {
     return '';
@@ -243,35 +244,49 @@ const buildLocalCompletionAnswer = ({
   evidence: string[];
   fallback: string;
 }) => {
-  const createdFiles = artifacts
-    .map((artifact) => `- ${artifact.title}: ${artifact.path}`)
-    .join('\n');
-  const verification = evidence
-    .filter((item) => item.trim())
-    .slice(-4)
-    .map((item) => `- ${item.trim()}`)
-    .join('\n');
-
-  if (createdFiles) {
-    return [
-      'Completed. Created the requested file output:',
-      createdFiles,
-      verification ? `Verification:\n${verification}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-  }
-
   const terminalAnswer = extractTerminalAnswer(evidence);
   if (terminalAnswer) {
     return terminalAnswer;
   }
 
-  return evidence
-    .filter(Boolean)
-    .map((item) => item.trim())
-    .filter((item) => !/^Validated \d+ local computer actor step/i.test(item))
-    .join('\n\n') || fallback;
+  if (artifacts.length) {
+    const createdFiles = artifacts
+      .map((artifact) => `Created file: ${artifact.path}`)
+      .join('\n');
+    return `${createdFiles}\nVerification: file was created successfully.`;
+  }
+
+  const cleanedEvidence = evidence
+    .map((item) => sanitizeLocalEvidence(item))
+    .filter((item): item is string => Boolean(item))
+    .filter(
+      (item, index, items) =>
+        items.findIndex((candidate) => candidate === item) === index,
+    );
+
+  return cleanedEvidence.slice(-4).join('\n') || fallback;
+};
+
+const sanitizeLocalEvidence = (value: string) => {
+  const item = value.trim();
+  if (!item) {
+    return '';
+  }
+  if (/^Read (?:file|DOCX|PDF)\s+.+:\s*\n\n/i.test(item)) {
+    const filePath = item.match(/^Read (?:file|DOCX|PDF)\s+(.+?):/i)?.[1];
+    return filePath ? `Verified file: ${filePath}` : 'Verified file content.';
+  }
+  if (
+    /^(?:Local computer actor plan|Task verified|Validated \d+ local computer actor step|Reading the file returns|Folder creation tool|Command returns|Deterministic)/i.test(
+      item,
+    )
+  ) {
+    return '';
+  }
+  if (/^(?:Created|Moved|Copied|Edited|Extracted)\b/i.test(item)) {
+    return item.split(/\r?\n/)[0].trim();
+  }
+  return item.length > 400 ? `${item.slice(0, 397).trim()}...` : item;
 };
 
 const extractTerminalAnswer = (evidence: string[]) => {
@@ -313,6 +328,32 @@ const validateVisualMessagingEvidence = (
   );
   if (firstTypeIndex < 0) {
     return;
+  }
+
+  const parsed = extractSimpleMessageTask(instructions);
+  if (parsed) {
+    const normalizedRecipient = parsed.recipient.toLowerCase();
+    const normalizedMessage = parsed.message.toLowerCase();
+    const recipientTypeIndex = actionEvidence.findIndex(
+      (item) =>
+        /^type:/i.test(item) &&
+        item.toLowerCase().includes(normalizedRecipient),
+    );
+    const messageTypeIndex = actionEvidence.findIndex(
+      (item) =>
+        /^type:/i.test(item) &&
+        item.toLowerCase().includes(normalizedMessage),
+    );
+    if (messageTypeIndex >= 0 && recipientTypeIndex < 0) {
+      throw new Error(
+        'The visual worker typed the message before searching/selecting the requested contact. It must search the contact first, verify the chat, then send the message.',
+      );
+    }
+    if (messageTypeIndex >= 0 && recipientTypeIndex > messageTypeIndex) {
+      throw new Error(
+        'The visual worker typed the message before the requested contact was selected. It must select the chat before sending.',
+      );
+    }
   }
 
   const hasTargetingBeforeType = actionEvidence

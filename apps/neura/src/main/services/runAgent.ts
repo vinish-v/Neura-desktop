@@ -41,6 +41,7 @@ import { runLocalWorkflowAgent } from './localWorkflowRunner';
 import { createTaskRun, TaskRunRegistry } from './taskRunRegistry';
 import { ComputerRuntimeController } from './computerRuntimeController';
 import { ElectronBrowserOperator } from './electronBrowserOperator';
+import { runQuickEmbeddedBrowserTask } from './quickEmbeddedBrowserTask';
 
 const INTERNAL_AGENT_FEEDBACK_PATTERN =
   /previous response was not executable|authorized benign UI automation|Action Space|previous action had invalid coordinates|browser state has not changed after repeated actions|previous browser DOM action could not be executed|continue autonomously: take a fresh screenshot\/DOM map|do not finish with this recovery message|element id was stale|Could not (?:type into|click) that DOM element|Refresh the DOM map|visible current DOM element|regex|pattern|validator|validated \d+ local computer actor|command output contains|planner checklist|planner step|predictionParsed/i;
@@ -225,6 +226,21 @@ export const runAgent = async (
     const handled = await runLocalComputerActorAgent({
       instructions,
       settings,
+      setState,
+      getState,
+    });
+    if (handled) {
+      return;
+    }
+  }
+
+  if (
+    intentDecision.runMode === 'gui_browser' &&
+    intentDecision.operator === Operator.LocalBrowser
+  ) {
+    const handled = await runQuickEmbeddedBrowserTask({
+      instructions,
+      searchEngine: settings.searchEngineForBrowser,
       setState,
       getState,
     });

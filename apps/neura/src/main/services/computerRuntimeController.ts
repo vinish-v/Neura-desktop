@@ -84,7 +84,9 @@ const syncLiveMirror = (mode?: ComputerRuntimeMode, status?: ComputerRuntimeStat
 
   if (status === 'completed' || status === 'failed' || status === 'idle') {
     localDesktopMirror.stop();
-    embeddedBrowserRuntime.destroy();
+    if (mode && mode !== 'browser') {
+      embeddedBrowserRuntime.destroy();
+    }
   }
 };
 

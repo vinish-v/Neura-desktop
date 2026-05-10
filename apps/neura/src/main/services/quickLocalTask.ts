@@ -58,7 +58,7 @@ const VERSION_CHECK_PATTERN =
 const cleanName = (value: string) =>
   value
     .replace(/\b(on|in|at)\s+(my\s+)?(desktop|downloads|documents)\b.*$/i, '')
-    .replace(/^(called|named)\s+/i, '')
+    .replace(/^(called|named|name|names|as)\s+/i, '')
     .trim()
     .replace(/^["'`]|["'`]$/g, '');
 
@@ -111,14 +111,14 @@ const extractFolderName = (instructions: string) => {
   }
 
   const named = instructions.match(
-    /\b(?:called|named)\s+([a-z0-9][\w .-]{0,120})/i,
+    /\b(?:called|named|name|names|as)\s+([a-z0-9][\w .-]{0,120})/i,
   )?.[1];
   if (named) {
     return cleanName(named);
   }
 
   const afterFolder = instructions.match(
-    /\b(?:folder|directory|dir)\s+([a-z0-9][\w .-]{0,120})/i,
+    /\b(?:folder|directory|dir)\s+(?:called|named|name|names|as)?\s*([a-z0-9][\w .-]{0,120})/i,
   )?.[1];
   if (afterFolder) {
     const name = cleanName(afterFolder);

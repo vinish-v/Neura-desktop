@@ -412,7 +412,7 @@ const resolveLocalPath = (rawPath: string | undefined) => {
 const cleanInferredFolderName = (value: string) =>
   value
     .replace(/\b(on|in|at)\s+(?:my\s+)?(?:desktop|downloads?|documents?)\b.*$/i, '')
-    .replace(/^(?:called|named)\s+/i, '')
+    .replace(/^(?:called|named|name|names|as)\s+/i, '')
     .replace(/[<>:"/\\|?*]/g, '')
     .trim()
     .replace(/^["'`]|["'`]$/g, '');
@@ -437,14 +437,14 @@ const inferFolderNameFromText = (value: string) => {
   }
 
   const named = value.match(
-    /\b(?:called|named)\s+([a-z0-9][\w .-]{0,120})/i,
+    /\b(?:called|named|name|names|as)\s+([a-z0-9][\w .-]{0,120})/i,
   )?.[1];
   if (named) {
     return cleanInferredFolderName(named);
   }
 
   const afterFolder = value.match(
-    /\b(?:folder|directory|dir)\s+(?:called|named)?\s*([a-z0-9][\w .-]{0,120})/i,
+    /\b(?:folder|directory|dir)\s+(?:called|named|name|names|as)?\s*([a-z0-9][\w .-]{0,120})/i,
   )?.[1];
   if (!afterFolder) {
     return '';
