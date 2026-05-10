@@ -57,10 +57,10 @@ type BaseIntentDecision = Omit<
 >;
 
 const complexBrowserPattern =
-  /\b(latest|current|today|tonight|tomorrow|now|live|news|weather|forecast|research|summari[sz]e|compare|comparison|extract|scrape|source-backed|sources?|top result|article|ranking|ranked|details?|verify|price|prices|stock|stocks|crypto|score|scores|results?|official|review|reviews|table|tables|dataset|data|near me|available|book|tickets?)\b/i;
+  /\b(latest|current|today|tonight|tomorrow|now|live|news|weather|forecast|research|summari[sz]e|compare|comparison|extract|scrape|source-backed|sources?|top result|top\s+\d+|best|popular|trending|article|ranking|ranked|details?|verify|price|prices|stock|stocks|crypto|score|scores|results?|official|review|reviews|table|tables|dataset|data|near me|available|book|tickets?)\b/i;
 
 const executorBrowserPattern =
-  /\b(research|summari[sz]e|compare|comparison|extract|scrape|source-backed|sources?|top result|article|ranking|ranked|details?|verify|official|review|reviews|table|tables|dataset|data|near me|available|book|tickets?)\b/i;
+  /\b(research|summari[sz]e|compare|comparison|extract|scrape|source-backed|sources?|top result|top\s+\d+|best|popular|trending|article|ranking|ranked|details?|verify|official|review|reviews|table|tables|dataset|data|near me|available|book|tickets?)\b/i;
 
 const wideResearchPattern =
   /\b(wide research|parallel research|research\s+\d+|analy[sz]e\s+(all|these|\d+)|compare\s+(all|these|\d+)|batch research|lead generation|prospects|competitors list)\b/i;

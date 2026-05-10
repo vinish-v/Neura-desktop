@@ -24,7 +24,6 @@ import {
   ErrorMessage,
   HumanTextMessage,
   AssistantTextMessage,
-  ScreenshotMessage,
   LoadingText,
 } from './Messages';
 import { TaskRunPanel } from './TaskRunPanel';
@@ -35,7 +34,6 @@ const RunMessages = () => {
   const { messages = [], thinking, errorMsg, taskState, status } = useStore();
   const containerRef = React.useRef<HTMLDivElement>(null);
   const suggestions: string[] = [];
-  const [selectImg, setSelectImg] = useState<number | undefined>(undefined);
   const { currentSessionId, chatMessages, updateMessages } = useSession();
   const isWelcome = currentSessionId === '';
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(!isWelcome);
@@ -81,14 +79,9 @@ const RunMessages = () => {
     await api.setInstructions({ instructions: suggestion });
   };
 
-  const handleImageSelect = async (index: number) => {
-    setIsRightPanelOpen(true);
-    setSelectImg(index);
-  };
-
   const renderChatList = () => {
     const isInternalAutomationCorrection = (value?: string) =>
-      /previous response was not executable|authorized benign UI automation|Action Space|previous action had invalid coordinates|browser state has not changed after repeated actions/i.test(
+      /previous response was not executable|authorized benign UI automation|Action Space|previous action had invalid coordinates|browser state has not changed after repeated actions|previous browser DOM action could not be executed|element id was stale|take a fresh screenshot\/DOM map|Could not (?:type into|click) that DOM element|Refresh the DOM map or use coordinate click\/type|reply with finished\(content=|visible current DOM element/i.test(
         value || '',
       );
 
@@ -108,13 +101,7 @@ const RunMessages = () => {
 
             if (message?.from === 'human') {
               if (message?.value === IMAGE_PLACEHOLDER) {
-                // screen shot
-                return (
-                  <ScreenshotMessage
-                    key={`message-${idx}`}
-                    onClick={() => handleImageSelect(idx)}
-                  />
-                );
+                return null;
               }
 
               return (
@@ -209,7 +196,7 @@ const RunMessages = () => {
             : 'w-0 opacity-0 overflow-hidden',
         )}
       >
-        <ImageGallery messages={chatMessages} selectImgIndex={selectImg} />
+        <ImageGallery messages={chatMessages} />
       </div>
     </div>
   );

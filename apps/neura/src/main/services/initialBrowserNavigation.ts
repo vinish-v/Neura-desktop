@@ -4,9 +4,45 @@
  */
 import { SearchEngineForSettings } from '@main/store/types';
 
+const LOCAL_COMPUTER_TASK_PATTERN =
+  /\b(desktop|downloads?|documents?|folder|directory|file|notepad|vs\s*code|visual studio code|terminal|shell|command|powershell|cmd|\.exe)\b/i;
+
+const WEB_LOOKUP_PATTERN =
+  /\b(search|look\s+up|lookup|find online|google|bing|latest|current|today|now|news|weather|price|stock|score|top\s+\d+|top|best|popular|trending|review|reviews|article|source|sources)\b/i;
+
+const buildSearchUrl = (
+  query: string,
+  searchEngine = SearchEngineForSettings.GOOGLE,
+) => {
+  const encoded = encodeURIComponent(query.trim());
+  if (!encoded) {
+    return null;
+  }
+
+  switch (searchEngine) {
+    case SearchEngineForSettings.BING:
+      return `https://www.bing.com/search?q=${encoded}`;
+    case SearchEngineForSettings.BAIDU:
+      return `https://www.baidu.com/s?wd=${encoded}`;
+    case SearchEngineForSettings.GOOGLE:
+    default:
+      return `https://www.google.com/search?q=${encoded}`;
+  }
+};
+
+const normalizeLookupQuery = (instructions: string) =>
+  instructions
+    .replace(/^\s*please\s+/i, '')
+    .replace(
+      /^\s*(?:search(?:\s+(?:for|about))?|look\s+up|lookup|find(?:\s+(?:me|the))?|google|bing|give(?:\s+me)?|show(?:\s+me)?|tell(?:\s+me)?|open\s+(?:a\s+)?browser\s+and)\s+/i,
+      '',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+
 export const inferInitialBrowserUrl = (
   instructions: string,
-  _searchEngine?: SearchEngineForSettings,
+  searchEngine?: SearchEngineForSettings,
 ): string | null => {
   const normalized = instructions.trim();
   const explicitUrl = normalized.match(/\bhttps?:\/\/[^\s"'<>]+/i)?.[0];
@@ -44,6 +80,13 @@ export const inferInitialBrowserUrl = (
     }
 
     return `${target}.com`;
+  }
+
+  if (
+    WEB_LOOKUP_PATTERN.test(normalized) &&
+    !LOCAL_COMPUTER_TASK_PATTERN.test(normalized)
+  ) {
+    return buildSearchUrl(normalizeLookupQuery(normalized), searchEngine);
   }
 
   return null;

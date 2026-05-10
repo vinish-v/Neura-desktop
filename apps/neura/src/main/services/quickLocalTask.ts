@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import fs from 'fs/promises';
+import { existsSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFile } from 'child_process';
@@ -62,19 +63,40 @@ const cleanName = (value: string) =>
     .replace(/^["'`]|["'`]$/g, '');
 
 const knownFolder = (instructions: string) => {
-  const home = os.homedir();
+  const oneDriveRoots = [
+    process.env.OneDrive,
+    process.env.OneDriveConsumer,
+    process.env.OneDriveCommercial,
+    process.env.USERPROFILE
+      ? path.join(process.env.USERPROFILE, 'OneDrive')
+      : undefined,
+  ]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .filter((value, index, values) => values.indexOf(value) === index);
+
+  const knownPath = (folderName: 'Desktop' | 'Documents' | 'Downloads') => {
+    if (process.platform === 'win32' && folderName !== 'Downloads') {
+      for (const root of oneDriveRoots) {
+        const candidate = path.join(root, folderName);
+        if (existsSync(candidate)) {
+          return candidate;
+        }
+      }
+    }
+    return path.join(os.homedir(), folderName);
+  };
 
   if (/\bdesktop\b/i.test(instructions)) {
-    return path.join(home, 'Desktop');
+    return knownPath('Desktop');
   }
   if (/\bdownloads?\b/i.test(instructions)) {
-    return path.join(home, 'Downloads');
+    return knownPath('Downloads');
   }
   if (/\bdocuments?\b/i.test(instructions)) {
-    return path.join(home, 'Documents');
+    return knownPath('Documents');
   }
 
-  return path.join(home, 'Desktop');
+  return knownPath('Desktop');
 };
 
 const extractQuotedValue = (instructions: string) => {

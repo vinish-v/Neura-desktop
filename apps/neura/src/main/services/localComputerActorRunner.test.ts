@@ -141,6 +141,21 @@ describe('local computer actor planner', () => {
         },
       ],
     });
+
+    expect(
+      buildDeterministicLocalComputerPlan(
+        'create a folder in desktop named hom',
+      ),
+    ).toMatchObject({
+      canHandle: true,
+      steps: [
+        {
+          actor: 'file_worker',
+          tool: 'create_folder',
+          inputs: { path: '~/Desktop/hom' },
+        },
+      ],
+    });
   });
 
   it('builds a visual-worker plan for desktop app tasks', async () => {

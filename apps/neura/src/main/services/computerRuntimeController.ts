@@ -14,6 +14,10 @@ import type {
   ComputerRuntimeStatus,
 } from '@main/store/types';
 import { localDesktopMirror } from './localDesktopMirror';
+import {
+  embeddedBrowserRuntime,
+  type ComputerSurfaceBounds,
+} from './embeddedBrowserRuntime';
 
 type RuntimeStartInput = {
   mode: ComputerRuntimeMode;
@@ -30,11 +34,13 @@ type RuntimeUpdateInput = Partial<
     ComputerRuntimeState,
     | 'mode'
     | 'status'
+    | 'surface'
     | 'subtitle'
     | 'display'
     | 'activity'
     | 'currentUrl'
     | 'cwd'
+    | 'browser'
     | 'activeProcessId'
     | 'takeoverEnabled'
   >
@@ -72,8 +78,13 @@ const syncLiveMirror = (mode?: ComputerRuntimeMode, status?: ComputerRuntimeStat
     localDesktopMirror.stop();
   }
 
+  if (mode && mode !== 'browser') {
+    embeddedBrowserRuntime.destroy();
+  }
+
   if (status === 'completed' || status === 'failed' || status === 'idle') {
     localDesktopMirror.stop();
+    embeddedBrowserRuntime.destroy();
   }
 };
 
@@ -149,6 +160,12 @@ export class ComputerRuntimeController {
     const runtime: ComputerRuntimeState = {
       mode: input.mode,
       status: 'starting',
+      surface:
+        input.mode === 'browser'
+          ? 'native_browser'
+          : input.mode === 'terminal'
+            ? 'terminal'
+            : 'frame_stream',
       title: input.title || "Neura's Computer",
       subtitle: input.subtitle || modeSubtitle(input.mode),
       display: input.display,
@@ -167,6 +184,9 @@ export class ComputerRuntimeController {
       ),
     });
     syncLiveMirror(runtime.mode, runtime.status);
+    if (runtime.mode === 'browser') {
+      void embeddedBrowserRuntime.setInteractionBlocked(true);
+    }
     return store.getState().computerRuntime;
   }
 
@@ -222,6 +242,7 @@ export class ComputerRuntimeController {
           {
             ...runtime,
             mode: 'terminal',
+            surface: 'terminal',
             subtitle: 'Terminal',
             display: output.command || runtime.display,
             cwd: output.cwd || runtime.cwd,
@@ -261,11 +282,53 @@ export class ComputerRuntimeController {
   }
 
   static setTakeover(enabled: boolean) {
-    return this.update({ takeoverEnabled: enabled });
+    const updated = this.update({ takeoverEnabled: enabled });
+    if (updated?.mode === 'browser') {
+      void embeddedBrowserRuntime.setInteractionBlocked(!enabled);
+      if (enabled) {
+        embeddedBrowserRuntime.focus();
+      }
+    }
+    return updated;
+  }
+
+  static updateBrowserState(
+    browser: NonNullable<ComputerRuntimeState['browser']>,
+  ) {
+    return patchRuntime((runtime) => ({
+      ...runtime,
+      mode: 'browser',
+      surface: 'native_browser',
+      subtitle: 'Browser',
+      display: browser.url || runtime.display,
+      currentUrl: browser.url || runtime.currentUrl,
+      browser,
+      status: runtime.status === 'starting' ? 'running' : runtime.status,
+      updatedAt: Date.now(),
+    }));
+  }
+
+  static setSurfaceBounds(bounds: ComputerSurfaceBounds) {
+    embeddedBrowserRuntime.setBounds(bounds);
+  }
+
+  static setSurfaceVisible(visible: boolean) {
+    embeddedBrowserRuntime.setVisible(visible);
   }
 
   static reset() {
     localDesktopMirror.stop();
+    void embeddedBrowserRuntime.setInteractionBlocked(true);
+    embeddedBrowserRuntime.destroy();
     store.setState({ computerRuntime: null });
   }
 }
+
+embeddedBrowserRuntime.setHandlers({
+  onBrowserState: (browser) => {
+    ComputerRuntimeController.updateBrowserState(browser);
+  },
+  onFailure: (message) => {
+    ComputerRuntimeController.fail(message);
+  },
+});

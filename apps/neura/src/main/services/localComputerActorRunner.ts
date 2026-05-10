@@ -167,7 +167,53 @@ const buildLocalAppVisualInstruction = (
 const quotedValue = (value: string) =>
   value.match(/["']([^"']+)["']/)?.[1]?.trim();
 
-const desktopPath = (folderName: string) => `~/Desktop/${folderName}`;
+const cleanFolderName = (value: string) =>
+  value
+    .replace(/\b(on|in|at)\s+(?:my\s+)?(?:desktop|downloads?|documents?)\b.*$/i, '')
+    .replace(/^(?:called|named)\s+/i, '')
+    .replace(/[<>:"/\\|?*]/g, '')
+    .trim()
+    .replace(/^["'`]|["'`]$/g, '');
+
+const extractRequestedFolderName = (value: string) => {
+  const quoted = quotedValue(value);
+  if (quoted) {
+    return cleanFolderName(quoted);
+  }
+
+  const named = value.match(
+    /\b(?:called|named)\s+([a-z0-9][\w .-]{0,120})/i,
+  )?.[1];
+  if (named) {
+    return cleanFolderName(named);
+  }
+
+  const afterFolder = value.match(
+    /\b(?:folder|directory|dir)\s+(?:called|named)?\s*([a-z0-9][\w .-]{0,120})/i,
+  )?.[1];
+  if (!afterFolder) {
+    return '';
+  }
+
+  const cleaned = cleanFolderName(afterFolder);
+  return /^(?:on|in|at|my|please)$/i.test(cleaned) ? '' : cleaned;
+};
+
+const knownFolderPath = (value: string) => {
+  if (/\bdownloads?\b/i.test(value)) {
+    return '~/Downloads';
+  }
+  if (/\bdocuments?\b/i.test(value)) {
+    return '~/Documents';
+  }
+  if (/\bdesktop\b/i.test(value)) {
+    return '~/Desktop';
+  }
+  return null;
+};
+
+const folderPath = (basePath: string, folderName: string) =>
+  `${basePath}/${folderName}`;
 
 const extractFinalAnswer = (messages: ConversationWithSoM[]) => {
   for (const message of [...messages].reverse()) {
@@ -354,22 +400,19 @@ export function buildDeterministicLocalComputerPlan(
   }
 
   if (/\bcreate\b.*\bfolder\b/i.test(normalized)) {
-    const folderName =
-      quotedValue(normalized) ||
-      normalized
-        .match(/\bfolder\s+(?:called|named)\s+([a-z0-9 _.-]+)/i)?.[1]
-        ?.trim();
-    if (folderName && /\bdesktop\b/i.test(normalized)) {
+    const folderName = extractRequestedFolderName(normalized) || 'New Folder';
+    const basePath = knownFolderPath(normalized);
+    if (folderName && basePath) {
       return {
         canHandle: true,
-        reason: 'Deterministic folder creation on Desktop.',
+        reason: 'Deterministic folder creation.',
         steps: [
           {
             id: 'create-folder',
             actor: 'file_worker',
             tool: 'create_folder',
-            inputs: { path: desktopPath(folderName) },
-            purpose: `Create Desktop folder ${folderName}.`,
+            inputs: { path: folderPath(basePath, folderName) },
+            purpose: `Create folder ${folderName}.`,
             verification: 'Folder creation tool succeeds.',
           },
         ],
@@ -574,7 +617,7 @@ const getComputerRuntimeModeForPlan = (
   ) {
     return 'terminal';
   }
-  return 'desktop';
+  return 'terminal';
 };
 
 async function runVisualGuiExecutor({

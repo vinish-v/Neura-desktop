@@ -352,13 +352,139 @@ const requireInput = (value: string | undefined, name: string) => {
   return trimmed;
 };
 
+type KnownFolderName = 'Desktop' | 'Documents' | 'Downloads';
+
+const oneDriveRoots = () =>
+  [
+    process.env.OneDrive,
+    process.env.OneDriveConsumer,
+    process.env.OneDriveCommercial,
+    process.env.USERPROFILE
+      ? path.join(process.env.USERPROFILE, 'OneDrive')
+      : undefined,
+  ]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .filter((value, index, values) => values.indexOf(value) === index);
+
+const getKnownFolderPath = (folderName: KnownFolderName) => {
+  if (process.platform === 'win32' && folderName !== 'Downloads') {
+    for (const root of oneDriveRoots()) {
+      const candidate = path.join(root, folderName);
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return path.join(os.homedir(), folderName);
+};
+
+const expandHomePath = (value: string) => {
+  if (value === '~') {
+    return os.homedir();
+  }
+
+  const match = value.match(/^~[\\/](.+)$/);
+  if (!match) {
+    return value;
+  }
+
+  const parts = match[1].split(/[\\/]+/).filter(Boolean);
+  const [first, ...rest] = parts;
+  if (/^desktop$/i.test(first || '')) {
+    return path.join(getKnownFolderPath('Desktop'), ...rest);
+  }
+  if (/^documents?$/i.test(first || '')) {
+    return path.join(getKnownFolderPath('Documents'), ...rest);
+  }
+  if (/^downloads?$/i.test(first || '')) {
+    return path.join(getKnownFolderPath('Downloads'), ...rest);
+  }
+
+  return path.join(os.homedir(), ...parts);
+};
+
 const resolveLocalPath = (rawPath: string | undefined) => {
   const value = requireInput(rawPath, 'path');
-  const expanded =
-    value === '~' || value.startsWith(`~${path.sep}`)
-      ? path.join(os.homedir(), value.slice(2))
-      : value;
-  return path.resolve(expanded);
+  return path.resolve(expandHomePath(value));
+};
+
+const cleanInferredFolderName = (value: string) =>
+  value
+    .replace(/\b(on|in|at)\s+(?:my\s+)?(?:desktop|downloads?|documents?)\b.*$/i, '')
+    .replace(/^(?:called|named)\s+/i, '')
+    .replace(/[<>:"/\\|?*]/g, '')
+    .trim()
+    .replace(/^["'`]|["'`]$/g, '');
+
+const inferKnownFolderBase = (value: string) => {
+  if (/\bdownloads?\b/i.test(value)) {
+    return getKnownFolderPath('Downloads');
+  }
+  if (/\bdocuments?\b/i.test(value)) {
+    return getKnownFolderPath('Documents');
+  }
+  if (/\bdesktop\b/i.test(value)) {
+    return getKnownFolderPath('Desktop');
+  }
+  return null;
+};
+
+const inferFolderNameFromText = (value: string) => {
+  const quoted = value.match(/["'`]([^"'`]+)["'`]/)?.[1];
+  if (quoted) {
+    return cleanInferredFolderName(quoted);
+  }
+
+  const named = value.match(
+    /\b(?:called|named)\s+([a-z0-9][\w .-]{0,120})/i,
+  )?.[1];
+  if (named) {
+    return cleanInferredFolderName(named);
+  }
+
+  const afterFolder = value.match(
+    /\b(?:folder|directory|dir)\s+(?:called|named)?\s*([a-z0-9][\w .-]{0,120})/i,
+  )?.[1];
+  if (!afterFolder) {
+    return '';
+  }
+
+  const cleaned = cleanInferredFolderName(afterFolder);
+  return /^(?:on|in|at|my|please)$/i.test(cleaned) ? '' : cleaned;
+};
+
+const activeRunInstructions = () => {
+  const runId = TaskRunRegistry.getActiveRunId();
+  return runId
+    ? TaskRunRegistry.list().find((run) => run.runId === runId)?.originalGoal ||
+        ''
+    : '';
+};
+
+const resolveCreateFolderPath = (inputs: ActionInputs) => {
+  if (inputs.path?.trim()) {
+    return resolveLocalPath(inputs.path);
+  }
+
+  const extra = inputs as ExtendedActionInputs;
+  const context = [
+    extra.content,
+    extra.text,
+    extra.message,
+    extra.prompt,
+    extra.title,
+    activeRunInstructions(),
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const folderName = inferFolderNameFromText(context);
+  if (!folderName) {
+    return resolveLocalPath(undefined);
+  }
+
+  const basePath = inferKnownFolderBase(context) || getKnownFolderPath('Desktop');
+  return path.resolve(basePath, folderName);
 };
 
 const isSuspiciousWritePath = (targetPath: string) => {
@@ -601,7 +727,7 @@ async function fileInfo(inputs: ActionInputs) {
 }
 
 async function createFolder(inputs: ActionInputs) {
-  const targetPath = resolveLocalPath(inputs.path);
+  const targetPath = resolveCreateFolderPath(inputs);
   if (isSuspiciousWritePath(targetPath)) {
     throw new Error(`Blocked suspicious folder path: ${targetPath}`);
   }

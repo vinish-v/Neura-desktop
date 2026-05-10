@@ -28,7 +28,7 @@ const statusIcon = {
 };
 
 const DEBUG_PROGRESS_PATTERN =
-  /\b(regex|pattern|validator|validated \d+ local computer actor|command output contains|planner checklist|planner step|raw|screenshot observed|predictionParsed|FullyQualifiedErrorId|CategoryInfo)\b/i;
+  /\b(regex|pattern|validator|validated \d+ local computer actor|command output contains|planner checklist|planner step|raw|screenshot observed|predictionParsed|FullyQualifiedErrorId|CategoryInfo)\b|previous response was not executable|authorized benign UI automation|Action Space|previous action had invalid coordinates|browser state has not changed after repeated actions|previous browser DOM action could not be executed|continue autonomously: take a fresh screenshot\/DOM map|do not finish with this recovery message|element id was stale|take a fresh screenshot\/DOM map|Could not (?:type into|click) that DOM element|Refresh the DOM map or use coordinate click\/type|reply with finished\(content=|visible current DOM element/i;
 
 const cleanProgressText = (value?: string) =>
   (value || '')
@@ -63,8 +63,14 @@ const publicProgressDetail = (detail?: string) => {
   return cleaned.length > 180 ? `${cleaned.slice(0, 180)}...` : cleaned;
 };
 
+const publicFinalAnswer = (answer?: string) => {
+  const cleaned = (answer || '').trim();
+  return cleaned && !DEBUG_PROGRESS_PATTERN.test(cleaned) ? cleaned : '';
+};
+
 export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const finalAnswer = publicFinalAnswer(taskState?.finalAnswer);
   const latestProgress = useMemo(
     () =>
       (taskState?.progressItems || [])
@@ -246,13 +252,13 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
         </div>
       )}
 
-      {taskState.finalAnswer && (
+      {finalAnswer && (
         <div className="mt-3 border-t border-white/10 pt-3">
           <div className="mb-2 text-xs font-medium text-muted-foreground">
             Final answer
           </div>
           <div className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-xl border border-emerald-400/20 bg-emerald-400/[0.04] px-3 py-2 text-xs leading-5 text-white/85">
-            {taskState.finalAnswer}
+            {finalAnswer}
           </div>
         </div>
       )}

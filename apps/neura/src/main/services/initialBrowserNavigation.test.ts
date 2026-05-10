@@ -8,16 +8,19 @@ import { SearchEngineForSettings } from '@main/store/types';
 import { inferInitialBrowserUrl } from './initialBrowserNavigation';
 
 describe('inferInitialBrowserUrl', () => {
-  it('leaves generic lookup tasks for the model to perform from the browser start page', () => {
+  it('opens generic lookup tasks directly on the configured search engine', () => {
     expect(
       inferInitialBrowserUrl('find the latest tn election news'),
-    ).toBeNull();
+    ).toBe('https://www.google.com/search?q=latest%20tn%20election%20news');
     expect(
       inferInitialBrowserUrl(
         'latest NVIDIA stock price',
         SearchEngineForSettings.BING,
       ),
-    ).toBeNull();
+    ).toBe('https://www.bing.com/search?q=latest%20NVIDIA%20stock%20price');
+    expect(inferInitialBrowserUrl('search about india')).toBe(
+      'https://www.google.com/search?q=india',
+    );
   });
 
   it('keeps explicit sites as direct navigation targets', () => {

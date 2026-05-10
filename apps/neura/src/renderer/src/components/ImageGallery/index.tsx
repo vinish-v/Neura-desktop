@@ -2,7 +2,13 @@
  * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { motion } from 'framer-motion';
 import {
   Check,
@@ -113,6 +119,39 @@ const getActionLabel = (type: string) => {
   }
 };
 
+const INTERNAL_PROGRESS_PATTERN =
+  /previous response was not executable|authorized benign UI automation|Action Space|previous action had invalid coordinates|browser state has not changed after repeated actions|previous browser DOM action could not be executed|continue autonomously: take a fresh screenshot\/DOM map|do not finish with this recovery message|element id was stale|take a fresh screenshot\/DOM map|Could not (?:type into|click) that DOM element|Refresh the DOM map or use coordinate click\/type|reply with finished\(content=|visible current DOM element|regex|pattern|validator|validated \d+ local computer actor|command output contains|planner checklist|planner step|predictionParsed/i;
+
+const cleanProgressInput = (value?: string) =>
+  (value || '')
+    .replace(/\\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const isInternalProgressText = (...parts: Array<string | undefined>) =>
+  INTERNAL_PROGRESS_PATTERN.test(parts.filter(Boolean).join(' '));
+
+const cleanFinalAnswer = (value?: string) => {
+  const text = (value || '').replace(/\\n/g, '\n').trim();
+  return text && !isInternalProgressText(text) ? text : '';
+};
+
+const dedupeConsecutive = <T,>(items: T[], keyOf: (item: T) => string) => {
+  const result: T[] = [];
+  let previousKey = '';
+
+  for (const item of items) {
+    const key = keyOf(item);
+    if (key === previousKey) {
+      continue;
+    }
+    result.push(item);
+    previousKey = key;
+  }
+
+  return result;
+};
+
 const getComputerMode = (operator?: Operator) =>
   operator === Operator.LocalBrowser || operator === Operator.RemoteBrowser
     ? 'Browser'
@@ -158,7 +197,10 @@ const getFinalAnswer = (messages: ConversationWithSoM[]) => {
         item.action_inputs.content.trim(),
     );
     if (typeof finished?.action_inputs?.content === 'string') {
-      return finished.action_inputs.content.replace(/\\n/g, '\n').trim();
+      const content = cleanFinalAnswer(finished.action_inputs.content);
+      if (content) {
+        return content;
+      }
     }
 
     if (
@@ -167,7 +209,10 @@ const getFinalAnswer = (messages: ConversationWithSoM[]) => {
       message.value.trim() &&
       !message.predictionParsed?.length
     ) {
-      return message.value.trim();
+      const content = cleanFinalAnswer(message.value);
+      if (content) {
+        return content;
+      }
     }
   }
 
@@ -184,6 +229,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
   const { taskState, computerRuntime } = useStore();
   const [takeoverBusy, setTakeoverBusy] = useState(false);
   const frameRef = useRef<HTMLDivElement>(null);
+  const nativeBrowserSurfaceRef = useRef<HTMLDivElement>(null);
 
   const imageEntries = useMemo(() => {
     return messages
@@ -268,6 +314,10 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
   const currentEntry = imageEntries[currentIndex];
   const liveFrame = computerRuntime?.frame || computerRuntime?.latestFrame;
   const liveFrameSrc = liveFrame?.dataUrl;
+  const takeoverEnabled = Boolean(computerRuntime?.takeoverEnabled);
+  const isNativeBrowserSurface =
+    computerRuntime?.mode === 'browser' &&
+    computerRuntime?.surface === 'native_browser';
   const replayFrameSrc = currentEntry?.imageData
     ? `data:${currentEntry?.message?.screenshotContext?.mime || 'image/png'};base64,${currentEntry.imageData}`
     : '';
@@ -280,7 +330,10 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
     currentEntry?.actions.find((action) => action.type !== 'screenshot') ||
     allActions[allActions.length - 1];
   const latestSource = taskState?.sourcesVisited.slice(-1)[0];
-  const pageUrl = getPageUrl(currentEntry?.message) || latestSource;
+  const pageUrl =
+    computerRuntime?.browser?.url ||
+    getPageUrl(currentEntry?.message) ||
+    latestSource;
   const parsedCommandFrame = useMemo(() => {
     const candidates = [
       ...(taskState?.completionProof?.evidence || []),
@@ -298,7 +351,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
     runtimeOutputToCommandFrame(
       computerRuntime?.terminal || computerRuntime?.latestOutput,
     ) || parsedCommandFrame;
-  const hasVisualFrame = Boolean(frameImageSrc);
+  const hasVisualFrame = Boolean(frameImageSrc) && !isNativeBrowserSurface;
   const shouldShowCommandFrame =
     Boolean(commandFrame) &&
     (computerRuntime?.mode === 'terminal' ||
@@ -314,21 +367,82 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
         ? 'Desktop'
         : getComputerMode(operator);
   const isFinished = allActions.some((action) => action.type === 'finished');
-  const takeoverEnabled = Boolean(computerRuntime?.takeoverEnabled);
   const finalAnswer = useMemo(
-    () => getFinalAnswer(messages) || taskState?.finalAnswer || '',
+    () => getFinalAnswer(messages) || cleanFinalAnswer(taskState?.finalAnswer),
     [messages, taskState?.finalAnswer],
   );
+  const shouldShowFinalAnswer =
+    Boolean(finalAnswer) &&
+    (taskState?.status === 'completed' || isFinished);
   const actionProgressItems = allActions
-    .filter((action) => action.type && action.type !== 'screenshot')
+    .filter(
+      (action) =>
+        action.type &&
+        action.type !== 'screenshot' &&
+        !isInternalProgressText(action.label, action.input),
+    )
+    .map((action) => ({
+      ...action,
+      input: cleanProgressInput(action.input),
+    }));
+  const compactActionProgressItems = dedupeConsecutive(
+    actionProgressItems,
+    (action) => `${action.type}:${action.label}:${action.input}`,
+  )
     .slice(-5);
-  const agentProgressItems = taskState?.progressItems.slice(-8) || [];
+  const agentProgressItems = dedupeConsecutive(
+    (taskState?.progressItems || [])
+      .filter((item) => !isInternalProgressText(item.title, item.detail))
+      .map((item) => ({
+        ...item,
+        detail: cleanProgressInput(item.detail),
+      })),
+    (item) => `${item.status}:${item.title}:${item.detail || ''}`,
+  ).slice(-8);
   const activeAgentProgress = agentProgressItems.length > 0;
   const progressItems = activeAgentProgress
     ? agentProgressItems
-    : actionProgressItems;
+    : compactActionProgressItems;
   const activityText =
     computerRuntime?.activity || currentAction?.label || taskState?.currentStep;
+
+  const syncNativeBrowserSurface = useCallback(() => {
+    const element = nativeBrowserSurfaceRef.current;
+    if (!isNativeBrowserSurface || !element) {
+      void api.setComputerSurfaceVisible({ visible: false });
+      return;
+    }
+
+    const rect = element.getBoundingClientRect();
+    const visible = rect.width >= 24 && rect.height >= 24;
+    void api.setComputerSurfaceBounds({
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
+    void api.setComputerSurfaceVisible({ visible });
+  }, [isNativeBrowserSurface]);
+
+  useEffect(() => {
+    syncNativeBrowserSurface();
+    if (!isNativeBrowserSurface || !nativeBrowserSurfaceRef.current) {
+      return;
+    }
+
+    const element = nativeBrowserSurfaceRef.current;
+    const observer = new ResizeObserver(syncNativeBrowserSurface);
+    observer.observe(element);
+    window.addEventListener('resize', syncNativeBrowserSurface);
+    const interval = window.setInterval(syncNativeBrowserSurface, 500);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', syncNativeBrowserSurface);
+      window.clearInterval(interval);
+      void api.setComputerSurfaceVisible({ visible: false });
+    };
+  }, [isNativeBrowserSurface, syncNativeBrowserSurface]);
 
   const renderEmptyState = () => (
     <div className="flex h-full max-w-xl flex-col items-center justify-center gap-4 px-6 text-center text-muted-foreground">
@@ -661,7 +775,14 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
             onPaste={forwardTakeoverPaste}
             onMouseDown={() => frameRef.current?.focus()}
           >
-            {shouldShowCommandFrame && commandFrame ? (
+            {isNativeBrowserSurface ? (
+              <div
+                ref={nativeBrowserSurfaceRef}
+                className="relative h-full min-h-[320px] w-full bg-black"
+              >
+                {!computerRuntime?.browser?.url ? renderEmptyState() : null}
+              </div>
+            ) : shouldShowCommandFrame && commandFrame ? (
               renderCommandFrame(commandFrame)
             ) : frameImageSrc ? (
               <motion.img
@@ -692,7 +813,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
           <div className="mt-3">{renderSlider()}</div>
         ) : null}
 
-        {finalAnswer ? (
+        {shouldShowFinalAnswer ? (
           <div className="mt-4 max-h-[34vh] overflow-y-auto rounded-lg border border-emerald-400/20 bg-emerald-400/[0.045] p-4">
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-emerald-100">
               <Check className="h-4 w-4 text-emerald-400" />

@@ -2,17 +2,13 @@
  * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { toast } from 'sonner';
-
 import { Conversation } from '@neura-desktop/shared/types';
 import { getState } from '@renderer/hooks/useStore';
 
-import { usePermissions } from './usePermissions';
-import { useSetting } from './useSetting';
 import { api } from '@renderer/api';
 import { ConversationWithSoM } from '@/main/shared/types';
 import { Message } from '@neura-desktop/shared/types';
-import { Operator } from '@/main/store/types';
+import type { Operator } from '@/main/store/types';
 
 const filterAndTransformWithMap = (
   history: ConversationWithSoM[],
@@ -54,35 +50,14 @@ const filterAndTransformWithMap = (
 
 export const useRunAgent = () => {
   // const dispatch = useDispatch();
-  const { settings } = useSetting();
-  const { ensurePermissions } = usePermissions();
 
   const run = async (
     value: string,
     history: ConversationWithSoM[],
     callback: () => void = () => {},
     displayValue = value,
-    operatorOverride?: Operator,
+    _operatorOverride?: Operator,
   ) => {
-    const operator = operatorOverride || settings.operator;
-    if (
-      (operator === Operator.LocalBrowser ||
-        operator === Operator.LocalComputer) &&
-      !(ensurePermissions?.accessibility && ensurePermissions?.screenCapture)
-    ) {
-      const permissionsText = [
-        !ensurePermissions?.screenCapture ? 'screenCapture' : '',
-        !ensurePermissions?.accessibility ? 'Accessibility' : '',
-      ]
-        .filter(Boolean)
-        .join(' and ');
-
-      toast.warning(
-        `Please grant the required permissions(${permissionsText})`,
-      );
-      return;
-    }
-
     const initialMessages: Conversation[] = [
       {
         from: 'human',

@@ -14,20 +14,15 @@ import {
   createRemoteBrowserOperator,
   RemoteComputerOperator,
 } from '../remote/operators';
-import {
-  DefaultBrowserOperator,
-  RemoteBrowserOperator,
-} from '@neura-desktop/operator-browser';
+import { RemoteBrowserOperator } from '@neura-desktop/operator-browser';
 import { SettingStore } from '@main/store/setting';
 import { AppState, Operator } from '@main/store/types';
 import { GUIAgentManager } from '../ipcRoutes/agent';
-import { checkBrowserAvailability } from './browserCheck';
 import {
   getModelVersion,
   getSpByModelVersion,
   beforeAgentRun,
   afterAgentRun,
-  getLocalBrowserSearchEngine,
 } from '../utils/agent';
 import { FREE_MODEL_BASE_URL } from '../remote/shared';
 import { getAuthHeader } from '../remote/auth';
@@ -45,6 +40,13 @@ import { runLocalComputerActorAgent } from './localComputerActorRunner';
 import { runLocalWorkflowAgent } from './localWorkflowRunner';
 import { createTaskRun, TaskRunRegistry } from './taskRunRegistry';
 import { ComputerRuntimeController } from './computerRuntimeController';
+import { ElectronBrowserOperator } from './electronBrowserOperator';
+
+const INTERNAL_AGENT_FEEDBACK_PATTERN =
+  /previous response was not executable|authorized benign UI automation|Action Space|previous action had invalid coordinates|browser state has not changed after repeated actions|previous browser DOM action could not be executed|continue autonomously: take a fresh screenshot\/DOM map|do not finish with this recovery message|element id was stale|Could not (?:type into|click) that DOM element|Refresh the DOM map|visible current DOM element|regex|pattern|validator|validated \d+ local computer actor|command output contains|planner checklist|planner step|predictionParsed/i;
+
+const isInternalAgentFeedback = (value?: string) =>
+  Boolean(value && INTERNAL_AGENT_FEEDBACK_PATTERN.test(value));
 
 const extractFinalAnswer = (messages: ConversationWithSoM[]) => {
   for (const message of [...messages].reverse()) {
@@ -52,10 +54,18 @@ const extractFinalAnswer = (messages: ConversationWithSoM[]) => {
       (prediction) => prediction.action_type === 'finished',
     );
     const content = finished?.action_inputs?.content;
-    if (typeof content === 'string' && content.trim()) {
+    if (
+      typeof content === 'string' &&
+      content.trim() &&
+      !isInternalAgentFeedback(content)
+    ) {
       return content.trim();
     }
-    if (message.from === 'gpt' && message.value?.trim()) {
+    if (
+      message.from === 'gpt' &&
+      message.value?.trim() &&
+      !isInternalAgentFeedback(message.value)
+    ) {
       return message.value.trim();
     }
   }
@@ -65,6 +75,17 @@ const extractFinalAnswer = (messages: ConversationWithSoM[]) => {
 const getPageUrlFromConversation = (message?: ConversationWithSoM) => {
   const domText = message?.domText || '';
   return domText.match(/^URL:\s*(.+)$/m)?.[1]?.trim();
+};
+
+const toScreenshotDataUrl = (base64?: string, mime = 'image/jpeg') => {
+  const value = base64?.trim();
+  if (!value) {
+    return undefined;
+  }
+  if (/^data:image\//i.test(value)) {
+    return value;
+  }
+  return `data:${mime};base64,${value.replace(/^data:[^,]+,/i, '')}`;
 };
 
 const getBrowserInstructionHint = (operatorType: 'computer' | 'browser') => {
@@ -96,7 +117,7 @@ const composeSystemPrompt = (
 };
 
 const runInitialBrowserNavigation = async (
-  operator: DefaultBrowserOperator | RemoteBrowserOperator,
+  operator: ElectronBrowserOperator | RemoteBrowserOperator,
   instructions: string,
   searchEngine = SettingStore.getStore().searchEngineForBrowser,
 ) => {
@@ -278,11 +299,10 @@ export const runAgent = async (
     );
 
     if (screenshotBase64 || screenshotContext?.size) {
+      const mime = screenshotContext?.mime || 'image/jpeg';
       ComputerRuntimeController.frame({
-        dataUrl: screenshotBase64
-          ? `data:${screenshotContext?.mime || 'image/jpeg'};base64,${screenshotBase64}`
-          : undefined,
-        mime: screenshotContext?.mime || 'image/jpeg',
+        dataUrl: toScreenshotDataUrl(screenshotBase64, mime),
+        mime,
         width: screenshotContext?.size?.width,
         height: screenshotContext?.size?.height,
         scaleFactor: screenshotContext?.scaleFactor,
@@ -322,7 +342,7 @@ export const runAgent = async (
   let operatorType: 'computer' | 'browser' = 'computer';
   let operator:
     | NutJSElectronOperator
-    | DefaultBrowserOperator
+    | ElectronBrowserOperator
     | RemoteComputerOperator
     | RemoteBrowserOperator;
 
@@ -332,27 +352,11 @@ export const runAgent = async (
       operatorType = 'computer';
       break;
     case Operator.LocalBrowser:
-      await checkBrowserAvailability();
-      const { browserAvailable } = getState();
-      if (!browserAvailable) {
-        logger.warn('Browser operator unavailable. Falling back to computer.');
-        operator = new NutJSElectronOperator();
-        operatorType = 'computer';
-        break;
-      }
-
-      logger.info('[runAgent] creating local browser operator', {
+      logger.info('[runAgent] creating embedded browser operator', {
         operator: activeOperator,
       });
-      operator = await DefaultBrowserOperator.getInstance(
-        false,
-        false,
-        false,
-        getState().status === StatusEnum.CALL_USER,
-        getLocalBrowserSearchEngine(settings.searchEngineForBrowser),
-        true,
-      );
-      logger.info('[runAgent] local browser operator ready');
+      operator = new ElectronBrowserOperator();
+      logger.info('[runAgent] embedded browser operator ready');
       operatorType = 'browser';
       break;
     case Operator.RemoteComputer:
@@ -373,7 +377,7 @@ export const runAgent = async (
       activeOperator === Operator.RemoteBrowser)
   ) {
     await runInitialBrowserNavigation(
-      operator! as DefaultBrowserOperator | RemoteBrowserOperator,
+      operator! as ElectronBrowserOperator | RemoteBrowserOperator,
       instructions,
       settings.searchEngineForBrowser,
     ).catch((error) => {
@@ -419,6 +423,10 @@ export const runAgent = async (
     plannerModelConfig = undefined;
     modelAuthHdrs = await getAuthHeader();
     modelVersion = await ProxyClient.getRemoteVLMProvider();
+  }
+
+  if (operatorType === 'browser') {
+    plannerModelConfig = undefined;
   }
 
   if (!modelAuthHdrs.Authorization && !modelConfig.apiKey?.trim()) {
@@ -601,5 +609,6 @@ export const runAgent = async (
 
   logger.info('[runAgent Totoal cost]: ', (Date.now() - startTime) / 1000, 's');
 
+  GUIAgentManager.getInstance().clearAgent();
   afterAgentRun(activeOperator);
 };

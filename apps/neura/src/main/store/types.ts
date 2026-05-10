@@ -175,6 +175,20 @@ export type ComputerRuntimeOutput = {
   updatedAt: number;
 };
 
+export type ComputerRuntimeSurface =
+  | 'native_browser'
+  | 'frame_stream'
+  | 'terminal';
+
+export type ComputerRuntimeBrowserState = {
+  surfaceId: string;
+  url?: string;
+  title?: string;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  updatedAt: number;
+};
+
 export type ComputerRuntimeEvent = {
   id: string;
   type: ComputerRuntimeEventType;
@@ -186,12 +200,14 @@ export type ComputerRuntimeEvent = {
 export type ComputerRuntimeState = {
   mode: ComputerRuntimeMode;
   status: ComputerRuntimeStatus;
+  surface?: ComputerRuntimeSurface;
   title: string;
   subtitle?: string;
   display?: string;
   activity?: string;
   currentUrl?: string;
   cwd?: string;
+  browser?: ComputerRuntimeBrowserState;
   frame?: ComputerRuntimeFrame;
   terminal?: ComputerRuntimeOutput;
   latestFrame?: ComputerRuntimeFrame;

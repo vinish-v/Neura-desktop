@@ -237,9 +237,32 @@ export const agentRoute = t.router({
       }
     }),
   runAgent: t.procedure.input<void>().handle(async () => {
-    const { thinking } = store.getState();
+    const { abortController, instructions, taskState, thinking } =
+      store.getState();
     if (thinking) {
-      return;
+      const activeGoal = taskState?.status === 'running' ? taskState.originalGoal : '';
+      const nextInstructions = instructions?.trim() || '';
+      if (!activeGoal || activeGoal.trim() === nextInstructions) {
+        return;
+      }
+
+      logger.warn('[agentRoute.runAgent] cancelling stale active run before starting a new task', {
+        activeRunId: taskState?.runId,
+        activeGoal,
+        nextInstructions,
+      });
+      abortController?.abort();
+      const guiAgent = GUIAgentManager.getInstance().getAgent();
+      if (guiAgent instanceof GUIAgent) {
+        guiAgent.resume();
+        guiAgent.stop();
+      }
+      GUIAgentManager.getInstance().clearAgent();
+      ComputerRuntimeController.complete('Previous task stopped');
+      store.setState({
+        status: StatusEnum.END,
+        thinking: false,
+      });
     }
 
     store.setState({
@@ -259,7 +282,36 @@ export const agentRoute = t.router({
       if (!computerRuntime) {
         return null;
       }
-      return ComputerRuntimeController.setTakeover(input.enabled);
+      const runtime = ComputerRuntimeController.setTakeover(input.enabled);
+      const guiAgent = GUIAgentManager.getInstance().getAgent();
+      if (guiAgent instanceof GUIAgent) {
+        if (input.enabled) {
+          guiAgent.pause();
+          ComputerRuntimeController.update({
+            status: 'paused',
+            activity: 'User takeover',
+          });
+        } else {
+          guiAgent.resume();
+          ComputerRuntimeController.update({
+            status: 'running',
+            activity: 'Neura resumed',
+          });
+        }
+      }
+      return store.getState().computerRuntime || runtime;
+    }),
+  setComputerSurfaceBounds: t.procedure
+    .input<{ x: number; y: number; width: number; height: number }>()
+    .handle(async ({ input }) => {
+      ComputerRuntimeController.setSurfaceBounds(input);
+      return { ok: true };
+    }),
+  setComputerSurfaceVisible: t.procedure
+    .input<{ visible: boolean }>()
+    .handle(async ({ input }) => {
+      ComputerRuntimeController.setSurfaceVisible(input.visible);
+      return { ok: true };
     }),
   computerTakeoverInput: t.procedure
     .input<

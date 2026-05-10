@@ -54,6 +54,9 @@ const PERSONAL_LOCAL_SCOPE_PATTERN =
 const CURRENT_WEB_PATTERN =
   /\b(latest|current|today|tonight|tomorrow|yesterday|now|live|breaking|news|weather|forecast|price|prices|stock|stocks|crypto|score|scores|fixture|fixtures|schedule|results?|near me|available|availability|book|booking|buy|ticket|tickets|sale|sales|ranking|rankings|reviews?|official|verify|source-backed|sources?)\b/i;
 
+const RANKED_WEB_LIST_PATTERN =
+  /\b(top|best|popular|trending|highest[- ]rated|most[- ]watched|most[- ]played|most[- ]searched)\s+(?:\d+\s+)?(?:movies?|games?|songs?|series|shows?|books?|restaurants?|places?|products?|phones?|laptops?|apps?|websites?|headlines?|news)\b|\btop\s+\d+\b/i;
+
 const URL_OR_DOMAIN_PATTERN =
   /\b(https?:\/\/|www\.|[a-z0-9-]+\.(com|org|net|io|ai|app|dev|in|co|edu|gov)(\/|\b))/i;
 
@@ -119,7 +122,8 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
   const shell = SHELL_PATTERN.test(text);
   const process = PROCESS_PATTERN.test(text) && shell;
   const localFile = LOCAL_FILE_PATTERN.test(text);
-  const currentWeb = CURRENT_WEB_PATTERN.test(text);
+  const currentWeb =
+    CURRENT_WEB_PATTERN.test(text) || RANKED_WEB_LIST_PATTERN.test(text);
   const urlOrDomain = URL_OR_DOMAIN_PATTERN.test(text);
   const explicitControl = EXPLICIT_CONTROL_PATTERN.test(text);
   const messageSend = MESSAGE_SEND_PATTERN.test(text);

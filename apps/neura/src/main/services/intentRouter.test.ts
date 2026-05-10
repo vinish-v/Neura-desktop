@@ -119,6 +119,15 @@ describe('intent router run modes', () => {
     });
   });
 
+  it('routes ranked list requests to the embedded local browser', async () => {
+    await expect(route('give the top 10 movies')).resolves.toMatchObject({
+      runMode: 'gui_browser',
+      operator: Operator.LocalBrowser,
+      requiresValidation: true,
+      taskType: 'browser_research',
+    });
+  });
+
   it('routes structured webpage extraction to the embedded local browser', async () => {
     await expect(
       route('extract table from this website https://example.com'),

@@ -70,6 +70,12 @@ const AUTOMATION_OFFER_PATTERN =
 const CORRECTION_AUTOMATION_PATTERN =
   /\b(you haven'?t|you did(?:n'?t| not)|not typed|type it|typed it|in (the )?notepad|into (the )?notepad|do it now|actually do)\b/i;
 
+const INTERNAL_AUTOMATION_TEXT_PATTERN =
+  /previous response was not executable|authorized benign UI automation|Action Space|previous action had invalid coordinates|browser state has not changed after repeated actions|previous browser DOM action could not be executed|element id was stale|take a fresh screenshot\/DOM map|Could not (?:type into|click) that DOM element|Refresh the DOM map or use coordinate click\/type|reply with finished\(content=|visible current DOM element/i;
+
+const isInternalAutomationMessage = (value?: string) =>
+  INTERNAL_AUTOMATION_TEXT_PATTERN.test(value || '');
+
 const buildFollowUpAutomationInstructions = (
   instructions: string,
   history: ReturnType<typeof useSession>['chatMessages'],
@@ -363,7 +369,12 @@ const ChatInput = ({
   const lastHumanMessage =
     [...(messages || [])]
       .reverse()
-      .find((m) => m?.from === 'human' && m?.value !== IMAGE_PLACEHOLDER)
+      .find(
+        (m) =>
+          m?.from === 'human' &&
+          m?.value !== IMAGE_PLACEHOLDER &&
+          !isInternalAutomationMessage(m?.value),
+      )
       ?.value || '';
 
   const stopRun = async () => {
