@@ -18,6 +18,7 @@ const runtimeMock = vi.hoisted(() => ({
   withInteractionUnblocked: vi.fn(async (operation: () => unknown) => operation()),
   webContents: {
     insertText: vi.fn(),
+    getURL: vi.fn(),
   },
 }));
 
@@ -52,6 +53,7 @@ describe('ElectronBrowserOperator', () => {
       mime: 'image/jpeg',
     });
     runtimeMock.executeJavaScript.mockResolvedValue('URL: about:blank');
+    runtimeMock.webContents.getURL.mockReturnValue('about:blank');
   });
 
   it('captures the embedded browser page and DOM map', async () => {
@@ -68,6 +70,17 @@ describe('ElectronBrowserOperator', () => {
     expect(runtimeMock.capturePage).toHaveBeenCalled();
   });
 
+  it('labels DOM map elements with e-prefixed zero-based ids', async () => {
+    const operator = new ElectronBrowserOperator();
+    runtimeMock.executeJavaScript
+      .mockResolvedValueOnce('URL: https://example.com\nELEMENTS:\ne0. button [1,2,3,4] Search')
+      .mockResolvedValueOnce(1);
+
+    const result = await operator.screenshot();
+
+    expect(result.domText).toContain('e0. button');
+  });
+
   it('executes DOM-first click_element actions', async () => {
     const operator = new ElectronBrowserOperator();
     runtimeMock.executeJavaScript.mockResolvedValueOnce({
@@ -79,6 +92,18 @@ describe('ElectronBrowserOperator', () => {
       operator.execute(executeParams('click_element', { element_id: '3' })),
     ).resolves.toMatchObject({ message: 'Open result' });
     expect(runtimeMock.publishBrowserState).toHaveBeenCalled();
+  });
+
+  it('does not re-navigate when the browser is already on the requested page', async () => {
+    const operator = new ElectronBrowserOperator();
+    runtimeMock.webContents.getURL.mockReturnValue('https://www.youtube.com/');
+
+    const output = await operator.execute(
+      executeParams('navigate', { content: 'https://www.youtube.com/' }),
+    );
+
+    expect(output.message).toContain('Navigation is already complete');
+    expect(runtimeMock.navigate).not.toHaveBeenCalled();
   });
 
   it('returns internal recovery feedback for stale DOM click_element actions', async () => {

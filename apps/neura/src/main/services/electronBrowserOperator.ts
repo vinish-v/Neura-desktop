@@ -106,18 +106,29 @@ const elementLookupScript = (elementId: string) => `
     });
   if (byAttr) return byAttr;
   const numericIndex = Number.parseInt(normalizedElementId, 10);
-  if (Number.isFinite(numericIndex) && numericIndex > 0) {
+  if (Number.isFinite(numericIndex) && numericIndex >= 0) {
     const visibleElements = Array.from(document.querySelectorAll(selectors.join(',')))
       .filter(isVisible)
       .slice(0, 120);
-    const byIndex = visibleElements[numericIndex - 1];
+    const requestedZeroBased = /^e\\d+$/i.test(rawElementId.trim());
+    const byIndex = visibleElements[requestedZeroBased ? numericIndex : Math.max(0, numericIndex - 1)];
     if (byIndex) {
-      byIndex.setAttribute(attr, normalizedElementId);
+      byIndex.setAttribute(attr, 'e' + (requestedZeroBased ? numericIndex : Math.max(0, numericIndex - 1)));
       return byIndex;
     }
   }
   return null;
 `;
+
+const normalizeUrlForComparison = (raw: string) => {
+  try {
+    const url = new URL(raw.trim().match(/^[a-z]+:/i) ? raw.trim() : `https://${raw.trim()}`);
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return raw.trim().replace(/\/$/, '');
+  }
+};
 
 export class ElectronBrowserOperator extends Operator {
   static MANUAL = {
@@ -140,6 +151,9 @@ export class ElectronBrowserOperator extends Operator {
       `call_user()`,
     ],
   };
+
+  private repeatedNavigationTarget = '';
+  private repeatedNavigationCount = 0;
 
   constructor() {
     super();
@@ -182,8 +196,7 @@ export class ElectronBrowserOperator extends Operator {
 
     switch (actionType) {
       case 'navigate':
-        await embeddedBrowserRuntime.navigate(requireInput(actionInputs.content, 'content'));
-        break;
+        return await this.navigate(actionInputs);
       case 'navigate_back':
         embeddedBrowserRuntime.goBack();
         break;
@@ -278,7 +291,7 @@ export class ElectronBrowserOperator extends Operator {
             .slice(0, 120);
           const lines = ['URL: ' + location.href, 'TITLE: ' + document.title, 'ELEMENTS:'];
           elements.forEach((el, index) => {
-            const id = String(index + 1);
+            const id = 'e' + index;
             el.setAttribute(attr, id);
             const rect = el.getBoundingClientRect();
             const role = el.getAttribute('role') || el.tagName.toLowerCase();
@@ -295,6 +308,35 @@ export class ElectronBrowserOperator extends Operator {
       logger.warn('[ElectronBrowserOperator] DOM map capture failed', error);
       return `ELEMENTS:\nDOM map unavailable: ${scriptErrorMessage(error)}`;
     }
+  }
+
+  private async navigate(inputs: ActionInputs): Promise<ExecuteOutput> {
+    const target = requireInput(inputs.content, 'content');
+    const currentUrl = embeddedBrowserRuntime.webContents?.getURL() || '';
+    const normalizedTarget = normalizeUrlForComparison(target);
+    const normalizedCurrent = normalizeUrlForComparison(currentUrl);
+
+    if (normalizedTarget && normalizedTarget === normalizedCurrent) {
+      this.repeatedNavigationCount =
+        this.repeatedNavigationTarget === normalizedTarget
+          ? this.repeatedNavigationCount + 1
+          : 1;
+      this.repeatedNavigationTarget = normalizedTarget;
+      return {
+        message:
+          this.repeatedNavigationCount >= 2
+            ? 'The browser is already on that page. Do not navigate again; inspect the current page with the visible screenshot/DOM map, then click, type, extract_page, or finish with the answer.'
+            : 'Navigation is already complete. Continue from the current visible page instead of navigating again.',
+      };
+    }
+
+    this.repeatedNavigationTarget = normalizedTarget;
+    this.repeatedNavigationCount = 0;
+    await embeddedBrowserRuntime.navigate(target);
+    return {
+      action_inputs: inputs,
+      message: `Navigated to ${embeddedBrowserRuntime.webContents?.getURL() || target}`,
+    };
   }
 
   private async clickElement(inputs: ActionInputs): Promise<ExecuteOutput> {
