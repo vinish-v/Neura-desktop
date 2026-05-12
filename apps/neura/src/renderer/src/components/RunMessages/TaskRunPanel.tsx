@@ -17,6 +17,7 @@ import { useMemo, useState } from 'react';
 import { TaskState } from '@main/store/types';
 import { cn } from '@renderer/utils';
 import { api } from '@renderer/api';
+import { Markdown } from '@renderer/components/markdown';
 import { Button } from '@renderer/components/ui/button';
 
 const statusIcon = {
@@ -138,6 +139,19 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
         </span>
       </div>
 
+      {finalAnswer && (
+        <div className="mt-4 border-t border-white/10 pt-4">
+          <div className="mb-2 text-xs font-medium text-muted-foreground">
+            Final answer
+          </div>
+          <div className="max-h-[72vh] min-h-[140px] overflow-y-auto rounded-xl border border-emerald-400/20 bg-emerald-400/[0.04] px-4 py-3 text-sm leading-6 text-white/85">
+            <div className="break-words [&_li]:my-1 [&_ol]:pl-5 [&_p]:my-2 [&_pre]:overflow-x-auto [&_ul]:pl-5">
+              <Markdown>{finalAnswer}</Markdown>
+            </div>
+          </div>
+        </div>
+      )}
+
       {latestProgress.length > 0 && (
         <div className="mt-4 space-y-2">
           {latestProgress.map((item) => (
@@ -248,17 +262,6 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
                 </div>
               </div>
             ))}
-          </div>
-        </div>
-      )}
-
-      {finalAnswer && (
-        <div className="mt-3 border-t border-white/10 pt-3">
-          <div className="mb-2 text-xs font-medium text-muted-foreground">
-            Final answer
-          </div>
-          <div className="max-h-[50vh] min-h-[96px] overflow-y-auto whitespace-pre-wrap break-words rounded-xl border border-emerald-400/20 bg-emerald-400/[0.04] px-3 py-2 text-sm leading-6 text-white/85">
-            {finalAnswer}
           </div>
         </div>
       )}

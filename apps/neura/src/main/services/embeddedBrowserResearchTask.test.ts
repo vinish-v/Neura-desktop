@@ -11,9 +11,9 @@ import {
 describe('embeddedBrowserResearchTask routing', () => {
   it('routes current-info and research requests to the research runner', () => {
     expect(isEmbeddedResearchTask('find the latest TN news')).toBe(true);
-    expect(isEmbeddedResearchTask('give me current iPhone price in India')).toBe(
-      true,
-    );
+    expect(
+      isEmbeddedResearchTask('give me current iPhone price in India'),
+    ).toBe(true);
     expect(isEmbeddedResearchTask('compare the top 10 games this month')).toBe(
       true,
     );
@@ -40,6 +40,12 @@ describe('embeddedBrowserResearchTask routing', () => {
             'Breaking latest Tamil Nadu news today with updated political and local developments.',
         },
         {
+          title: 'Tamil Nadu topic index',
+          url: 'https://example-news.test/topic/tamil-nadu',
+          snippet:
+            'Latest Tamil Nadu news today category page with many links and related searches.',
+        },
+        {
           title: 'YouTube video result',
           url: 'https://www.youtube.com/watch?v=abc',
           snippet: 'latest Tamil Nadu news video',
@@ -58,6 +64,43 @@ describe('embeddedBrowserResearchTask routing', () => {
       'https://example-news.test/tamil-nadu/latest-news',
       'https://another-source.test/news/tn-live',
     ]);
+  });
+
+  it('dedupes sources by domain and prefers article-like pages over index pages', () => {
+    const ranked = rankSearchCandidates(
+      [
+        {
+          title: 'Tamil Nadu news category',
+          url: 'https://daily-source.test/topic/tamil-nadu',
+          snippet:
+            'Latest Tamil Nadu news today category page with related searches and topic links.',
+        },
+        {
+          title: 'Tamil Nadu chief minister signs first orders today',
+          url: 'https://daily-source.test/news/india/tamil-nadu-chief-minister-first-orders-2026-05-12',
+          snippet:
+            'Updated report on Tamil Nadu political developments, first executive orders, current context, and reactions today.',
+        },
+        {
+          title: 'Tamil Nadu weather and local updates',
+          url: 'https://regional-source.test/story/tamil-nadu-weather-local-updates',
+          snippet:
+            'Current local Tamil Nadu updates today from a regional newsroom with verified details.',
+        },
+      ],
+      'latest Tamil Nadu news today',
+    );
+
+    const rankedUrls = ranked.map((candidate) => candidate.url);
+    expect(rankedUrls).toContain(
+      'https://daily-source.test/news/india/tamil-nadu-chief-minister-first-orders-2026-05-12',
+    );
+    expect(rankedUrls).toContain(
+      'https://regional-source.test/story/tamil-nadu-weather-local-updates',
+    );
+    expect(rankedUrls).not.toContain(
+      'https://daily-source.test/topic/tamil-nadu',
+    );
   });
 
   it('expands current-info research queries without changing simple browser routing', () => {

@@ -99,6 +99,38 @@ const knownFolder = (instructions: string) => {
   return knownPath('Desktop');
 };
 
+const isWithinPath = (targetPath: string, basePath: string) => {
+  const relativePath = path.relative(basePath, targetPath);
+  return (
+    Boolean(relativePath) &&
+    !relativePath.startsWith('..') &&
+    !path.isAbsolute(relativePath)
+  );
+};
+
+const knownFolderLabel = (targetPath: string, instructions: string) => {
+  const folderPath = knownFolder(instructions);
+  const normalizedTarget = path.resolve(targetPath);
+  const normalizedFolder = path.resolve(folderPath);
+  if (
+    normalizedTarget !== normalizedFolder &&
+    !isWithinPath(normalizedTarget, normalizedFolder)
+  ) {
+    return '';
+  }
+
+  const folderName = path.basename(normalizedFolder);
+  const isOneDrive =
+    process.platform === 'win32' &&
+    folderName !== 'Downloads' &&
+    /[\\/]onedrive(?:[\\/]| - )/i.test(normalizedFolder);
+
+  if (isOneDrive) {
+    return `OneDrive ${folderName}`;
+  }
+  return folderName === 'Desktop' ? 'local Desktop' : folderName;
+};
+
 const extractQuotedValue = (instructions: string) => {
   const match = instructions.match(/["'`]([^"'`]+)["'`]/);
   return match?.[1]?.trim();
@@ -229,6 +261,6 @@ export async function runQuickLocalTask(
 
   return {
     handled: true,
-    message: `Created folder:\n\`${targetPath}\``,
+    message: `Created folder on ${knownFolderLabel(targetPath, trimmed) || 'requested location'}:\n\`${targetPath}\``,
   };
 }

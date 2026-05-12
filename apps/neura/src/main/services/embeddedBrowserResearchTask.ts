@@ -52,7 +52,10 @@ export const isEmbeddedResearchTask = (instructions: string) => {
   if (!normalized || /\byoutube\b/i.test(normalized)) {
     return false;
   }
-  if (SIMPLE_OPEN_PATTERN.test(normalized) && !RESEARCH_PATTERN.test(normalized)) {
+  if (
+    SIMPLE_OPEN_PATTERN.test(normalized) &&
+    !RESEARCH_PATTERN.test(normalized)
+  ) {
     return false;
   }
   return RESEARCH_PATTERN.test(normalized);
@@ -103,13 +106,19 @@ export const buildResearchSearchQueries = (instructions: string) => {
   };
 
   add(baseQuery);
-  if (/\b(latest|current|today|recent|news|headlines|live)\b/i.test(instructions)) {
+  if (
+    /\b(latest|current|today|recent|news|headlines|live)\b/i.test(instructions)
+  ) {
     add(`${baseQuery} latest news today`);
     add(`latest news ${baseQuery}`);
   } else if (/\b(price|prices|cost|stock)\b/i.test(instructions)) {
     add(`${baseQuery} current price`);
     add(`${baseQuery} official price`);
-  } else if (/\b(top\s+\d+|top|best|popular|trending|compare|comparison|review|reviews)\b/i.test(instructions)) {
+  } else if (
+    /\b(top\s+\d+|top|best|popular|trending|compare|comparison|review|reviews)\b/i.test(
+      instructions,
+    )
+  ) {
     add(`${baseQuery} latest ranking`);
     add(`${baseQuery} expert reviews`);
   } else {
@@ -124,6 +133,20 @@ const SOURCE_BLOCKED_HOST_PATTERN =
 
 const SEARCH_RESULT_NOISE_PATTERN =
   /\b(sign in|translate this page|cached|similar pages|people also ask|related searches|images|videos|maps|shopping)\b/i;
+
+const ARTICLE_PATH_HINT_PATTERN =
+  /\b(article|story|news|latest|live|update|updates|report|reports|explained|india|world|business|technology|sports|politics|elections?)\b|\/\d{4}[/-]\d{2}[/-]\d{2}\b/i;
+
+const SEARCH_OR_INDEX_PATH_PATTERN =
+  /\/(?:search|tag|tags|topic|topics|category|categories|archive|author|authors|video|videos|photo|photos|gallery|galleries)(?:\/|$)/i;
+
+const sourceDomainKey = (urlValue: string) => {
+  try {
+    return new URL(urlValue).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return '';
+  }
+};
 
 const isUsableSourceUrl = (urlValue: string) => {
   try {
@@ -147,15 +170,33 @@ const scoreSearchCandidate = (candidate: SearchCandidate, query: string) => {
     (score, token) => score + (haystack.includes(token) ? 2 : 0),
     0,
   );
-  const freshnessScore = /\b(latest|live|today|current|updated|breaking|news)\b/i.test(
-    haystack,
-  )
-    ? 5
-    : 0;
+  const freshnessScore =
+    /\b(latest|live|today|current|updated|breaking|news)\b/i.test(haystack)
+      ? 5
+      : 0;
   const titleScore = candidate.title.length >= 16 ? 3 : 0;
   const snippetScore = candidate.snippet.length >= 80 ? 2 : 0;
   const noisePenalty = SEARCH_RESULT_NOISE_PATTERN.test(haystack) ? 4 : 0;
-  return tokenScore + freshnessScore + titleScore + snippetScore - noisePenalty;
+  let articleScore = 0;
+  try {
+    const url = new URL(candidate.url);
+    const pathName = url.pathname.toLowerCase();
+    const pathDepth = pathName.split('/').filter(Boolean).length;
+    articleScore += pathDepth >= 2 ? 2 : 0;
+    articleScore += ARTICLE_PATH_HINT_PATTERN.test(pathName) ? 4 : 0;
+    articleScore -= SEARCH_OR_INDEX_PATH_PATTERN.test(pathName) ? 6 : 0;
+    articleScore -= url.searchParams.size > 2 ? 2 : 0;
+  } catch {
+    articleScore -= 4;
+  }
+  return (
+    tokenScore +
+    freshnessScore +
+    titleScore +
+    snippetScore +
+    articleScore -
+    noisePenalty
+  );
 };
 
 export const rankSearchCandidates = (
@@ -176,9 +217,9 @@ export const rankSearchCandidates = (
     .filter((candidate) => {
       const url = new URL(candidate.url);
       const normalizedUrl = `${url.origin}${url.pathname}`.replace(/\/$/, '');
-      const host = url.hostname.replace(/^www\./, '');
+      const host = sourceDomainKey(candidate.url);
       const hostCount = hostCounts.get(host) || 0;
-      if (seenUrls.has(normalizedUrl) || hostCount >= 2) {
+      if (seenUrls.has(normalizedUrl) || hostCount >= 1) {
         return false;
       }
       seenUrls.add(normalizedUrl);
@@ -312,18 +353,24 @@ const decodeHtmlEntities = (value: string) =>
     }
     if (lower.startsWith('#x')) {
       const codePoint = Number.parseInt(lower.slice(2), 16);
-      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : match;
+      return Number.isFinite(codePoint)
+        ? String.fromCodePoint(codePoint)
+        : match;
     }
     if (lower.startsWith('#')) {
       const codePoint = Number.parseInt(lower.slice(1), 10);
-      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : match;
+      return Number.isFinite(codePoint)
+        ? String.fromCodePoint(codePoint)
+        : match;
     }
     return match;
   });
 
 const firstMatch = (html: string, pattern: RegExp) => {
   const match = html.match(pattern);
-  return match?.[1] ? decodeHtmlEntities(match[1]).replace(/\s+/g, ' ').trim() : '';
+  return match?.[1]
+    ? decodeHtmlEntities(match[1]).replace(/\s+/g, ' ').trim()
+    : '';
 };
 
 const htmlToText = (html: string) => {
@@ -352,17 +399,31 @@ export const extractSourceFromHtml = (
 ): ResearchSource => {
   const url = new URL(urlValue);
   const title =
-    firstMatch(html, /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
-    firstMatch(html, /<meta[^>]+name=["']twitter:title["'][^>]+content=["']([^"']+)["']/i) ||
+    firstMatch(
+      html,
+      /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,
+    ) ||
+    firstMatch(
+      html,
+      /<meta[^>]+name=["']twitter:title["'][^>]+content=["']([^"']+)["']/i,
+    ) ||
     firstMatch(html, /<h1\b[^>]*>([\s\S]*?)<\/h1>/i).replace(/<[^>]+>/g, ' ') ||
     firstMatch(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i) ||
     url.hostname.replace(/^www\./, '');
   const sourceName =
-    firstMatch(html, /<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)["']/i) ||
-    url.hostname.replace(/^www\./, '');
+    firstMatch(
+      html,
+      /<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)["']/i,
+    ) || url.hostname.replace(/^www\./, '');
   const publishedAt =
-    firstMatch(html, /<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)["']/i) ||
-    firstMatch(html, /<meta[^>]+name=["']date["'][^>]+content=["']([^"']+)["']/i) ||
+    firstMatch(
+      html,
+      /<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)["']/i,
+    ) ||
+    firstMatch(
+      html,
+      /<meta[^>]+name=["']date["'][^>]+content=["']([^"']+)["']/i,
+    ) ||
     firstMatch(html, /<time[^>]+datetime=["']([^"']+)["']/i) ||
     firstMatch(html, /"datePublished"\s*:\s*"([^"]+)"/i) ||
     firstMatch(html, /"dateModified"\s*:\s*"([^"]+)"/i);
@@ -384,7 +445,8 @@ const fetchSourcePage = async (urlValue: string) => {
   try {
     const response = await fetch(urlValue, {
       headers: {
-        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'accept-language': 'en-US,en;q=0.9',
         'user-agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
@@ -411,6 +473,25 @@ const sourceHasUsefulText = (source: ResearchSource) =>
   /^https?:/i.test(source.url) &&
   source.text.replace(/\s+/g, ' ').trim().length >= 300 &&
   !captchaLikeText(source.text);
+
+const addResearchSource = (
+  sources: ResearchSource[],
+  seenDomains: Set<string>,
+  source: ResearchSource | null,
+) => {
+  if (!source || !sourceHasUsefulText(source)) {
+    return false;
+  }
+
+  const domain = sourceDomainKey(source.url);
+  if (!domain || seenDomains.has(domain)) {
+    return false;
+  }
+
+  seenDomains.add(domain);
+  sources.push(source);
+  return true;
+};
 
 const getResearchModelConfig = (settings: LocalStore) => {
   const baseURL = settings.plannerBaseUrl || settings.vlmBaseUrl;
@@ -463,8 +544,7 @@ const deterministicSynthesis = (
     '',
     'Sources:',
     ...sources.map(
-      (source) =>
-        `- ${source.sourceName || source.title}: ${source.url}`,
+      (source) => `- ${source.sourceName || source.title}: ${source.url}`,
     ),
   ].join('\n');
 };
@@ -515,7 +595,9 @@ export const ensureSourcesSection = (
   sources: ResearchSource[],
 ) => {
   const normalized = answer.trim();
-  const missingSources = sources.filter((source) => !normalized.includes(source.url));
+  const missingSources = sources.filter(
+    (source) => !normalized.includes(source.url),
+  );
   if (/^sources?:/im.test(normalized) && missingSources.length === 0) {
     return normalized;
   }
@@ -532,10 +614,7 @@ export const ensureSourcesSection = (
     .join('\n');
 };
 
-const validateResearchAnswer = (
-  answer: string,
-  sources: ResearchSource[],
-) => {
+const validateResearchAnswer = (answer: string, sources: ResearchSource[]) => {
   const normalized = answer.trim();
   if (sources.length < 2) {
     throw new Error(
@@ -544,7 +623,9 @@ const validateResearchAnswer = (
   }
   if (
     !normalized ||
-    /^Top visible results\b/i.test(normalized) ||
+    /\bTop visible results\b/i.test(normalized) ||
+    /\b(Translate this page|cached|similar pages)\b/i.test(normalized) ||
+    /(?:[^\s)]https?:\/\/|Read more\s+-\s+\d+\s+hours ago)/i.test(normalized) ||
     normalized.length < 220
   ) {
     throw new Error(
@@ -597,9 +678,7 @@ export async function runEmbeddedBrowserResearchTask({
     const searchEngines = [
       searchEngine || SearchEngineForSettings.GOOGLE,
       SearchEngineForSettings.BING,
-    ].filter(
-      (engine, index, engines) => engines.indexOf(engine) === index,
-    );
+    ].filter((engine, index, engines) => engines.indexOf(engine) === index);
     let candidates: SearchCandidate[] = [];
     let activeSearchUrl = '';
     for (const searchQuery of searchQueries) {
@@ -611,7 +690,8 @@ export async function runEmbeddedBrowserResearchTask({
         orchestrator.emit({
           type: 'step.completed',
           title: 'Search opened',
-          detail: embeddedBrowserRuntime.webContents?.getURL() || activeSearchUrl,
+          detail:
+            embeddedBrowserRuntime.webContents?.getURL() || activeSearchUrl,
           status: 'done',
         });
 
@@ -649,7 +729,8 @@ export async function runEmbeddedBrowserResearchTask({
     });
 
     const sources: ResearchSource[] = [];
-    for (const candidate of candidates.slice(0, 6)) {
+    const sourceDomains = new Set<string>();
+    for (const candidate of candidates.slice(0, 10)) {
       if (sources.length >= 4) {
         break;
       }
@@ -662,7 +743,8 @@ export async function runEmbeddedBrowserResearchTask({
         });
         await embeddedBrowserRuntime.navigate(candidate.url);
         await waitForPageReady();
-        let source: ResearchSource | null = await extractor.extractCurrentPage();
+        let source: ResearchSource | null =
+          await extractor.extractCurrentPage();
         if (!sourceHasUsefulText(source)) {
           source = await fetchSourcePage(candidate.url).catch((error) => {
             logger.warn(
@@ -672,16 +754,18 @@ export async function runEmbeddedBrowserResearchTask({
             return null;
           });
         }
-        if (!source || !sourceHasUsefulText(source)) {
+        if (!addResearchSource(sources, sourceDomains, source)) {
           continue;
         }
-        sources.push(source);
-        orchestrator.addSource(source.url);
-        orchestrator.addFact(`${source.title}: ${source.excerpt.slice(0, 240)}`);
+        const acceptedSource = sources[sources.length - 1];
+        orchestrator.addSource(acceptedSource.url);
+        orchestrator.addFact(
+          `${acceptedSource.title}: ${acceptedSource.excerpt.slice(0, 240)}`,
+        );
         orchestrator.emit({
           type: 'step.completed',
           title: 'Extracted source',
-          detail: `${source.title}\n${source.url}`,
+          detail: `${acceptedSource.title}\n${acceptedSource.url}`,
           status: 'done',
         });
       } catch (error) {
@@ -689,21 +773,25 @@ export async function runEmbeddedBrowserResearchTask({
           '[embeddedBrowserResearchTask] source extraction skipped',
           error,
         );
-        const source = await fetchSourcePage(candidate.url).catch((fetchError) => {
-          logger.warn(
-            '[embeddedBrowserResearchTask] source fetch after navigation failure skipped',
-            fetchError,
+        const source = await fetchSourcePage(candidate.url).catch(
+          (fetchError) => {
+            logger.warn(
+              '[embeddedBrowserResearchTask] source fetch after navigation failure skipped',
+              fetchError,
+            );
+            return null;
+          },
+        );
+        if (addResearchSource(sources, sourceDomains, source)) {
+          const acceptedSource = sources[sources.length - 1];
+          orchestrator.addSource(acceptedSource.url);
+          orchestrator.addFact(
+            `${acceptedSource.title}: ${acceptedSource.excerpt.slice(0, 240)}`,
           );
-          return null;
-        });
-        if (source && sourceHasUsefulText(source)) {
-          sources.push(source);
-          orchestrator.addSource(source.url);
-          orchestrator.addFact(`${source.title}: ${source.excerpt.slice(0, 240)}`);
           orchestrator.emit({
             type: 'step.completed',
             title: 'Fetched source',
-            detail: `${source.title}\n${source.url}`,
+            detail: `${acceptedSource.title}\n${acceptedSource.url}`,
             status: 'done',
           });
         }

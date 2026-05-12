@@ -196,10 +196,7 @@ const terminalNativeTools = new Set([
   'list_processes',
 ]);
 
-const syncRuntimeForNativeTool = (
-  actionType: string,
-  inputs: ActionInputs,
-) => {
+const syncRuntimeForNativeTool = (actionType: string, inputs: ActionInputs) => {
   if (!terminalNativeTools.has(actionType)) {
     return;
   }
@@ -270,7 +267,9 @@ const recordNativeToolOutput = (
   if (isDesktopLaunchHelper(actionType, inputs)) {
     ComputerRuntimeController.update({
       status: failed ? 'failed' : 'running',
-      activity: failed ? 'Could not open local app' : 'Local app launch requested',
+      activity: failed
+        ? 'Could not open local app'
+        : 'Local app launch requested',
     });
     return;
   }
@@ -379,6 +378,48 @@ const getKnownFolderPath = (folderName: KnownFolderName) => {
   return path.join(os.homedir(), folderName);
 };
 
+const isWithinPath = (targetPath: string, basePath: string) => {
+  const relativePath = path.relative(basePath, targetPath);
+  return (
+    Boolean(relativePath) &&
+    !relativePath.startsWith('..') &&
+    !path.isAbsolute(relativePath)
+  );
+};
+
+const knownFolderLabelForPath = (targetPath: string) => {
+  const normalizedTarget = path.resolve(targetPath);
+
+  for (const folderName of ['Desktop', 'Documents', 'Downloads'] as const) {
+    const folderPath = path.resolve(getKnownFolderPath(folderName));
+    if (
+      normalizedTarget === folderPath ||
+      isWithinPath(normalizedTarget, folderPath)
+    ) {
+      const oneDriveRoot = oneDriveRoots().find((root) => {
+        const resolvedRoot = path.resolve(root);
+        return (
+          normalizedTarget === resolvedRoot ||
+          isWithinPath(normalizedTarget, resolvedRoot)
+        );
+      });
+      if (oneDriveRoot && folderName !== 'Downloads') {
+        return `OneDrive ${folderName}`;
+      }
+      return folderName === 'Desktop' ? 'local Desktop' : folderName;
+    }
+  }
+
+  return '';
+};
+
+const describeCreatedPath = (kind: 'file' | 'folder', targetPath: string) => {
+  const label = knownFolderLabelForPath(targetPath);
+  return label
+    ? `Created ${kind} on ${label}: ${targetPath}`
+    : `Created ${kind}: ${targetPath}`;
+};
+
 const expandHomePath = (value: string) => {
   if (value === '~') {
     return os.homedir();
@@ -411,7 +452,10 @@ const resolveLocalPath = (rawPath: string | undefined) => {
 
 const cleanInferredFolderName = (value: string) =>
   value
-    .replace(/\b(on|in|at)\s+(?:my\s+)?(?:desktop|downloads?|documents?)\b.*$/i, '')
+    .replace(
+      /\b(on|in|at)\s+(?:my\s+)?(?:desktop|downloads?|documents?)\b.*$/i,
+      '',
+    )
     .replace(/^(?:called|named|name|names|as)\s+/i, '')
     .replace(/[<>:"/\\|?*]/g, '')
     .trim()
@@ -483,7 +527,8 @@ const resolveCreateFolderPath = (inputs: ActionInputs) => {
     return resolveLocalPath(undefined);
   }
 
-  const basePath = inferKnownFolderBase(context) || getKnownFolderPath('Desktop');
+  const basePath =
+    inferKnownFolderBase(context) || getKnownFolderPath('Desktop');
   return path.resolve(basePath, folderName);
 };
 
@@ -680,7 +725,7 @@ async function writeFile(inputs: ActionInputs) {
     filePath: targetPath,
     mimeType: mimeTypeForPath(targetPath),
   });
-  return `Created file: ${targetPath}`;
+  return describeCreatedPath('file', targetPath);
 }
 
 async function editFile(inputs: ActionInputs) {
@@ -732,7 +777,7 @@ async function createFolder(inputs: ActionInputs) {
     throw new Error(`Blocked suspicious folder path: ${targetPath}`);
   }
   await fs.mkdir(targetPath, { recursive: true });
-  return `Created folder: ${targetPath}`;
+  return describeCreatedPath('folder', targetPath);
 }
 
 async function copyFile(inputs: ActionInputs) {

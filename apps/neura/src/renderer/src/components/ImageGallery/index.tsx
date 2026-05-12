@@ -123,10 +123,7 @@ const INTERNAL_PROGRESS_PATTERN =
   /previous response was not executable|authorized benign UI automation|Action Space|previous action had invalid coordinates|browser state has not changed after repeated actions|previous browser DOM action could not be executed|continue autonomously: take a fresh screenshot\/DOM map|do not finish with this recovery message|element id was stale|take a fresh screenshot\/DOM map|Could not (?:type into|click) that DOM element|Refresh the DOM map or use coordinate click\/type|reply with finished\(content=|visible current DOM element|regex|pattern|validator|validated \d+ local computer actor|command output contains|planner checklist|planner step|predictionParsed/i;
 
 const cleanProgressInput = (value?: string) =>
-  (value || '')
-    .replace(/\\n/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  (value || '').replace(/\\n/g, ' ').replace(/\s+/g, ' ').trim();
 
 const isInternalProgressText = (...parts: Array<string | undefined>) =>
   INTERNAL_PROGRESS_PATTERN.test(parts.filter(Boolean).join(' '));
@@ -372,8 +369,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
     [messages, taskState?.finalAnswer],
   );
   const shouldShowFinalAnswer =
-    Boolean(finalAnswer) &&
-    (taskState?.status === 'completed' || isFinished);
+    Boolean(finalAnswer) && (taskState?.status === 'completed' || isFinished);
   const actionProgressItems = allActions
     .filter(
       (action) =>
@@ -388,8 +384,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
   const compactActionProgressItems = dedupeConsecutive(
     actionProgressItems,
     (action) => `${action.type}:${action.label}:${action.input}`,
-  )
-    .slice(-5);
+  ).slice(-5);
   const agentProgressItems = dedupeConsecutive(
     (taskState?.progressItems || [])
       .filter((item) => !isInternalProgressText(item.title, item.detail))
@@ -573,7 +568,9 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
     await api.computerTakeoverInput({ type: 'right_click', ...point });
   };
 
-  const forwardFrameWheel = async (event: React.WheelEvent<HTMLImageElement>) => {
+  const forwardFrameWheel = async (
+    event: React.WheelEvent<HTMLImageElement>,
+  ) => {
     const point = getFramePoint(event);
     if (!point) {
       return;
@@ -703,13 +700,9 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
               )}
             </span>
             <span>Neura is using {mode}</span>
+            {activityText ? <span>|</span> : null}
             {activityText ? (
-              <span>|</span>
-            ) : null}
-            {activityText ? (
-              <span className="truncate">
-                {activityText}
-              </span>
+              <span className="truncate">{activityText}</span>
             ) : null}
           </div>
         </div>
@@ -814,7 +807,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
         ) : null}
 
         {shouldShowFinalAnswer ? (
-          <div className="mt-4 max-h-[52vh] min-h-[140px] overflow-y-auto rounded-lg border border-emerald-400/20 bg-emerald-400/[0.045] p-4">
+          <div className="mt-4 max-h-[72vh] min-h-[180px] overflow-y-auto rounded-lg border border-emerald-400/20 bg-emerald-400/[0.045] p-4">
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-emerald-100">
               <Check className="h-4 w-4 text-emerald-400" />
               Final answer
@@ -825,7 +818,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
           </div>
         ) : null}
 
-        <div className="mt-4 max-h-[28vh] overflow-y-auto rounded-lg border border-white/10 bg-[#080808] p-4">
+        <div className="mt-4 max-h-[22vh] overflow-y-auto rounded-lg border border-white/10 bg-[#080808] p-4">
           <div className="mb-3 flex items-center justify-between">
             <div className="font-semibold">Task progress</div>
             <div className="flex items-center gap-1 text-xs text-muted-foreground">

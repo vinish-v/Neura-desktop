@@ -170,7 +170,10 @@ const quotedValue = (value: string) =>
 
 const cleanFolderName = (value: string) =>
   value
-    .replace(/\b(on|in|at)\s+(?:my\s+)?(?:desktop|downloads?|documents?)\b.*$/i, '')
+    .replace(
+      /\b(on|in|at)\s+(?:my\s+)?(?:desktop|downloads?|documents?)\b.*$/i,
+      '',
+    )
     .replace(/^(?:called|named|name|names|as)\s+/i, '')
     .replace(/[<>:"/\\|?*]/g, '')
     .trim()
@@ -251,7 +254,10 @@ const buildLocalCompletionAnswer = ({
 
   if (artifacts.length) {
     const createdFiles = artifacts
-      .map((artifact) => `Created file: ${artifact.path}`)
+      .map(
+        (artifact) =>
+          `Created file: ${artifact.title}\nLocation: ${artifact.path}`,
+      )
       .join('\n');
     return `${createdFiles}\nVerification: file was created successfully.`;
   }
@@ -341,8 +347,7 @@ const validateVisualMessagingEvidence = (
     );
     const messageTypeIndex = actionEvidence.findIndex(
       (item) =>
-        /^type:/i.test(item) &&
-        item.toLowerCase().includes(normalizedMessage),
+        /^type:/i.test(item) && item.toLowerCase().includes(normalizedMessage),
     );
     if (messageTypeIndex >= 0 && recipientTypeIndex < 0) {
       throw new Error(
