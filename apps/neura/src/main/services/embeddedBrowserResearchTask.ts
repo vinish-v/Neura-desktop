@@ -89,6 +89,36 @@ const normalizeResearchQuery = (instructions: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+export const buildResearchSearchQueries = (instructions: string) => {
+  const baseQuery = normalizeResearchQuery(instructions) || instructions.trim();
+  const queries: string[] = [];
+  const add = (query: string) => {
+    const normalized = query.replace(/\s+/g, ' ').trim();
+    if (
+      normalized &&
+      !queries.some((item) => item.toLowerCase() === normalized.toLowerCase())
+    ) {
+      queries.push(normalized);
+    }
+  };
+
+  add(baseQuery);
+  if (/\b(latest|current|today|recent|news|headlines|live)\b/i.test(instructions)) {
+    add(`${baseQuery} latest news today`);
+    add(`latest news ${baseQuery}`);
+  } else if (/\b(price|prices|cost|stock)\b/i.test(instructions)) {
+    add(`${baseQuery} current price`);
+    add(`${baseQuery} official price`);
+  } else if (/\b(top\s+\d+|top|best|popular|trending|compare|comparison|review|reviews)\b/i.test(instructions)) {
+    add(`${baseQuery} latest ranking`);
+    add(`${baseQuery} expert reviews`);
+  } else {
+    add(`${baseQuery} reliable sources`);
+  }
+
+  return queries.slice(0, 3);
+};
+
 const SOURCE_BLOCKED_HOST_PATTERN =
   /(^|\.)((google|bing|baidu|youtube|facebook|instagram|twitter|x|reddit|quora|pinterest|linkedin|tiktok)\.com|accounts\.google|webcache\.google|translate\.google|support\.google|policies\.google)/i;
 
@@ -266,6 +296,116 @@ export class EmbeddedBrowserSourceExtractor implements SourceExtractor {
   }
 }
 
+const decodeHtmlEntities = (value: string) =>
+  value.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity) => {
+    const named: Record<string, string> = {
+      amp: '&',
+      apos: "'",
+      gt: '>',
+      lt: '<',
+      nbsp: ' ',
+      quot: '"',
+    };
+    const lower = String(entity).toLowerCase();
+    if (lower in named) {
+      return named[lower];
+    }
+    if (lower.startsWith('#x')) {
+      const codePoint = Number.parseInt(lower.slice(2), 16);
+      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : match;
+    }
+    if (lower.startsWith('#')) {
+      const codePoint = Number.parseInt(lower.slice(1), 10);
+      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : match;
+    }
+    return match;
+  });
+
+const firstMatch = (html: string, pattern: RegExp) => {
+  const match = html.match(pattern);
+  return match?.[1] ? decodeHtmlEntities(match[1]).replace(/\s+/g, ' ').trim() : '';
+};
+
+const htmlToText = (html: string) => {
+  const body =
+    html.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1] ||
+    html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] ||
+    html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] ||
+    html;
+  return decodeHtmlEntities(
+    body
+      .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, ' ')
+      .replace(/<svg\b[\s\S]*?<\/svg>/gi, ' ')
+      .replace(/<\/(p|div|li|h[1-6]|section|article|br)>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n\s+/g, '\n')
+      .replace(/\n{3,}/g, '\n\n'),
+  ).trim();
+};
+
+export const extractSourceFromHtml = (
+  html: string,
+  urlValue: string,
+): ResearchSource => {
+  const url = new URL(urlValue);
+  const title =
+    firstMatch(html, /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
+    firstMatch(html, /<meta[^>]+name=["']twitter:title["'][^>]+content=["']([^"']+)["']/i) ||
+    firstMatch(html, /<h1\b[^>]*>([\s\S]*?)<\/h1>/i).replace(/<[^>]+>/g, ' ') ||
+    firstMatch(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i) ||
+    url.hostname.replace(/^www\./, '');
+  const sourceName =
+    firstMatch(html, /<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)["']/i) ||
+    url.hostname.replace(/^www\./, '');
+  const publishedAt =
+    firstMatch(html, /<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)["']/i) ||
+    firstMatch(html, /<meta[^>]+name=["']date["'][^>]+content=["']([^"']+)["']/i) ||
+    firstMatch(html, /<time[^>]+datetime=["']([^"']+)["']/i) ||
+    firstMatch(html, /"datePublished"\s*:\s*"([^"]+)"/i) ||
+    firstMatch(html, /"dateModified"\s*:\s*"([^"]+)"/i);
+  const text = htmlToText(html);
+
+  return {
+    title,
+    url: urlValue,
+    sourceName,
+    publishedAt,
+    excerpt: text.slice(0, 700),
+    text: text.slice(0, 14000),
+  };
+};
+
+const fetchSourcePage = async (urlValue: string) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const response = await fetch(urlValue, {
+      headers: {
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'accept-language': 'en-US,en;q=0.9',
+        'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+      },
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    const contentType = response.headers.get('content-type') || '';
+    if (!response.ok || (contentType && !/html|text/i.test(contentType))) {
+      return null;
+    }
+    const html = await response.text();
+    if (!html.trim()) {
+      return null;
+    }
+    return extractSourceFromHtml(html, response.url || urlValue);
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
 const sourceHasUsefulText = (source: ResearchSource) =>
   source.title.length >= 4 &&
   /^https?:/i.test(source.url) &&
@@ -370,6 +510,28 @@ const synthesizeSources = async (
   return content || deterministicSynthesis(instructions, sources);
 };
 
+export const ensureSourcesSection = (
+  answer: string,
+  sources: ResearchSource[],
+) => {
+  const normalized = answer.trim();
+  const missingSources = sources.filter((source) => !normalized.includes(source.url));
+  if (/^sources?:/im.test(normalized) && missingSources.length === 0) {
+    return normalized;
+  }
+
+  return [
+    normalized,
+    '',
+    'Sources:',
+    ...missingSources.map(
+      (source) => `- ${source.sourceName || source.title}: ${source.url}`,
+    ),
+  ]
+    .filter((line, index, lines) => line || lines[index - 1])
+    .join('\n');
+};
+
 const validateResearchAnswer = (
   answer: string,
   sources: ResearchSource[],
@@ -399,6 +561,7 @@ export async function runEmbeddedBrowserResearchTask({
   getState,
 }: RunnerArgs) {
   const query = normalizeResearchQuery(instructions) || instructions.trim();
+  const searchQueries = buildResearchSearchQueries(instructions);
   const orchestrator = new AgentOrchestrator({ getState, setState });
   const extractor = new EmbeddedBrowserSourceExtractor();
 
@@ -428,7 +591,7 @@ export async function runEmbeddedBrowserResearchTask({
     orchestrator.emit({
       type: 'step.started',
       title: 'Searching',
-      detail: query,
+      detail: searchQueries.join('\n'),
       status: 'in_progress',
     });
     const searchEngines = [
@@ -439,27 +602,35 @@ export async function runEmbeddedBrowserResearchTask({
     );
     let candidates: SearchCandidate[] = [];
     let activeSearchUrl = '';
-    for (const engine of searchEngines) {
-      activeSearchUrl = buildSearchUrl(query, engine);
-      await embeddedBrowserRuntime.navigate(activeSearchUrl);
-      await waitForPageReady();
-      orchestrator.addSource(activeSearchUrl);
-      orchestrator.emit({
-        type: 'step.completed',
-        title: 'Search opened',
-        detail: embeddedBrowserRuntime.webContents?.getURL() || activeSearchUrl,
-        status: 'done',
-      });
+    for (const searchQuery of searchQueries) {
+      for (const engine of searchEngines) {
+        activeSearchUrl = buildSearchUrl(searchQuery, engine);
+        await embeddedBrowserRuntime.navigate(activeSearchUrl);
+        await waitForPageReady();
+        orchestrator.addSource(activeSearchUrl);
+        orchestrator.emit({
+          type: 'step.completed',
+          title: 'Search opened',
+          detail: embeddedBrowserRuntime.webContents?.getURL() || activeSearchUrl,
+          status: 'done',
+        });
 
-      const visibleText = await embeddedBrowserRuntime
-        .executeJavaScript<string>("document.body?.innerText || ''")
-        .catch(() => '');
-      if (captchaLikeText(visibleText)) {
-        continue;
+        const visibleText = await embeddedBrowserRuntime
+          .executeJavaScript<string>("document.body?.innerText || ''")
+          .catch(() => '');
+        if (captchaLikeText(visibleText)) {
+          continue;
+        }
+
+        candidates = rankSearchCandidates(
+          [...candidates, ...(await extractSearchCandidates())],
+          `${query} ${searchQuery}`,
+        );
+        if (candidates.length >= 4) {
+          break;
+        }
       }
-
-      candidates = rankSearchCandidates(await extractSearchCandidates(), query);
-      if (candidates.length >= 2) {
+      if (candidates.length >= 4) {
         break;
       }
     }
@@ -491,8 +662,17 @@ export async function runEmbeddedBrowserResearchTask({
         });
         await embeddedBrowserRuntime.navigate(candidate.url);
         await waitForPageReady();
-        const source = await extractor.extractCurrentPage();
+        let source: ResearchSource | null = await extractor.extractCurrentPage();
         if (!sourceHasUsefulText(source)) {
+          source = await fetchSourcePage(candidate.url).catch((error) => {
+            logger.warn(
+              '[embeddedBrowserResearchTask] source fetch fallback skipped',
+              error,
+            );
+            return null;
+          });
+        }
+        if (!source || !sourceHasUsefulText(source)) {
           continue;
         }
         sources.push(source);
@@ -509,6 +689,24 @@ export async function runEmbeddedBrowserResearchTask({
           '[embeddedBrowserResearchTask] source extraction skipped',
           error,
         );
+        const source = await fetchSourcePage(candidate.url).catch((fetchError) => {
+          logger.warn(
+            '[embeddedBrowserResearchTask] source fetch after navigation failure skipped',
+            fetchError,
+          );
+          return null;
+        });
+        if (source && sourceHasUsefulText(source)) {
+          sources.push(source);
+          orchestrator.addSource(source.url);
+          orchestrator.addFact(`${source.title}: ${source.excerpt.slice(0, 240)}`);
+          orchestrator.emit({
+            type: 'step.completed',
+            title: 'Fetched source',
+            detail: `${source.title}\n${source.url}`,
+            status: 'done',
+          });
+        }
       }
     }
 
@@ -524,7 +722,10 @@ export async function runEmbeddedBrowserResearchTask({
       detail: `Using ${sources.length} sources.`,
       status: 'in_progress',
     });
-    const finalAnswer = await synthesizeSources(instructions, settings, sources);
+    const finalAnswer = ensureSourcesSection(
+      await synthesizeSources(instructions, settings, sources),
+      sources,
+    );
     validateResearchAnswer(finalAnswer, sources);
 
     orchestrator.setCompletionProof({
