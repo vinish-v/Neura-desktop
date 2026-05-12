@@ -1,0 +1,20 @@
+{
+  "name": "build-website",
+  "description": "Build, preview, and iterate production-quality websites or app screens inside Neura Canvas.",
+  "instructions": "Clarify the target audience, primary user action, visual tone, and required sections when they are missing. Create or update files inside the active Neura Canvas project under ~/Neura-Projects. Prefer clean React/Vite or standalone HTML only when it is the fastest valid deliverable for the request. Use the Neura dark design system unless the user specifies another brand. Produce real code, no placeholder-only sections, no fake data presented as real. Verify the preview path or explain what could not be verified. Return the project path, changed files, and the next useful iteration options.",
+  "tools": ["filesystem", "commands", "browser", "mcp_autonomous"],
+  "chains": ["code-generation", "website-audit"],
+  "examples": [
+    {
+      "input": "Build a modern SaaS landing page for AI tools",
+      "output": "A Canvas project with editable code, live-previewable UI, and a short verification summary."
+    },
+    {
+      "input": "Make the hero section darker and more serious",
+      "output": "An updated Canvas file set with the requested visual iteration applied."
+    }
+  ],
+  "tags": ["web-development", "canvas", "ui", "code"],
+  "version": "1.0.0",
+  "author": "Neura"
+}

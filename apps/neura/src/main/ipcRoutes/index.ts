@@ -14,6 +14,7 @@ import { mcpRoute } from './mcp';
 import { skillsRoute } from './skills';
 import { tasksRoute } from './tasks';
 import { connectorsRoute } from './connectors';
+import { canvasRoute } from './canvas';
 
 const t = initIpc.create();
 
@@ -29,6 +30,7 @@ export const ipcRoutes = t.router({
   ...skillsRoute,
   ...tasksRoute,
   ...connectorsRoute,
+  ...canvasRoute,
 });
 export type Router = typeof ipcRoutes;
 

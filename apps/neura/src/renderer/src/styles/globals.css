@@ -8,61 +8,61 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: hsl(0 0% 0%);
-  --foreground: hsl(0 0% 96%);
-  --card: hsl(0 0% 5%);
-  --card-foreground: hsl(0 0% 96%);
-  --popover: hsl(0 0% 5%);
-  --popover-foreground: hsl(0 0% 96%);
-  --primary: hsl(0 0% 96%);
-  --primary-foreground: hsl(0 0% 0%);
-  --secondary: hsl(0 0% 8%);
+  --background: hsl(0 0% 4%);
+  --foreground: hsl(0 0% 100%);
+  --card: hsl(0 0% 10%);
+  --card-foreground: hsl(0 0% 100%);
+  --popover: hsl(0 0% 10%);
+  --popover-foreground: hsl(0 0% 100%);
+  --primary: hsl(217 91% 60%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(0 0% 9%);
   --secondary-foreground: hsl(0 0% 92%);
-  --muted: hsl(0 0% 10%);
-  --muted-foreground: hsl(0 0% 60%);
-  --accent: hsl(0 0% 14%);
-  --accent-foreground: hsl(0 0% 96%);
-  --destructive: hsl(0 72% 55%);
+  --muted: hsl(0 0% 12%);
+  --muted-foreground: hsl(0 0% 64%);
+  --accent: hsl(217 91% 60%);
+  --accent-foreground: hsl(0 0% 100%);
+  --destructive: hsl(0 84% 60%);
   --destructive-foreground: hsl(0 0% 96%);
-  --border: hsl(0 0% 18%);
+  --border: hsl(0 0% 16%);
   --input: hsl(0 0% 12%);
-  --ring: hsl(0 0% 70%);
+  --ring: hsl(217 91% 66%);
   --chart-1: hsl(174 84% 62%);
   --chart-2: hsl(212 92% 62%);
   --chart-3: hsl(321 78% 66%);
   --chart-4: hsl(45 92% 62%);
   --chart-5: hsl(145 68% 58%);
-  --radius: 0.625rem;
-  --sidebar: hsl(0 0% 3%);
+  --radius: 0.5rem;
+  --sidebar: hsl(0 0% 4%);
   --sidebar-foreground: hsl(0 0% 96%);
   --sidebar-primary: hsl(0 0% 96%);
   --sidebar-primary-foreground: hsl(0 0% 0%);
-  --sidebar-accent: hsl(0 0% 8%);
+  --sidebar-accent: hsl(0 0% 10%);
   --sidebar-accent-foreground: hsl(0 0% 96%);
   --sidebar-border: hsl(0 0% 14%);
   --sidebar-ring: hsl(0 0% 70%);
 }
 
 .dark {
-  --background: hsl(0 0% 0%);
-  --foreground: hsl(0 0% 96%);
-  --card: hsl(0 0% 5%);
+  --background: hsl(0 0% 4%);
+  --foreground: hsl(0 0% 100%);
+  --card: hsl(0 0% 10%);
   --card-foreground: hsl(0 0% 96%);
   --popover: hsl(0 0% 5%);
   --popover-foreground: hsl(0 0% 96%);
-  --primary: hsl(0 0% 96%);
-  --primary-foreground: hsl(0 0% 0%);
+  --primary: hsl(217 91% 60%);
+  --primary-foreground: hsl(0 0% 100%);
   --secondary: hsl(0 0% 8%);
   --secondary-foreground: hsl(0 0% 92%);
   --muted: hsl(0 0% 10%);
   --muted-foreground: hsl(0 0% 60%);
-  --accent: hsl(0 0% 14%);
+  --accent: hsl(217 91% 60%);
   --accent-foreground: hsl(0 0% 96%);
   --destructive: hsl(0 72% 55%);
   --destructive-foreground: hsl(0 0% 96%);
   --border: hsl(0 0% 18%);
   --input: hsl(0 0% 12%);
-  --ring: hsl(0 0% 70%);
+  --ring: hsl(217 91% 66%);
   --chart-1: hsl(174 84% 62%);
   --chart-2: hsl(212 92% 62%);
   --chart-3: hsl(321 78% 66%);
@@ -127,6 +127,7 @@
     font-family:
       Inter,
       Geist,
+      'Geist Sans',
       Outfit,
       ui-sans-serif,
       system-ui,
@@ -153,19 +154,19 @@ body {
 }
 
 .neura-shell {
-  background: #000 !important;
+  background: #0a0a0a !important;
 }
 
 .neura-glass {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #0b0b0b;
+  border: 1px solid #2a2a2a;
+  background: #171717;
   box-shadow: none;
   backdrop-filter: none;
 }
 
 .neura-surface {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #050505;
+  border: 1px solid #2a2a2a;
+  background: #1a1a1a;
   box-shadow: none;
 }
 
@@ -175,4 +176,28 @@ body {
 
 .neura-agent-pulse {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+
+.neura-panel {
+  border: 1px solid #2a2a2a;
+  background: #171717;
+}
+
+.neura-panel-hover {
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    transform 160ms ease;
+}
+
+.neura-panel-hover:hover {
+  border-color: rgba(96, 165, 250, 0.45);
+  background: #1a1a1a;
+}
+
+code,
+pre,
+textarea.neura-code {
+  font-family:
+    'Geist Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
 }

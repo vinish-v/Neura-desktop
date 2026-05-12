@@ -4,7 +4,14 @@
  */
 import { useCallback, useState, type ComponentProps } from 'react';
 import { useNavigate, useLocation } from 'react-router';
-import { Activity, BookOpen, Cable, PencilLine } from 'lucide-react';
+import {
+  BookOpen,
+  Cable,
+  FolderClock,
+  LayoutDashboard,
+  PanelsTopLeft,
+  PencilLine,
+} from 'lucide-react';
 import { FolderKanban } from 'lucide-react';
 
 import {
@@ -48,6 +55,7 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
     | 'skills'
     | 'dashboard'
     | 'connectors'
+    | 'canvas'
     | { type: 'session'; id: string }
     | null
   >(null);
@@ -141,6 +149,19 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
     }
   }, [needsConfirm, goConnectors]);
 
+  const goCanvas = useCallback(async () => {
+    await navigate('/canvas');
+  }, [navigate]);
+
+  const handleCanvasClick = useCallback(() => {
+    if (needsConfirm) {
+      setPendingAction('canvas');
+      setNavDialogOpen(true);
+    } else {
+      goCanvas();
+    }
+  }, [needsConfirm, goCanvas]);
+
   const handleSessionClick = useCallback(
     (sessionId: string) => {
       if (needsConfirm) {
@@ -167,6 +188,8 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
       await goDashboard();
     } else if (pendingAction === 'connectors') {
       await goConnectors();
+    } else if (pendingAction === 'canvas') {
+      await goCanvas();
     } else if (pendingAction?.type === 'session') {
       await onSessionClick(pendingAction.id);
     }
@@ -193,7 +216,7 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
     <>
       <Sidebar
         collapsible="icon"
-        className="select-none border-r border-white/10 bg-[#050505]"
+        className="select-none border-r border-[#2a2a2a] bg-[#0a0a0a]"
         {...props}
       >
         <DragArea></DragArea>
@@ -201,39 +224,53 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
           <NeuraHeader showTrigger={location.pathname === '/'} />
           <SidebarMenu className="items-center">
             <SidebarMenuButton
-              className="rounded-2xl font-medium text-white/90 hover:bg-white/8 hover:text-white"
+              className="rounded-lg font-medium text-white/85 hover:bg-white/8 hover:text-white"
+              onClick={goHome}
+            >
+              <LayoutDashboard />
+              Dashboard
+            </SidebarMenuButton>
+            <SidebarMenuButton
+              className="rounded-lg border border-blue-400/20 bg-blue-500/10 font-medium text-blue-100 hover:bg-blue-500/15 hover:text-white"
               onClick={handleHomeClick}
             >
               <PencilLine />
               New task
             </SidebarMenuButton>
             <SidebarMenuButton
-              className="rounded-2xl font-medium text-white/90 hover:bg-white/8 hover:text-white"
-              onClick={handleProjectsClick}
+              className="rounded-lg font-medium text-white/85 hover:bg-white/8 hover:text-white"
+              onClick={handleDashboardClick}
             >
-              <FolderKanban />
-              Projects
+              <FolderClock />
+              Active Tasks
             </SidebarMenuButton>
             <SidebarMenuButton
-              className="rounded-2xl font-medium text-white/90 hover:bg-white/8 hover:text-white"
+              className="rounded-lg font-medium text-white/85 hover:bg-white/8 hover:text-white"
               onClick={handleSkillsClick}
             >
               <BookOpen />
               Skills
             </SidebarMenuButton>
             <SidebarMenuButton
-              className="rounded-2xl font-medium text-white/90 hover:bg-white/8 hover:text-white"
-              onClick={handleDashboardClick}
-            >
-              <Activity />
-              Dashboard
-            </SidebarMenuButton>
-            <SidebarMenuButton
-              className="rounded-2xl font-medium text-white/90 hover:bg-white/8 hover:text-white"
+              className="rounded-lg font-medium text-white/85 hover:bg-white/8 hover:text-white"
               onClick={handleConnectorsClick}
             >
               <Cable />
               Connectors
+            </SidebarMenuButton>
+            <SidebarMenuButton
+              className="rounded-lg font-medium text-white/85 hover:bg-white/8 hover:text-white"
+              onClick={handleProjectsClick}
+            >
+              <FolderKanban />
+              Projects
+            </SidebarMenuButton>
+            <SidebarMenuButton
+              className="rounded-lg font-medium text-white/85 hover:bg-white/8 hover:text-white"
+              onClick={handleCanvasClick}
+            >
+              <PanelsTopLeft />
+              Canvas
             </SidebarMenuButton>
           </SidebarMenu>
         </SidebarHeader>

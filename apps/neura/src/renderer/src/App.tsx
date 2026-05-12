@@ -16,6 +16,7 @@ const Projects = lazy(() => import('./pages/projects'));
 const Skills = lazy(() => import('./pages/skills'));
 const Dashboard = lazy(() => import('./pages/dashboard'));
 const Connectors = lazy(() => import('./pages/connectors'));
+const Canvas = lazy(() => import('./pages/canvas'));
 
 export default function App() {
   return (
@@ -35,6 +36,7 @@ export default function App() {
             <Route path="/skills" element={<Skills />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/connectors" element={<Connectors />} />
+            <Route path="/canvas" element={<Canvas />} />
           </Route>
         </Routes>
         <Toaster
