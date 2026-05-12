@@ -17,7 +17,11 @@ import {
 import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
 import { useSetting } from '@renderer/hooks/useSetting';
-import { TaskRunRecord } from '@main/store/types';
+import {
+  RoadmapProgress,
+  RoadmapTaskStatus,
+  TaskRunRecord,
+} from '@main/store/types';
 
 const statusIcon = {
   pending: Clock,
@@ -27,8 +31,127 @@ const statusIcon = {
   cancelled: XCircle,
 };
 
+const roadmapStatusLabel: Record<RoadmapTaskStatus, string> = {
+  not_started: 'Not Started',
+  in_progress: 'In Progress',
+  blocked: 'Blocked',
+  done: 'Done',
+};
+
+const roadmapStatusClass: Record<RoadmapTaskStatus, string> = {
+  not_started: 'border-white/10 bg-white/[0.03] text-muted-foreground',
+  in_progress: 'border-blue-400/25 bg-blue-400/10 text-blue-100',
+  blocked: 'border-red-400/30 bg-red-400/10 text-red-100',
+  done: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-100',
+};
+
 const formatDate = (value?: number) =>
   value ? new Date(value).toLocaleString() : 'Not finished';
+
+const summarizeRoadmap = (roadmap: RoadmapProgress) => {
+  const tasks = roadmap.phases.flatMap((phase) => phase.tasks);
+  return {
+    total: tasks.length,
+    done: tasks.filter((task) => task.status === 'done').length,
+    inProgress: tasks.filter((task) => task.status === 'in_progress').length,
+    blocked: tasks.filter((task) => task.status === 'blocked').length,
+  };
+};
+
+const RoadmapPanel = ({ roadmap }: { roadmap?: RoadmapProgress }) => {
+  if (!roadmap) {
+    return null;
+  }
+
+  const summary = summarizeRoadmap(roadmap);
+
+  return (
+    <section className="mb-6 rounded-lg border border-white/10 bg-white/[0.045] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-white">{roadmap.title}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Phased progress for the Manus-style Neura upgrade.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-1 text-emerald-100">
+            {summary.done}/{summary.total} Done
+          </span>
+          <span className="rounded-full border border-blue-400/25 bg-blue-400/10 px-3 py-1 text-blue-100">
+            {summary.inProgress} In Progress
+          </span>
+          <span className="rounded-full border border-red-400/30 bg-red-400/10 px-3 py-1 text-red-100">
+            {summary.blocked} Blocked
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3">
+        {roadmap.phases.map((phase) => (
+          <details
+            key={phase.id}
+            className="rounded-md border border-white/10 bg-black/20 p-3"
+            open={phase.tasks.some(
+              (task) =>
+                task.status === 'in_progress' || task.status === 'blocked',
+            )}
+          >
+            <summary className="cursor-pointer list-none">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-white">
+                    {phase.id}. {phase.title}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {phase.summary}
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {phase.tasks.filter((task) => task.status === 'done').length}/
+                  {phase.tasks.length} done
+                </div>
+              </div>
+            </summary>
+            <div className="mt-3 space-y-2">
+              {phase.tasks.map((task) => {
+                const latestEvidence = task.evidence[task.evidence.length - 1];
+                return (
+                  <div
+                    key={task.id}
+                    className="rounded-md border border-white/10 bg-white/[0.035] p-3"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-white">
+                          {task.id} {task.title}
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {task.doneWhen}
+                        </div>
+                      </div>
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-[11px] ${roadmapStatusClass[task.status]}`}
+                      >
+                        {roadmapStatusLabel[task.status]}
+                      </span>
+                    </div>
+                    {latestEvidence && (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        Evidence: {latestEvidence.kind} -{' '}
+                        {latestEvidence.summary}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+        ))}
+      </div>
+    </section>
+  );
+};
 
 const RunCard = ({ run }: { run: TaskRunRecord }) => {
   const StatusIcon = statusIcon[run.status] || Clock;
@@ -180,6 +303,7 @@ const RunCard = ({ run }: { run: TaskRunRecord }) => {
 
 export default function Projects() {
   const { settings } = useSetting();
+  const roadmap = settings.neuraRoadmap as RoadmapProgress | undefined;
   const runs = ([...(settings.taskRuns || [])] as TaskRunRecord[]).sort(
     (a, b) => b.startedAt - a.startedAt,
   );
@@ -193,6 +317,7 @@ export default function Projects() {
             Run history, artifacts, sources, and approval trail.
           </p>
         </div>
+        <RoadmapPanel roadmap={roadmap} />
         <div className="space-y-3">
           {runs.length ? (
             runs.map((run) => <RunCard key={run.runId} run={run} />)

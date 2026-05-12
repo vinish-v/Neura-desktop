@@ -7,6 +7,10 @@ import yaml from 'js-yaml';
 
 import * as env from '@main/env';
 import { logger } from '@main/logger';
+import {
+  createDefaultNeuraRoadmap,
+  normalizeNeuraRoadmap,
+} from '@main/services/neuraRoadmap';
 
 import {
   LocalStore,
@@ -41,6 +45,7 @@ export const DEFAULT_SETTING: LocalStore = {
     updatedAt: Date.now(),
   },
   taskRuns: [],
+  neuraRoadmap: createDefaultNeuraRoadmap(),
   connectors: [
     {
       id: 'github',
@@ -151,6 +156,7 @@ const normalizeSettingStore = (state: Partial<LocalStore>): LocalStore => {
   merged.utioBaseUrl = merged.utioBaseUrl || '';
   merged.agentMemory = merged.agentMemory || DEFAULT_SETTING.agentMemory;
   merged.taskRuns = Array.isArray(merged.taskRuns) ? merged.taskRuns : [];
+  merged.neuraRoadmap = normalizeNeuraRoadmap(merged.neuraRoadmap);
   merged.connectors = Array.isArray(merged.connectors)
     ? merged.connectors
     : DEFAULT_SETTING.connectors;
@@ -209,7 +215,9 @@ export class SettingStore {
 
   public static setStore(state: Partial<LocalStore>): void {
     const current = SettingStore.getInstance().store;
-    SettingStore.getInstance().set(normalizeSettingStore({ ...current, ...state }));
+    SettingStore.getInstance().set(
+      normalizeSettingStore({ ...current, ...state }),
+    );
   }
 
   public static get<K extends keyof LocalStore>(key: K): LocalStore[K] {

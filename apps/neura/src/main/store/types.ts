@@ -105,6 +105,55 @@ export type CompletionProof = {
   verifiedAt: number;
 };
 
+export type RoadmapTaskStatus =
+  | 'not_started'
+  | 'in_progress'
+  | 'blocked'
+  | 'done';
+
+export type RoadmapEvidenceKind =
+  | 'test'
+  | 'typecheck'
+  | 'build'
+  | 'manual'
+  | 'commit'
+  | 'tag';
+
+export type RoadmapEvidence = {
+  id: string;
+  kind: RoadmapEvidenceKind;
+  summary: string;
+  command?: string;
+  artifactPath?: string;
+  url?: string;
+  recordedAt: number;
+};
+
+export type RoadmapTask = {
+  id: string;
+  title: string;
+  doneWhen: string;
+  status: RoadmapTaskStatus;
+  evidence: RoadmapEvidence[];
+  updatedAt?: number;
+  blockedReason?: string;
+};
+
+export type RoadmapPhase = {
+  id: string;
+  title: string;
+  summary: string;
+  tasks: RoadmapTask[];
+};
+
+export type RoadmapProgress = {
+  id: string;
+  title: string;
+  version: number;
+  phases: RoadmapPhase[];
+  updatedAt: number;
+};
+
 export type TaskTodoItem = {
   id: string;
   text: string;
@@ -124,6 +173,7 @@ export type TaskState = {
   artifacts: TaskArtifact[];
   approvalEvents: ApprovalEvent[];
   completionProof?: CompletionProof;
+  roadmapProgress?: RoadmapProgress;
   finalAnswer?: string;
   error?: string;
   validationStatus?: 'pending' | 'valid' | 'invalid' | 'failed';

@@ -87,6 +87,41 @@ const CompletionProofSchema = z.object({
   verifiedAt: z.number(),
 });
 
+const RoadmapEvidenceSchema = z.object({
+  id: z.string(),
+  kind: z.enum(['test', 'typecheck', 'build', 'manual', 'commit', 'tag']),
+  summary: z.string(),
+  command: z.string().optional(),
+  artifactPath: z.string().optional(),
+  url: z.string().optional(),
+  recordedAt: z.number(),
+});
+
+const RoadmapTaskSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  doneWhen: z.string(),
+  status: z.enum(['not_started', 'in_progress', 'blocked', 'done']),
+  evidence: z.array(RoadmapEvidenceSchema),
+  updatedAt: z.number().optional(),
+  blockedReason: z.string().optional(),
+});
+
+const RoadmapPhaseSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  summary: z.string(),
+  tasks: z.array(RoadmapTaskSchema),
+});
+
+const RoadmapProgressSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  version: z.number(),
+  phases: z.array(RoadmapPhaseSchema),
+  updatedAt: z.number(),
+});
+
 const TaskRunSchema = z.object({
   runId: z.string(),
   originalGoal: z.string(),
@@ -117,6 +152,7 @@ const TaskRunSchema = z.object({
   artifacts: z.array(TaskArtifactSchema).optional(),
   approvalEvents: z.array(ApprovalEventSchema).optional(),
   completionProof: CompletionProofSchema.optional(),
+  roadmapProgress: RoadmapProgressSchema.optional(),
   finalAnswer: z.string().optional(),
   error: z.string().optional(),
   validationStatus: z
@@ -199,6 +235,7 @@ export const PresetSchema = z.object({
   monitors: z.array(WebMonitorSchema).optional(),
   agentMemory: AgentMemorySchema.optional(),
   taskRuns: z.array(TaskRunSchema).optional(),
+  neuraRoadmap: RoadmapProgressSchema.optional(),
   connectors: z.array(ConnectorSchema).optional(),
   multimodalProviders: MultimodalProvidersSchema.optional(),
 });
