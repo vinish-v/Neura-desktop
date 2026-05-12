@@ -199,7 +199,7 @@ const PHASE_DEFINITIONS: RoadmapPhaseDefinition[] = [
     id: 'P6',
     title: 'Advanced Manus-Like Capabilities',
     summary:
-      'Add durable memory, approval gates, optional scraper evaluation, and sandbox planning after V1 is stable.',
+      'Add durable memory, approval gates, optional scraper evaluation, and local-only affordability controls.',
     tasks: [
       {
         id: 'P6.1',
@@ -224,9 +224,9 @@ const PHASE_DEFINITIONS: RoadmapPhaseDefinition[] = [
       },
       {
         id: 'P6.5',
-        title: 'Sandbox/VM investigation',
+        title: 'Local-only affordability guardrail',
         doneWhen:
-          'VM/RDP/microVM plan exists after local Standard Mode is stable.',
+          'Roadmap and product surfaces avoid requiring paid cloud sandbox infrastructure.',
       },
     ],
   },
@@ -577,14 +577,14 @@ const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
     ],
   },
   'P6.5': {
-    status: 'done',
+    status: 'in_progress',
     evidence: [
       {
-        id: 'baseline-p6-5-sandbox-investigation',
+        id: 'baseline-p6-5-local-affordability',
         kind: 'manual',
         summary:
-          'Sandbox, VM, and microVM direction is documented for the post-stabilization phase.',
-        artifactPath: 'docs/neura-sandbox-vm-investigation.md',
+          'Cloud sandbox work is explicitly out of scope unless the user supplies infrastructure.',
+        artifactPath: 'docs/neura-local-affordability-plan.md',
       },
     ],
   },
@@ -605,8 +605,20 @@ const applyBaseline = (
       }
       return {
         ...task,
-        status: entry.status,
-        blockedReason: entry.blockedReason,
+        status:
+          entry.status === 'done' &&
+          !(entry.evidence || []).some((item) =>
+            ['test', 'typecheck', 'build', 'commit', 'tag'].includes(item.kind),
+          )
+            ? 'in_progress'
+            : entry.status,
+        blockedReason:
+          entry.status === 'done' &&
+          !(entry.evidence || []).some((item) =>
+            ['test', 'typecheck', 'build', 'commit', 'tag'].includes(item.kind),
+          )
+            ? 'Manual baseline evidence needs automated or acceptance verification before this is marked done.'
+            : entry.blockedReason,
         updatedAt: now,
         evidence: (entry.evidence || []).map((item) => ({
           ...item,

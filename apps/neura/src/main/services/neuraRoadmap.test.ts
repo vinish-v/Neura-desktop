@@ -110,11 +110,14 @@ describe('neuraRoadmap', () => {
     expect(byId.get('P1.1')?.status).toBe('done');
     expect(byId.get('P2.4')?.status).toBe('done');
     expect(byId.get('P3.4')?.status).toBe('done');
-    expect(byId.get('P4.1')?.status).toBe('done');
-    expect(byId.get('P5.1')?.status).toBe('done');
+    expect(byId.get('P4.1')?.status).toBe('in_progress');
+    expect(byId.get('P5.1')?.status).toBe('in_progress');
     expect(byId.get('P6.1')?.status).toBe('done');
-    expect(byId.get('P6.5')?.status).toBe('done');
+    expect(byId.get('P6.5')?.status).toBe('in_progress');
     expect(byId.get('P1.1')?.evidence.length).toBeGreaterThan(0);
+    expect(byId.get('P4.1')?.blockedReason).toContain(
+      'Manual baseline evidence',
+    );
   });
 
   it('rejects unknown task ids', () => {

@@ -127,7 +127,14 @@ export type AutonomousAgentOptions = {
   skillDepth?: number;
   maxSteps?: number;
   maxRetriesPerStep?: number;
+  signal?: AbortSignal;
   onEvent?: (event: AutonomousAgentEvent) => void | Promise<void>;
+};
+
+const throwIfAborted = (signal?: AbortSignal) => {
+  if (signal?.aborted) {
+    throw new Error('Autonomous task cancelled.');
+  }
 };
 
 const extractJson = (value: string): unknown => {
@@ -312,10 +319,12 @@ const extractImageDataUrls = (result: AutonomousToolResult): string[] => {
 
 export class AutonomousAgent {
   async run(options: AutonomousAgentOptions): Promise<string> {
+    throwIfAborted(options.signal);
     const maxSteps = options.maxSteps ?? 12;
     const maxRetriesPerStep = options.maxRetriesPerStep ?? 1;
     const skillDepth = options.skillDepth ?? 0;
     const availableTools = await options.tools.listTools();
+    throwIfAborted(options.signal);
     const availableSkills =
       skillDepth < 3 ? await options.skills?.listSkills() : [];
     const toolsForPrompt = availableTools.map((tool) => ({
@@ -350,6 +359,7 @@ export class AutonomousAgent {
         'Use skill for reusable high-level work. Use tool for direct low-level MCP work. Only include one of skill or tool per step.',
       ].join('\n'),
     });
+    throwIfAborted(options.signal);
 
     const steps = normalizePlan(
       extractJson(rawPlan),
@@ -363,12 +373,14 @@ export class AutonomousAgent {
     let finalAnswer = '';
 
     for (const step of steps) {
+      throwIfAborted(options.signal);
       await options.onEvent?.({ type: 'step.started', step });
 
       let retries = 0;
       let stepResult: AutonomousToolResult | undefined;
       while (retries <= maxRetriesPerStep) {
         try {
+          throwIfAborted(options.signal);
           if (step.skill && options.skills) {
             const skill = await options.skills.getSkill(step.skill.name);
             if (!skill) {
@@ -387,6 +399,7 @@ export class AutonomousAgent {
               skillDepth: skillDepth + 1,
               maxSteps: Math.min(maxSteps, 8),
             });
+            throwIfAborted(options.signal);
             stepResult = {
               isError: false,
               content: [
@@ -401,6 +414,7 @@ export class AutonomousAgent {
             );
           } else if (step.tool) {
             stepResult = await options.tools.callTool(step.tool);
+            throwIfAborted(options.signal);
             await options.onEvent?.({
               type: 'tool.called',
               step,
@@ -428,6 +442,7 @@ export class AutonomousAgent {
                 `Prior observations:\n${observations.join('\n\n') || 'None'}`,
               ].join('\n'),
             });
+            throwIfAborted(options.signal);
             stepResult = {
               isError: false,
               content: [{ type: 'text', text: executorOutput }],
@@ -452,6 +467,7 @@ export class AutonomousAgent {
               'Return JSON: {"status":"continue|retry|complete|fail","reason":"short public reason","finalAnswer":"only when complete or fail"}',
             ].join('\n'),
           });
+          throwIfAborted(options.signal);
           const reflection = normalizeReflection(extractJson(rawReflection));
           await options.onEvent?.({
             type: 'step.completed',
@@ -509,6 +525,7 @@ export class AutonomousAgent {
         `Observations:\n${observations.join('\n\n') || 'No observations.'}`,
       ].join('\n'),
     });
+    throwIfAborted(options.signal);
     finalAnswer = finalAnswer.trim() || 'The autonomous MCP run finished.';
     await options.onEvent?.({ type: 'completed', finalAnswer });
     return finalAnswer;

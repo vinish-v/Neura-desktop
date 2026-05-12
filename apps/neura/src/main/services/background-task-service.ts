@@ -32,12 +32,15 @@ type EnqueueBackgroundTaskInput = {
 
 type BackgroundRunner = (
   task: BackgroundTaskRecord,
+  signal: AbortSignal,
 ) => Promise<TaskRunRecord | null | undefined>;
 
 export class BackgroundTaskService {
   private static instance: BackgroundTaskService | null = null;
   private running = false;
+  private activeTaskId: string | null = null;
   private powerSaveBlockerId: number | null = null;
+  private activeAbortController: AbortController | null = null;
   private runners = new Map<BackgroundTaskKind, BackgroundRunner>();
 
   static getInstance() {
@@ -48,15 +51,21 @@ export class BackgroundTaskService {
   }
 
   constructor() {
-    this.runners.set('multi_agent', async (task) => {
+    this.runners.set('multi_agent', async (task, signal) => {
       const { TaskManager } = await import('./task-manager');
-      return TaskManager.getInstance().startMultiAgentTask(task.goal);
+      return TaskManager.getInstance().startMultiAgentTask(task.goal, {
+        signal,
+        backgroundTaskId: task.id,
+      });
     });
-    this.runners.set('mcp_autonomous', async (task) => {
+    this.runners.set('mcp_autonomous', async (task, signal) => {
       const { TaskManager } = await import('./task-manager');
-      return TaskManager.getInstance().startMcpAutonomousTask(task.goal);
+      return TaskManager.getInstance().startMcpAutonomousTask(task.goal, {
+        signal,
+        backgroundTaskId: task.id,
+      });
     });
-    this.runners.set('skill', async (task) => {
+    this.runners.set('skill', async (task, signal) => {
       if (!task.skillName) {
         throw new Error('Background skill task requires a skillName.');
       }
@@ -65,6 +74,8 @@ export class BackgroundTaskService {
         skillName: task.skillName,
         arguments: task.arguments || {},
         goal: task.goal,
+        signal,
+        backgroundTaskId: task.id,
       });
     });
   }
@@ -117,6 +128,53 @@ export class BackgroundTaskService {
     return task;
   }
 
+  async cancel(id: string) {
+    const task = this.list().find((item) => item.id === id);
+    if (!task) {
+      throw new Error(`Background task not found: ${id}`);
+    }
+    if (
+      task.status === 'completed' ||
+      task.status === 'failed' ||
+      task.status === 'cancelled'
+    ) {
+      return task;
+    }
+    if (task.status === 'queued') {
+      this.patch(id, {
+        status: 'cancelled',
+        error: 'Cancelled before start.',
+        completedAt: Date.now(),
+      });
+      return this.list().find((item) => item.id === id) || task;
+    }
+    if (task.status === 'running' && this.activeTaskId === id) {
+      this.patch(id, {
+        cancelRequested: true,
+        error: 'Cancellation requested.',
+      });
+      this.activeAbortController?.abort();
+      return this.list().find((item) => item.id === id) || task;
+    }
+    return task;
+  }
+
+  async retry(id: string) {
+    const task = this.list().find((item) => item.id === id);
+    if (!task) {
+      throw new Error(`Background task not found: ${id}`);
+    }
+    if (task.status === 'queued' || task.status === 'running') {
+      return task;
+    }
+    return this.enqueue({
+      kind: task.kind,
+      goal: task.goal,
+      skillName: task.skillName,
+      arguments: task.arguments,
+    });
+  }
+
   private async runNext() {
     if (this.running) {
       return;
@@ -141,6 +199,8 @@ export class BackgroundTaskService {
     }
 
     this.running = true;
+    this.activeTaskId = next.id;
+    this.activeAbortController = new AbortController();
     this.startPowerSaveBlocker();
     this.patch(next.id, {
       status: 'running',
@@ -149,28 +209,49 @@ export class BackgroundTaskService {
     });
 
     try {
-      const run = await runner(next);
+      const run = await runner(next, this.activeAbortController.signal);
+      const wasCancelled =
+        this.activeAbortController.signal.aborted ||
+        this.list().find((task) => task.id === next.id)?.cancelRequested;
       this.patch(next.id, {
-        status: run?.status === 'failed' ? 'failed' : 'completed',
+        status: wasCancelled
+          ? 'cancelled'
+          : run?.status === 'failed'
+            ? 'failed'
+            : 'completed',
         runId: run?.runId,
-        error: run?.error,
+        error: wasCancelled ? 'Cancelled by user.' : run?.error,
+        cancelRequested: undefined,
         completedAt: Date.now(),
       });
       this.notify(
-        run?.status === 'failed' ? 'Neura task failed' : 'Neura task completed',
+        wasCancelled
+          ? 'Neura task cancelled'
+          : run?.status === 'failed'
+            ? 'Neura task failed'
+            : 'Neura task completed',
         next.goal,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const wasCancelled =
+        this.activeAbortController?.signal.aborted ||
+        this.list().find((task) => task.id === next.id)?.cancelRequested;
       logger.warn('[BackgroundTaskService] task failed', error);
       this.patch(next.id, {
-        status: 'failed',
-        error: message,
+        status: wasCancelled ? 'cancelled' : 'failed',
+        error: wasCancelled ? 'Cancelled by user.' : message,
+        cancelRequested: undefined,
         completedAt: Date.now(),
       });
-      this.notify('Neura task failed', message);
+      this.notify(
+        wasCancelled ? 'Neura task cancelled' : 'Neura task failed',
+        wasCancelled ? next.goal : message,
+      );
     } finally {
       this.running = false;
+      this.activeTaskId = null;
+      this.activeAbortController = null;
       this.broadcast();
       void this.runNext();
     }
@@ -244,6 +325,12 @@ export const registerBackgroundTaskIpcHandlers = () => {
       service.enqueue(params),
   );
   ipcMain.handle('task:list', async () => service.list());
+  ipcMain.handle('task:cancel', async (_event, params: { id: string }) =>
+    service.cancel(params.id),
+  );
+  ipcMain.handle('task:retry', async (_event, params: { id: string }) =>
+    service.retry(params.id),
+  );
   ipcMain.on('task:subscribe', (event) => {
     event.sender.send('task:updated', service.list());
   });

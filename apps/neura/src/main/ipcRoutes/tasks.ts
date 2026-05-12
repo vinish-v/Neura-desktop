@@ -28,4 +28,14 @@ export const tasksRoute = t.router({
   listBackgroundTasks: t.procedure.input<void>().handle(async () => {
     return BackgroundTaskService.getInstance().list();
   }),
+  cancelBackgroundTask: t.procedure
+    .input<{ id: string }>()
+    .handle(async ({ input }) => {
+      return BackgroundTaskService.getInstance().cancel(input.id);
+    }),
+  retryBackgroundTask: t.procedure
+    .input<{ id: string }>()
+    .handle(async ({ input }) => {
+      return BackgroundTaskService.getInstance().retry(input.id);
+    }),
 });

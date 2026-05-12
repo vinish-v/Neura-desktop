@@ -45,6 +45,16 @@ export type TaskProgressEventType =
   | 'validation.completed'
   | 'task.completed';
 
+export type TaskRunPhase =
+  | 'planning'
+  | 'acting'
+  | 'observing'
+  | 'validating'
+  | 'waiting_for_approval'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
 export type TaskTodoStatus = 'pending' | 'in_progress' | 'done' | 'failed';
 
 export type TaskRunStatus =
@@ -89,6 +99,26 @@ export type TaskProgressItem = {
   eventType?: string;
 };
 
+export type TaskSourceRecord = {
+  id: string;
+  url: string;
+  title?: string;
+  sourceName?: string;
+  excerpt?: string;
+  capturedAt: number;
+};
+
+export type TaskToolCallRecord = {
+  id: string;
+  serverName: string;
+  toolName: string;
+  arguments?: Record<string, unknown>;
+  status: 'pending' | 'completed' | 'failed';
+  resultPreview?: string;
+  startedAt: number;
+  completedAt?: number;
+};
+
 export type BackgroundTaskKind = 'mcp_autonomous' | 'skill' | 'multi_agent';
 
 export type BackgroundTaskStatus =
@@ -107,6 +137,7 @@ export type BackgroundTaskRecord = {
   skillName?: string;
   arguments?: Record<string, unknown>;
   error?: string;
+  cancelRequested?: boolean;
   createdAt: number;
   startedAt?: number;
   completedAt?: number;
@@ -193,6 +224,9 @@ export type TaskState = {
   originalGoal: string;
   runMode: AgentRunMode;
   status: TaskRunStatus;
+  phase?: TaskRunPhase;
+  activeAgent?: 'planner' | 'researcher' | 'executor' | 'critic';
+  backgroundTaskId?: string;
   workspacePath?: string;
   memoryFilePath?: string;
   memorySummary?: string;
@@ -202,12 +236,15 @@ export type TaskState = {
   currentStep?: string;
   factsFound: string[];
   sourcesVisited: string[];
+  sourceRecords: TaskSourceRecord[];
+  toolCalls: TaskToolCallRecord[];
   artifacts: TaskArtifact[];
   approvalEvents: ApprovalEvent[];
   completionProof?: CompletionProof;
   roadmapProgress?: RoadmapProgress;
   finalAnswer?: string;
   error?: string;
+  validationFailures: string[];
   validationStatus?: 'pending' | 'valid' | 'invalid' | 'failed';
   startedAt: number;
   completedAt?: number;

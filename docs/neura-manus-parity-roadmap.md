@@ -19,6 +19,7 @@ Acceptance: this document exists in the repo and can be updated as features land
 - [x] Add reusable artifact metadata.
 - [x] Add UI support for task progress, completed artifacts, and failed tasks.
 - [x] Keep v1 local-first with no cloud worker dependency.
+- [x] Keep paid cloud sandbox/VM infrastructure out of the required roadmap.
 
 Acceptance: every advanced workflow can create a local run record and attach artifacts.
 

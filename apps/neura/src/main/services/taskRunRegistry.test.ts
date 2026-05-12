@@ -28,8 +28,11 @@ const buildRun = (
   progressItems: [],
   factsFound: [],
   sourcesVisited: [],
+  sourceRecords: [],
+  toolCalls: [],
   artifacts: [],
   approvalEvents: [],
+  validationFailures: [],
   startedAt: 1,
 });
 
@@ -107,5 +110,65 @@ describe('TaskRunRegistry', () => {
     expect(persistedRuns[1]).toEqual(
       expect.objectContaining({ runId: 'run_a', finalAnswer: 'answer A' }),
     );
+  });
+
+  it('records structured source evidence without duplicating visited URLs', () => {
+    let persistedRuns: TaskRunRecord[] = [buildRun('run_source', 'running')];
+    mocks.settingGet.mockImplementation(() => persistedRuns);
+    mocks.settingSet.mockImplementation((_key, value) => {
+      persistedRuns = value as TaskRunRecord[];
+    });
+
+    TaskRunRegistry.addSource('run_source', {
+      url: 'https://example.com/report',
+      title: 'Report',
+      excerpt: 'A useful source excerpt.',
+    });
+    TaskRunRegistry.addSource('run_source', {
+      url: 'https://example.com/report',
+      sourceName: 'Example',
+    });
+
+    expect(persistedRuns[0].sourcesVisited).toEqual([
+      'https://example.com/report',
+    ]);
+    expect(persistedRuns[0].sourceRecords).toHaveLength(1);
+    expect(persistedRuns[0].sourceRecords[0]).toEqual(
+      expect.objectContaining({
+        url: 'https://example.com/report',
+        title: 'Report',
+        sourceName: 'Example',
+      }),
+    );
+  });
+
+  it('records tool calls and validation failures as run evidence', () => {
+    let persistedRuns: TaskRunRecord[] = [buildRun('run_tool', 'running')];
+    mocks.settingGet.mockImplementation(() => persistedRuns);
+    mocks.settingSet.mockImplementation((_key, value) => {
+      persistedRuns = value as TaskRunRecord[];
+    });
+
+    TaskRunRegistry.addToolCall('run_tool', {
+      serverName: 'neura-search',
+      toolName: 'search',
+      arguments: { query: 'neura' },
+      status: 'completed',
+      resultPreview: 'result',
+    });
+    TaskRunRegistry.addValidationFailure('run_tool', 'Need another source.');
+
+    expect(persistedRuns[0].toolCalls[0]).toEqual(
+      expect.objectContaining({
+        serverName: 'neura-search',
+        toolName: 'search',
+        status: 'completed',
+        resultPreview: 'result',
+      }),
+    );
+    expect(persistedRuns[0].validationFailures).toEqual([
+      'Need another source.',
+    ]);
+    expect(persistedRuns[0].validationStatus).toBe('invalid');
   });
 });

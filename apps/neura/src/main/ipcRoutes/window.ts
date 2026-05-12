@@ -257,6 +257,9 @@ export const windowRoute = t.router({
   openPath: t.procedure.input<{ path: string }>().handle(async ({ input }) => {
     return shell.openPath(input.path);
   }),
+  openExternal: t.procedure.input<{ url: string }>().handle(async ({ input }) => {
+    return shell.openExternal(input.url);
+  }),
   revealPath: t.procedure
     .input<{ path: string }>()
     .handle(async ({ input }) => {

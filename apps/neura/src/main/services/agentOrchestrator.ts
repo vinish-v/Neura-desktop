@@ -45,6 +45,27 @@ const statusToTodoStatus = (
   return 'pending';
 };
 
+const eventTypeToPhase = (
+  event: TaskProgressEvent,
+): TaskState['phase'] | undefined => {
+  if (event.type === 'plan.updated') {
+    return 'planning';
+  }
+  if (event.type === 'step.started' || event.type === 'step.completed') {
+    return 'acting';
+  }
+  if (event.type === 'validation.completed') {
+    return 'validating';
+  }
+  if (event.type === 'task.completed') {
+    return 'completed';
+  }
+  if (event.type === 'step.failed') {
+    return 'failed';
+  }
+  return undefined;
+};
+
 const normalizeProgressText = (value?: string) =>
   (value || '').replace(/\s+/g, ' ').trim();
 
@@ -104,7 +125,10 @@ export class AgentOrchestrator {
 
   begin(originalGoal: string, runMode: AgentRunMode) {
     const taskState: TaskState = prepareTaskRunContext(
-      createTaskRun(originalGoal, runMode),
+      {
+        ...createTaskRun(originalGoal, runMode),
+        phase: 'planning',
+      },
       TaskRunRegistry.list(),
     );
     TaskRunRegistry.upsert(taskState);
@@ -164,6 +188,7 @@ export class AgentOrchestrator {
     const nextTaskState = taskState
       ? {
           ...taskState,
+          phase: eventTypeToPhase(event) || taskState.phase,
           todoItems: nextTodoItems,
           progressItems: nextProgressItems,
           currentStep:
@@ -211,17 +236,13 @@ export class AgentOrchestrator {
       return;
     }
 
-    const sources = new Set(current.taskState.sourcesVisited);
-    sources.add(url.trim());
-    const nextTaskState = {
-      ...current.taskState,
-      sourcesVisited: [...sources].slice(-30),
-    };
-    TaskRunRegistry.upsert(nextTaskState);
+    const nextTaskState = TaskRunRegistry.addSource(current.taskState.runId, {
+      url,
+    });
 
     this.setState({
       ...current,
-      taskState: nextTaskState,
+      taskState: nextTaskState || current.taskState,
     });
   }
 
@@ -256,6 +277,7 @@ export class AgentOrchestrator {
       ...current.taskState,
       completionProof,
       validationStatus: 'valid' as const,
+      phase: 'validating' as const,
     };
     TaskRunRegistry.upsert(nextTaskState);
 
@@ -292,6 +314,7 @@ export class AgentOrchestrator {
       ? {
           ...current.taskState,
           status: 'completed' as const,
+          phase: 'completed' as const,
           finalAnswer: trimmedAnswer || finalAnswer,
           validationStatus: 'valid' as const,
           completedAt: Date.now(),
@@ -318,6 +341,7 @@ export class AgentOrchestrator {
       ? {
           ...current.taskState,
           status: 'failed' as const,
+          phase: 'failed' as const,
           error: errorMsg,
           validationStatus: 'failed' as const,
           completedAt: Date.now(),

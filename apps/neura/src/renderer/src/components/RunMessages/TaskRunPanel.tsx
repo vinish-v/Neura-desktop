@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
-import { TaskState } from '@main/store/types';
+import { TaskSourceRecord, TaskState } from '@main/store/types';
 import { cn } from '@renderer/utils';
 import { api } from '@renderer/api';
 import { Markdown } from '@renderer/components/markdown';
@@ -115,11 +115,17 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
   );
   const [workspaceState, setWorkspaceState] = useState<WorkspaceRoot[]>([]);
   const finalAnswer = publicFinalAnswer(taskState?.finalAnswer);
-  const artifacts = taskState?.artifacts.slice(-6) || [];
+  const artifacts = (taskState?.artifacts || []).slice(-6);
   const todoItems = taskState?.todoItems || [];
+  const toolCalls = taskState?.toolCalls || [];
+  const validationFailures = taskState?.validationFailures || [];
+  const progressItems = taskState?.progressItems || [];
+  const approvalEvents = taskState?.approvalEvents || [];
+  const sourcesVisited = taskState?.sourcesVisited || [];
+  const rawSourceRecords = taskState?.sourceRecords || [];
   const latestProgress = useMemo(
     () =>
-      (taskState?.progressItems || [])
+      progressItems
         .map((item) => ({
           ...item,
           title: publicProgressTitle(item.title),
@@ -131,12 +137,21 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
             !DEBUG_PROGRESS_PATTERN.test(item.title),
         )
         .slice(-5),
-    [taskState?.progressItems],
+    [progressItems],
   );
 
   if (!taskState) {
     return null;
   }
+
+  const sourceRecords: TaskSourceRecord[] =
+    rawSourceRecords.length > 0
+      ? rawSourceRecords
+      : sourcesVisited.map((url, index) => ({
+          id: `${taskState.runId}-source-${index}`,
+          url,
+          capturedAt: taskState.startedAt,
+        }));
 
   const previewArtifact = async (artifact: (typeof artifacts)[number]) => {
     setPreviewLoading(true);
@@ -210,14 +225,15 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
   };
 
   const StatusIcon = statusIcon[taskState.status] || Loader2;
-  const requestedApprovals = taskState.approvalEvents.filter(
+  const requestedApprovals = approvalEvents.filter(
     (event) => event.status === 'requested',
   );
 
   return (
-    <section className="neura-glass mb-4 rounded-2xl p-4 text-sm">
+    <section className="overflow-hidden rounded-lg border border-white/10 bg-[#0b0b0b] text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
+      <div className="border-b border-white/10 px-4 py-3">
       <div className="flex items-center gap-3 text-white">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/40">
           <StatusIcon
             className={cn(
               'h-4 w-4',
@@ -230,10 +246,13 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
           />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="break-words text-base font-semibold">
-            {taskState.runMode.replace(/_/g, ' ')}
+          <div className="truncate text-sm font-semibold">
+            Run Trace
           </div>
-          <div className="truncate text-xs text-muted-foreground">
+          <div className="mt-1 truncate text-xs text-muted-foreground">
+            {taskState.runMode.replace(/_/g, ' ')} |{' '}
+            {taskState.phase || taskState.status}
+            {taskState.activeAgent ? ` / ${taskState.activeAgent}` : ''} |{' '}
             {taskState.runId}
           </div>
         </div>
@@ -253,14 +272,16 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
           {taskState.status}
         </span>
       </div>
+      </div>
+      <div className="p-4">
 
       {finalAnswer && (
-        <div className="mt-4 border-t border-white/10 pt-4">
+        <div>
           <div className="mb-2 text-xs font-medium text-muted-foreground">
             Final answer
           </div>
-          <div className="max-h-[72vh] min-h-[140px] overflow-y-auto rounded-xl border border-emerald-400/20 bg-emerald-400/[0.04] px-4 py-3 text-sm leading-6 text-white/85">
-            <div className="break-words [&_li]:my-1 [&_ol]:pl-5 [&_p]:my-2 [&_pre]:overflow-x-auto [&_ul]:pl-5">
+          <div className="max-h-[48vh] min-h-[120px] overflow-y-auto overflow-x-hidden rounded-lg border border-emerald-400/20 bg-emerald-400/[0.04] px-4 py-3 text-sm leading-6 text-white/85">
+            <div className="break-words [overflow-wrap:anywhere] [&_a]:break-all [&_li]:my-1 [&_ol]:pl-5 [&_p]:my-2 [&_pre]:overflow-x-auto [&_ul]:pl-5">
               <Markdown>{finalAnswer}</Markdown>
             </div>
           </div>
@@ -309,11 +330,11 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
       )}
 
       {latestProgress.length > 0 && (
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 grid gap-2">
           {latestProgress.map((item) => (
             <div
               key={item.id}
-              className="rounded-xl border border-white/10 bg-black/10 px-3 py-2"
+              className="rounded-lg border border-white/10 bg-black/25 px-3 py-2"
             >
               <div className="flex items-start gap-2 text-xs">
                 <span
@@ -339,7 +360,95 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
         </div>
       )}
 
-      {taskState.progressItems.length > 0 && (
+      {sourceRecords.length > 0 && (
+        <div className="mt-3 border-t border-white/10 pt-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+            <ExternalLink className="h-3.5 w-3.5" />
+            Sources
+          </div>
+          <div className="grid gap-2">
+            {sourceRecords.slice(-6).map((source) => (
+              <button
+                type="button"
+                key={source.id}
+                className="rounded-md border border-white/10 bg-black/10 px-2 py-1.5 text-left"
+                onClick={() => api.openExternal({ url: source.url })}
+              >
+                <div className="truncate text-xs text-blue-200">
+                  {source.title || source.url}
+                </div>
+                {source.excerpt ? (
+                  <div className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+                    {source.excerpt}
+                  </div>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {toolCalls.length > 0 && (
+        <div className="mt-3 border-t border-white/10 pt-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+            <FileCode2 className="h-3.5 w-3.5" />
+            Tool Calls
+          </div>
+          <div className="grid gap-2">
+            {toolCalls.slice(-6).map((toolCall) => (
+              <div
+                key={toolCall.id}
+                className="rounded-md border border-white/10 bg-black/10 px-2 py-1.5 text-xs"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-white">
+                    {toolCall.serverName}.{toolCall.toolName}
+                  </span>
+                  <span
+                    className={cn(
+                      'ml-auto rounded-full px-2 py-0.5 text-[10px] uppercase',
+                      toolCall.status === 'completed' &&
+                        'bg-emerald-400/15 text-emerald-200',
+                      toolCall.status === 'failed' &&
+                        'bg-red-400/15 text-red-200',
+                      toolCall.status === 'pending' &&
+                        'bg-blue-400/15 text-blue-200',
+                    )}
+                  >
+                    {toolCall.status}
+                  </span>
+                </div>
+                {toolCall.resultPreview ? (
+                  <div className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+                    {toolCall.resultPreview}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {validationFailures.length > 0 && (
+        <div className="mt-3 border-t border-white/10 pt-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-red-200">
+            <AlertCircle className="h-3.5 w-3.5" />
+            Validation Failures
+          </div>
+          <div className="grid gap-2">
+            {validationFailures.slice(-4).map((failure, index) => (
+              <div
+                key={`${failure}-${index}`}
+                className="rounded-md border border-red-400/20 bg-red-400/[0.05] px-2 py-1.5 text-xs text-red-100"
+              >
+                {failure}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {progressItems.length > 0 && (
         <div className="mt-3 border-t border-white/10 pt-3">
           <Button
             size="sm"
@@ -355,8 +464,8 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
             Diagnostics
           </Button>
           {showDiagnostics && (
-            <div className="mt-2 max-h-44 overflow-y-auto rounded-xl border border-white/10 bg-black/30 p-3 text-[11px] leading-4 text-muted-foreground">
-              {taskState.progressItems.slice(-12).map((item) => (
+            <div className="mt-2 max-h-44 overflow-y-auto rounded-lg border border-white/10 bg-black/30 p-3 text-[11px] leading-4 text-muted-foreground">
+              {progressItems.slice(-12).map((item) => (
                 <div key={item.id} className="mb-2 last:mb-0">
                   <div className="text-white/70">
                     {item.status}: {item.title}
@@ -442,14 +551,14 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
         </div>
       )}
 
-      {taskState.approvalEvents.length > 0 && (
+      {approvalEvents.length > 0 && (
         <div className="mt-3 border-t border-white/10 pt-3">
           <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5" />
             Approval Events
           </div>
           <div className="space-y-2">
-            {taskState.approvalEvents.slice(-4).map((event) => (
+            {approvalEvents.slice(-4).map((event) => (
               <div
                 key={event.id}
                 className="rounded-md border border-white/10 bg-black/10 px-2 py-1.5 text-xs"
@@ -517,6 +626,7 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
           )}
         </div>
       )}
+      </div>
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-4xl max-h-[88vh] overflow-hidden border border-white/20 bg-black/95 text-white">

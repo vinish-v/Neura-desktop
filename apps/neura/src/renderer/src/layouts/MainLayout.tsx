@@ -7,9 +7,9 @@ import { useSetting } from '@renderer/hooks/useSetting';
 import { useStore } from '@renderer/hooks/useStore';
 
 const routeTitle: Record<string, string> = {
-  '/': 'Dashboard',
+  '/': 'Agent Workspace',
   '/local': 'New Task',
-  '/dashboard': 'Active Tasks',
+  '/dashboard': 'Agent Workspace',
   '/skills': 'Skills',
   '/connectors': 'Connectors',
   '/projects': 'Projects',

@@ -139,6 +139,11 @@ const compact = (value: unknown, limit = 900) => {
   return text.length > limit ? `${text.slice(0, limit)}...` : text;
 };
 
+type TaskStartOptions = {
+  signal?: AbortSignal;
+  backgroundTaskId?: string;
+};
+
 export class TaskManager {
   private static instance: TaskManager | null = null;
 
@@ -197,6 +202,8 @@ export class TaskManager {
       this.patch(runId, {
         todoItems,
         currentStep: 'Plan created',
+        phase: 'planning',
+        activeAgent: 'planner',
       });
       this.addProgress(runId, {
         title: 'Plan created',
@@ -210,6 +217,8 @@ export class TaskManager {
       const run = this.getRun(runId);
       this.patch(runId, {
         currentStep: event.step.title,
+        phase: 'acting',
+        activeAgent: 'executor',
         todoItems:
           run?.todoItems.map((item) =>
             item.id === event.step.id
@@ -226,6 +235,13 @@ export class TaskManager {
     }
 
     if (event.type === 'tool.called') {
+      TaskRunRegistry.addToolCall(runId, {
+        serverName: event.tool.serverName,
+        toolName: event.tool.name,
+        arguments: event.tool.arguments,
+        status: event.result.isError ? 'failed' : 'completed',
+        resultPreview: compact(event.result),
+      });
       this.addProgress(runId, {
         title: `${event.tool.serverName}: ${event.tool.name}`,
         detail: compact(event.result),
@@ -250,6 +266,7 @@ export class TaskManager {
     if (event.type === 'step.completed') {
       const run = this.getRun(runId);
       this.patch(runId, {
+        phase: 'observing',
         todoItems:
           run?.todoItems.map((item) =>
             item.id === event.step.id ? { ...item, status: 'done' } : item,
@@ -264,8 +281,10 @@ export class TaskManager {
     }
 
     if (event.type === 'step.failed') {
+      TaskRunRegistry.addValidationFailure(runId, event.error);
       const run = this.getRun(runId);
       this.patch(runId, {
+        phase: 'failed',
         todoItems:
           run?.todoItems.map((item) =>
             item.id === event.step.id ? { ...item, status: 'failed' } : item,
@@ -282,24 +301,31 @@ export class TaskManager {
     if (event.type === 'completed') {
       this.patch(runId, {
         finalAnswer: event.finalAnswer,
+        phase: 'completed',
       });
     }
   }
 
-  async startMcpAutonomousTask(goal: string) {
+  async startMcpAutonomousTask(goal: string, options: TaskStartOptions = {}) {
     return this.startAutonomousTask({
       goal,
       runMode: 'mcp_autonomous',
+      signal: options.signal,
+      backgroundTaskId: options.backgroundTaskId,
     });
   }
 
-  async startMultiAgentTask(goal: string) {
+  async startMultiAgentTask(goal: string, options: TaskStartOptions = {}) {
     const trimmedGoal = goal.trim();
     if (!trimmedGoal) {
       throw new Error('Task goal is required.');
     }
 
-    const run = createTaskRun(trimmedGoal, 'multi_agent');
+    const run = {
+      ...createTaskRun(trimmedGoal, 'multi_agent'),
+      phase: 'planning' as const,
+      backgroundTaskId: options.backgroundTaskId,
+    };
     this.upsert(run);
     ComputerRuntimeController.start({
       mode: 'browser',
@@ -330,11 +356,13 @@ export class TaskManager {
         skills: new DesktopSkillsRuntime(),
         memory,
         maxIterations: 18,
+        signal: options.signal,
         onEvent: (event) => this.handleMultiAgentEvent(run.runId, event),
       });
 
       const completed = this.patch(run.runId, {
         status: 'completed',
+        phase: 'completed',
         finalAnswer,
         validationStatus: 'valid',
         completionProof: {
@@ -362,23 +390,33 @@ export class TaskManager {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn('[TaskManager] multi-agent task failed', error);
+      const wasCancelled = options.signal?.aborted;
       const failed = this.patch(run.runId, {
-        status: 'failed',
+        status: wasCancelled ? 'cancelled' : 'failed',
+        phase: wasCancelled ? 'cancelled' : 'failed',
         error: message,
-        finalAnswer: `I could not complete the multi-agent task: ${message}`,
+        finalAnswer: wasCancelled
+          ? `The multi-agent task was cancelled: ${message}`
+          : `I could not complete the multi-agent task: ${message}`,
         completedAt: Date.now(),
       });
       this.addProgress(run.runId, {
-        title: 'Multi-agent task failed',
+        title: wasCancelled
+          ? 'Multi-agent task cancelled'
+          : 'Multi-agent task failed',
         detail: message,
-        status: 'failed',
+        status: wasCancelled ? 'done' : 'failed',
         eventType: 'task.failed',
       });
-      ComputerRuntimeController.fail(message);
+      if (wasCancelled) {
+        ComputerRuntimeController.complete('Multi-agent task cancelled');
+      } else {
+        ComputerRuntimeController.fail(message);
+      }
       store.setState({
-        status: StatusEnum.ERROR,
+        status: wasCancelled ? StatusEnum.USER_STOPPED : StatusEnum.ERROR,
         thinking: false,
-        errorMsg: message,
+        errorMsg: wasCancelled ? null : message,
         taskState: failed || store.getState().taskState,
       });
       return failed;
@@ -391,6 +429,8 @@ export class TaskManager {
     skillName: string;
     arguments?: Record<string, unknown>;
     goal?: string;
+    signal?: AbortSignal;
+    backgroundTaskId?: string;
   }) {
     const { SkillsService } = await import('./skills-service');
     const skill = await SkillsService.getInstance().get(input.skillName);
@@ -413,6 +453,8 @@ export class TaskManager {
       goal,
       runMode: 'skill',
       publicGoal: input.goal || `Use ${skill.name} skill`,
+      signal: input.signal,
+      backgroundTaskId: input.backgroundTaskId,
     });
   }
 
@@ -420,14 +462,20 @@ export class TaskManager {
     goal: string;
     runMode: 'mcp_autonomous' | 'skill';
     publicGoal?: string;
+    signal?: AbortSignal;
+    backgroundTaskId?: string;
   }) {
-    const { goal, runMode, publicGoal } = input;
+    const { goal, runMode, publicGoal, signal, backgroundTaskId } = input;
     const trimmedGoal = goal.trim();
     if (!trimmedGoal) {
       throw new Error('Task goal is required.');
     }
 
-    const run = createTaskRun(publicGoal || trimmedGoal, runMode);
+    const run = {
+      ...createTaskRun(publicGoal || trimmedGoal, runMode),
+      phase: 'planning' as const,
+      backgroundTaskId,
+    };
     this.upsert(run);
     ComputerRuntimeController.start({
       mode: 'browser',
@@ -452,11 +500,13 @@ export class TaskManager {
         skills: new DesktopSkillsRuntime(),
         maxSteps: 12,
         maxRetriesPerStep: 1,
+        signal,
         onEvent: (event) => this.handleEvent(run.runId, event),
       });
 
       const completed = this.patch(run.runId, {
         status: 'completed',
+        phase: 'completed',
         finalAnswer,
         validationStatus: 'valid',
         completionProof: {
@@ -487,22 +537,32 @@ export class TaskManager {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn('[TaskManager] MCP autonomous task failed', error);
+      const wasCancelled = signal?.aborted;
       const failed = this.patch(run.runId, {
-        status: 'failed',
+        status: wasCancelled ? 'cancelled' : 'failed',
+        phase: wasCancelled ? 'cancelled' : 'failed',
         error: message,
-        finalAnswer: `I could not complete the ${runMode === 'skill' ? 'skill' : 'MCP autonomous'} task: ${message}`,
+        finalAnswer: wasCancelled
+          ? `The ${runMode === 'skill' ? 'skill' : 'MCP autonomous'} task was cancelled: ${message}`
+          : `I could not complete the ${runMode === 'skill' ? 'skill' : 'MCP autonomous'} task: ${message}`,
         completedAt: Date.now(),
       });
       this.addProgress(run.runId, {
-        title: 'MCP autonomous task failed',
+        title: wasCancelled
+          ? 'MCP autonomous task cancelled'
+          : 'MCP autonomous task failed',
         detail: message,
-        status: 'failed',
+        status: wasCancelled ? 'done' : 'failed',
       });
-      ComputerRuntimeController.fail(message);
+      if (wasCancelled) {
+        ComputerRuntimeController.complete('MCP task cancelled');
+      } else {
+        ComputerRuntimeController.fail(message);
+      }
       store.setState({
-        status: StatusEnum.ERROR,
+        status: wasCancelled ? StatusEnum.USER_STOPPED : StatusEnum.ERROR,
         thinking: false,
-        errorMsg: message,
+        errorMsg: wasCancelled ? null : message,
         taskState: failed || store.getState().taskState,
       });
       return failed;
@@ -519,6 +579,13 @@ export class TaskManager {
     if (event.type === 'agent.started') {
       this.patch(runId, {
         currentStep: `${event.agentName} agent`,
+        phase:
+          event.agentName === 'planner'
+            ? 'planning'
+            : event.agentName === 'critic'
+              ? 'validating'
+              : 'acting',
+        activeAgent: event.agentName,
       });
       this.addProgress(runId, {
         title: `${event.agentName}: started`,
@@ -531,6 +598,15 @@ export class TaskManager {
     }
 
     if (event.type === 'agent.completed') {
+      if (event.result.toolCall) {
+        TaskRunRegistry.addToolCall(runId, {
+          serverName: event.result.toolCall.serverName,
+          toolName: event.result.toolCall.name,
+          arguments: event.result.toolCall.arguments,
+          status: event.result.toolResult?.isError ? 'failed' : 'completed',
+          resultPreview: compact(event.result.toolResult || event.result.detail),
+        });
+      }
       if (event.result.plan?.length) {
         const todoItems: TaskTodoItem[] = event.result.plan.map((step) => ({
           id: step.id,
@@ -542,6 +618,7 @@ export class TaskManager {
         this.patch(runId, {
           todoItems,
           currentStep: event.result.summary,
+          activeAgent: event.agentName,
         });
       } else {
         const run = this.getRun(runId);
@@ -553,6 +630,7 @@ export class TaskManager {
                 : item,
             ),
             currentStep: event.result.summary,
+            activeAgent: event.agentName,
           });
         }
       }
@@ -606,6 +684,7 @@ export class TaskManager {
     if (event.type === 'completed') {
       this.patch(runId, {
         finalAnswer: event.finalAnswer,
+        phase: 'completed',
       });
     }
   }

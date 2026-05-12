@@ -45,15 +45,15 @@ export const FreeTrialDialog = memo(
             <AlertDialogDescription className="hidden" />
             <div className="text-muted-foreground text-sm">
               <p>
-                As part of our research, we offer a 30-minute free trial of our
-                cloud service powered by Volcano Engine, where you can
-                experience Neura with remote computer and browser operations
-                without purchasing model service and computing resources.
+                Neura is designed to work local-first. This optional remote
+                trial is a legacy research service for users who explicitly want
+                remote computer or browser operations; it is not required for
+                normal Neura tasks.
               </p>
               <p className="my-4">
                 <b>
-                  By agreeing to use this service, your data will be transmitted
-                  to the servers. Please note that.
+                  By agreeing to use the optional remote service, your data will
+                  be transmitted to servers. Please note that.
                 </b>{' '}
                 In compliance with relevant regulations, you should avoid
                 entering any sensitive personal information. All records on the

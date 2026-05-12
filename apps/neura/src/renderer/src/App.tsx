@@ -10,7 +10,6 @@ import { MainLayout } from './layouts/MainLayout';
 
 import './styles/globals.css';
 
-const Home = lazy(() => import('./pages/home'));
 const LocalOperator = lazy(() => import('./pages/local'));
 const Projects = lazy(() => import('./pages/projects'));
 const Skills = lazy(() => import('./pages/skills'));
@@ -30,7 +29,7 @@ export default function App() {
       >
         <Routes>
           <Route element={<MainLayout />}>
-            <Route path="/" element={<Home />} />
+            <Route path="/" element={<Dashboard />} />
             <Route path="/local" element={<LocalOperator />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/skills" element={<Skills />} />

@@ -62,7 +62,7 @@ Evidence values: `test`, `typecheck`, `build`, `manual`, `commit`, `tag`.
 | P6.2 | Episodic retrieval                  | Done        | Past useful task records can inform new runs                   |
 | P6.3 | Approval gates                      | Done        | Sensitive actions show clean approve/deny controls             |
 | P6.4 | Optional scraper backend evaluation | Done        | Obscura is tested behind `SourceExtractor`, not added blindly  |
-| P6.5 | Sandbox/VM investigation            | Done        | VM/RDP/microVM plan exists after local Standard Mode is stable |
+| P6.5 | Local-only affordability guardrail  | In Progress | Roadmap and product surfaces avoid requiring paid cloud sandbox infrastructure |
 
 ## Phase Checkpoint
 

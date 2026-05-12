@@ -67,6 +67,26 @@ const TaskProgressItemSchema = z.object({
   eventType: z.string().optional(),
 });
 
+const TaskSourceRecordSchema = z.object({
+  id: z.string(),
+  url: z.string(),
+  title: z.string().optional(),
+  sourceName: z.string().optional(),
+  excerpt: z.string().optional(),
+  capturedAt: z.number(),
+});
+
+const TaskToolCallRecordSchema = z.object({
+  id: z.string(),
+  serverName: z.string(),
+  toolName: z.string(),
+  arguments: z.record(z.unknown()).optional(),
+  status: z.enum(['pending', 'completed', 'failed']),
+  resultPreview: z.string().optional(),
+  startedAt: z.number(),
+  completedAt: z.number().optional(),
+});
+
 const BackgroundTaskSchema = z.object({
   id: z.string(),
   kind: z.enum(['mcp_autonomous', 'skill', 'multi_agent']),
@@ -76,6 +96,7 @@ const BackgroundTaskSchema = z.object({
   skillName: z.string().optional(),
   arguments: z.record(z.unknown()).optional(),
   error: z.string().optional(),
+  cancelRequested: z.boolean().optional(),
   createdAt: z.number(),
   startedAt: z.number().optional(),
   completedAt: z.number().optional(),
@@ -155,6 +176,22 @@ const TaskRunSchema = z.object({
     'multi_agent',
   ]),
   status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled']),
+  phase: z
+    .enum([
+      'planning',
+      'acting',
+      'observing',
+      'validating',
+      'waiting_for_approval',
+      'completed',
+      'failed',
+      'cancelled',
+    ])
+    .optional(),
+  activeAgent: z
+    .enum(['planner', 'researcher', 'executor', 'critic'])
+    .optional(),
+  backgroundTaskId: z.string().optional(),
   workspacePath: z.string().optional(),
   memoryFilePath: z.string().optional(),
   memorySummary: z.string().optional(),
@@ -172,12 +209,15 @@ const TaskRunSchema = z.object({
   currentStep: z.string().optional(),
   factsFound: z.array(z.string()).optional(),
   sourcesVisited: z.array(z.string()).optional(),
+  sourceRecords: z.array(TaskSourceRecordSchema).optional(),
+  toolCalls: z.array(TaskToolCallRecordSchema).optional(),
   artifacts: z.array(TaskArtifactSchema).optional(),
   approvalEvents: z.array(ApprovalEventSchema).optional(),
   completionProof: CompletionProofSchema.optional(),
   roadmapProgress: RoadmapProgressSchema.optional(),
   finalAnswer: z.string().optional(),
   error: z.string().optional(),
+  validationFailures: z.array(z.string()).optional(),
   validationStatus: z
     .enum(['pending', 'valid', 'invalid', 'failed'])
     .optional(),

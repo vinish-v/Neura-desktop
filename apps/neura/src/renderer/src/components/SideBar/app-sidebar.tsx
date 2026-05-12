@@ -228,7 +228,7 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
               onClick={goHome}
             >
               <LayoutDashboard />
-              Dashboard
+              Agent Workspace
             </SidebarMenuButton>
             <SidebarMenuButton
               className="rounded-lg border border-blue-400/20 bg-blue-500/10 font-medium text-blue-100 hover:bg-blue-500/15 hover:text-white"
@@ -242,7 +242,7 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
               onClick={handleDashboardClick}
             >
               <FolderClock />
-              Active Tasks
+              Queue
             </SidebarMenuButton>
             <SidebarMenuButton
               className="rounded-lg font-medium text-white/85 hover:bg-white/8 hover:text-white"

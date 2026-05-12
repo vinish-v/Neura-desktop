@@ -11,6 +11,8 @@ import {
   TaskArtifact,
   TaskProgressItem,
   TaskRunRecord,
+  TaskSourceRecord,
+  TaskToolCallRecord,
   TaskRunStatus,
   TaskTodoItem,
 } from '@main/store/types';
@@ -34,8 +36,11 @@ export const createTaskRun = (
   progressItems: [],
   factsFound: [],
   sourcesVisited: [],
+  sourceRecords: [],
+  toolCalls: [],
   artifacts: [],
   approvalEvents: [],
+  validationFailures: [],
   validationStatus: runMode === 'executor_browser' ? 'pending' : undefined,
   startedAt: Date.now(),
 });
@@ -46,8 +51,11 @@ const normalizeRun = (run: TaskRunRecord): TaskRunRecord => ({
   progressItems: run.progressItems || [],
   factsFound: run.factsFound || [],
   sourcesVisited: run.sourcesVisited || [],
+  sourceRecords: run.sourceRecords || [],
+  toolCalls: run.toolCalls || [],
   artifacts: run.artifacts || [],
   approvalEvents: run.approvalEvents || [],
+  validationFailures: run.validationFailures || [],
   retrievedRunIds: run.retrievedRunIds || [],
 });
 
@@ -124,6 +132,10 @@ export class TaskRunRegistry {
   static setStatus(runId: string, status: TaskRunStatus, error?: string) {
     return TaskRunRegistry.patch(runId, {
       status,
+      phase:
+        status === 'completed' || status === 'failed' || status === 'cancelled'
+          ? status
+          : undefined,
       error,
       completedAt:
         status === 'completed' || status === 'failed' || status === 'cancelled'
@@ -153,6 +165,73 @@ export class TaskRunRegistry {
       ...run,
       progressItems: [...run.progressItems, progress],
       currentStep: item.title,
+    });
+  }
+
+  static addSource(runId: string, source: Omit<TaskSourceRecord, 'id' | 'capturedAt'>) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run || !source.url.trim()) {
+      return null;
+    }
+    const url = source.url.trim();
+    const existingIndex = run.sourceRecords.findIndex((item) => item.url === url);
+    const sourceRecord: TaskSourceRecord = {
+      ...source,
+      url,
+      id:
+        existingIndex >= 0
+          ? run.sourceRecords[existingIndex].id
+          : `source-${Date.now()}-${run.sourceRecords.length}`,
+      capturedAt: Date.now(),
+    };
+    const sourceRecords =
+      existingIndex >= 0
+        ? run.sourceRecords.map((item, index) =>
+            index === existingIndex ? { ...item, ...sourceRecord } : item,
+          )
+        : [...run.sourceRecords, sourceRecord];
+    return TaskRunRegistry.upsert({
+      ...run,
+      sourcesVisited: [...new Set([...run.sourcesVisited, url])].slice(-50),
+      sourceRecords: sourceRecords.slice(-50),
+    });
+  }
+
+  static addToolCall(
+    runId: string,
+    toolCall: Omit<TaskToolCallRecord, 'id' | 'startedAt'>,
+  ) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run) {
+      return null;
+    }
+    const startedAt = Date.now();
+    const record: TaskToolCallRecord = {
+      ...toolCall,
+      id: `tool-${startedAt}-${run.toolCalls.length}`,
+      startedAt,
+      completedAt:
+        toolCall.status === 'completed' || toolCall.status === 'failed'
+          ? startedAt
+          : undefined,
+    };
+    return TaskRunRegistry.upsert({
+      ...run,
+      toolCalls: [...run.toolCalls, record].slice(-100),
+      phase: 'acting',
+    });
+  }
+
+  static addValidationFailure(runId: string, reason: string) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run || !reason.trim()) {
+      return null;
+    }
+    return TaskRunRegistry.upsert({
+      ...run,
+      validationFailures: [...run.validationFailures, reason.trim()].slice(-20),
+      validationStatus: 'invalid',
+      phase: 'validating',
     });
   }
 

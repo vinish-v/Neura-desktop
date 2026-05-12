@@ -22,7 +22,14 @@ export type MultiAgentOrchestratorOptions = MultiAgentRuntime & {
   goal: string;
   taskId: string;
   maxIterations?: number;
+  signal?: AbortSignal;
   onEvent?: (event: MultiAgentEvent) => void | Promise<void>;
+};
+
+const throwIfAborted = (signal?: AbortSignal) => {
+  if (signal?.aborted) {
+    throw new Error('Multi-agent task cancelled.');
+  }
 };
 
 const createObservation = (
@@ -50,6 +57,7 @@ export class MultiAgentOrchestrator {
   }
 
   async run(options: MultiAgentOrchestratorOptions): Promise<string> {
+    throwIfAborted(options.signal);
     const memory = options.memory;
     const retrievedMemory = memory
       ? await memory.search(options.goal, { limit: 6 })
@@ -71,6 +79,7 @@ export class MultiAgentOrchestrator {
     const agents = this.createAgents(options);
 
     while (!state.isComplete && state.iteration < state.maxIterations) {
+      throwIfAborted(options.signal);
       const agentName = this.supervisor.decideNextAgent(state);
       const agent = agents.get(agentName);
       if (!agent) {
@@ -89,6 +98,7 @@ export class MultiAgentOrchestrator {
       await options.onEvent?.({ type: 'agent.started', agentName, state });
 
       const result = await agent.execute(state);
+      throwIfAborted(options.signal);
       state.iteration += 1;
       state.lastAgent = agentName;
       state.lastResult = result;
@@ -159,8 +169,10 @@ export class MultiAgentOrchestrator {
     }
 
     if (!state.finalAnswer) {
+      throwIfAborted(options.signal);
       state.finalAnswer = await this.finalize(options, state);
     }
+    throwIfAborted(options.signal);
     state.isComplete = true;
     state.status = state.error ? 'failed' : 'completed';
 
