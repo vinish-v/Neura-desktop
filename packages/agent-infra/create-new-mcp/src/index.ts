@@ -19,18 +19,23 @@ const argv = mri<{
   template?: string;
   help?: boolean;
   overwrite?: boolean;
+  skill?: boolean;
+  fromRun?: string;
 }>(process.argv.slice(2), {
   alias: { h: 'help', t: 'template' },
-  boolean: ['help', 'overwrite'],
-  string: ['template'],
+  boolean: ['help', 'overwrite', 'skill'],
+  string: ['template', 'fromRun'],
 });
 const cwd = process.cwd();
+const invokedAsSkill = path.basename(process.argv[1] || '').includes('skill');
 
 // prettier-ignore
 const helpMessage = `\
 Usage: create-mcp-server [OPTION]... [DIRECTORY]
+       create-new-skill [OPTION]... [DIRECTORY]
 
 Create a new MCP Server project.
+Create a new Neura Skill JSON when invoked as create-new-skill or with --skill.
 With no arguments, start the CLI in interactive mode.
 `
 
@@ -88,8 +93,106 @@ const renameFiles: Record<string, string | undefined> = {
 };
 
 const defaultTargetDir = 'mcp-server';
+const defaultSkillDir = 'skill';
+
+function toSkillName(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+}
+
+async function initSkill() {
+  const argTargetDir = argv._[0]
+    ? formatTargetDir(String(argv._[0]))
+    : undefined;
+  const help = argv.help;
+  if (help) {
+    console.log(helpMessage);
+    return;
+  }
+
+  const cancel = () => prompts.cancel('Operation cancelled');
+  let targetDir = argTargetDir;
+  if (!targetDir) {
+    const projectName = await prompts.text({
+      message: 'Skill folder:',
+      defaultValue: defaultSkillDir,
+      placeholder: defaultSkillDir,
+    });
+    if (prompts.isCancel(projectName)) return cancel();
+    targetDir = formatTargetDir(projectName as string);
+  }
+
+  const root = path.join(cwd, targetDir);
+  fs.mkdirSync(root, { recursive: true });
+
+  const nameResult = await prompts.text({
+    message: 'Skill name:',
+    defaultValue: toSkillName(path.basename(path.resolve(targetDir))),
+    validate(value) {
+      if (!toSkillName(value)) {
+        return 'Skill name is required';
+      }
+    },
+  });
+  if (prompts.isCancel(nameResult)) return cancel();
+
+  const descriptionResult = await prompts.text({
+    message: 'Description:',
+    placeholder: 'Conduct high-quality reusable work...',
+  });
+  if (prompts.isCancel(descriptionResult)) return cancel();
+
+  const toolsResult = await prompts.text({
+    message: 'Tools (comma separated):',
+    defaultValue: 'search,browser,filesystem',
+  });
+  if (prompts.isCancel(toolsResult)) return cancel();
+
+  const name = toSkillName(String(nameResult));
+  const skill = {
+    name,
+    description: String(descriptionResult),
+    instructions: [
+      `Use this skill for: ${String(descriptionResult)}`,
+      '',
+      'Clarify the user goal from arguments.',
+      'Use the listed MCP tools when they provide real evidence or action.',
+      'Return a concise, verified result with sources or changed files when available.',
+    ].join('\n'),
+    tools: String(toolsResult)
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+    chains: [],
+    examples: argv.fromRun
+      ? [
+          {
+            input: `Generated from task run ${argv.fromRun}`,
+          },
+        ]
+      : [],
+    tags: ['custom'],
+    version: '1.0.0',
+    author: 'Neura',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+
+  const outputPath = path.join(root, `${name}.json`);
+  fs.writeFileSync(outputPath, `${JSON.stringify(skill, null, 2)}\n`, 'utf8');
+  prompts.outro(`Created skill: ${outputPath}`);
+}
 
 async function init() {
+  if (argv.skill || invokedAsSkill) {
+    await initSkill();
+    return;
+  }
+
   const argTargetDir = argv._[0]
     ? formatTargetDir(String(argv._[0]))
     : undefined;

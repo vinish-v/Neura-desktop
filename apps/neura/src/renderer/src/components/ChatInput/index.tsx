@@ -27,6 +27,7 @@ import {
   Play,
   Plus,
   Send,
+  Sparkles,
   Square,
   X,
 } from 'lucide-react';
@@ -257,7 +258,11 @@ const ChatInput = ({
       instructions,
       history,
     );
-    const effectiveInstructions = followUpAutomation.instructions;
+    const selectedSkill = settings.selectedSkillName?.trim();
+    const effectiveInstructions =
+      selectedSkill && !followUpAutomation.shouldAutomate
+        ? `/skill ${selectedSkill} ${followUpAutomation.instructions}`
+        : followUpAutomation.instructions;
     const interaction = followUpAutomation.shouldAutomate
       ? {
           mode: 'automation' as const,
@@ -327,6 +332,12 @@ const ChatInput = ({
       () => {
         setLocalInstructions('');
         setAttachments([]);
+        if (selectedSkill) {
+          updateSetting({
+            ...settings,
+            selectedSkillName: '',
+          });
+        }
       },
       instructions,
     );
@@ -374,8 +385,7 @@ const ChatInput = ({
           m?.from === 'human' &&
           m?.value !== IMAGE_PLACEHOLDER &&
           !isInternalAutomationMessage(m?.value),
-      )
-      ?.value || '';
+      )?.value || '';
 
   const stopRun = async () => {
     await stopAgentRuning(() => {
@@ -514,6 +524,25 @@ const ChatInput = ({
               </div>
             )}
             <div className="absolute bottom-4 left-4 flex items-center gap-2">
+              {settings.selectedSkillName && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-9 rounded-lg border border-blue-400/25 bg-blue-400/10 px-3 text-xs text-blue-100 hover:bg-blue-400/15"
+                  disabled={running || disabled}
+                  onClick={() =>
+                    updateSetting({
+                      ...settings,
+                      selectedSkillName: '',
+                    })
+                  }
+                  title="Clear selected skill"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  {settings.selectedSkillName}
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="secondary"

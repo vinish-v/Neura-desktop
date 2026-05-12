@@ -45,18 +45,79 @@ export const DEFAULT_SETTING: LocalStore = {
     updatedAt: Date.now(),
   },
   taskRuns: [],
+  backgroundTasks: [],
   neuraRoadmap: createStabilizedV1Roadmap(),
   connectors: [
     {
+      id: 'gmail',
+      displayName: 'Gmail',
+      type: 'oauth',
+      enabled: false,
+      authState: 'not_configured',
+      permissionLevel: 'read',
+      tools: ['gmail_list_unread'],
+      config: {
+        clientId: '',
+        redirectUri: 'http://127.0.0.1:54887/oauth/callback',
+      },
+    },
+    {
+      id: 'notion',
+      displayName: 'Notion',
+      type: 'api',
+      enabled: false,
+      authState: 'not_configured',
+      permissionLevel: 'write',
+      tools: ['notion_create_page'],
+      config: {
+        parentPageId: '',
+        databaseId: '',
+      },
+    },
+    {
+      id: 'slack',
+      displayName: 'Slack',
+      type: 'webhook',
+      enabled: false,
+      authState: 'not_configured',
+      permissionLevel: 'write',
+      tools: ['slack_post_message'],
+      config: {},
+    },
+    {
       id: 'github',
       displayName: 'GitHub',
+      type: 'api',
+      enabled: false,
+      authState: 'not_configured',
+      permissionLevel: 'write',
+      tools: ['github_create_issue'],
+      config: {
+        repository: '',
+        apiBase: 'https://api.github.com',
+      },
+    },
+    {
+      id: 'generic_rest',
+      displayName: 'Generic REST',
+      type: 'rest',
+      enabled: false,
+      authState: 'not_configured',
+      permissionLevel: 'write',
+      tools: ['rest_request'],
+      config: {
+        baseUrl: '',
+      },
+    },
+    {
+      id: 'legacy_github_export',
+      displayName: 'Legacy GitHub Export',
       type: 'builtin',
       enabled: false,
       authState: 'not_configured',
       permissionLevel: 'write',
-      tools: ['connector_github_issue', 'connector_github_export'],
+      tools: ['connector_github_export'],
       config: {
-        token: '',
         repository: '',
         apiBase: 'https://api.github.com',
       },
@@ -80,6 +141,19 @@ export const DEFAULT_SETTING: LocalStore = {
       tools: ['connector_drive_export'],
     },
     {
+      id: 'builtin_mcp',
+      displayName: 'Neura Built-in MCP Tools',
+      type: 'mcp',
+      enabled: false,
+      authState: 'configured',
+      permissionLevel: 'write',
+      tools: ['filesystem', 'commands', 'search', 'browser'],
+      config: {
+        servers: 'filesystem,commands,search,browser',
+        allowedDirectories: '',
+      },
+    },
+    {
       id: 'custom_mcp',
       displayName: 'Custom MCP Server',
       type: 'mcp',
@@ -91,10 +165,14 @@ export const DEFAULT_SETTING: LocalStore = {
         command: '',
         args: '',
         env: '',
+        url: '',
       },
     },
   ],
+  connectorAuditLog: [],
   multimodalProviders: {},
+  skillsEnabled: true,
+  selectedSkillName: '',
 };
 
 const firstNonEmptyString = (...values: Array<unknown>): string => {
@@ -104,6 +182,28 @@ const firstNonEmptyString = (...values: Array<unknown>): string => {
     }
   }
   return '';
+};
+
+const normalizeConnectors = (
+  connectors: LocalStore['connectors'],
+): LocalStore['connectors'] => {
+  const byId = new Map(
+    (Array.isArray(connectors) ? connectors : []).map((connector) => [
+      connector.id,
+      connector,
+    ]),
+  );
+  return (DEFAULT_SETTING.connectors || []).map((connector) => {
+    const existing = byId.get(connector.id);
+    return {
+      ...connector,
+      ...existing,
+      config: {
+        ...(connector.config || {}),
+        ...(existing?.config || {}),
+      },
+    };
+  });
 };
 
 const normalizeSettingStore = (state: Partial<LocalStore>): LocalStore => {
@@ -156,11 +256,17 @@ const normalizeSettingStore = (state: Partial<LocalStore>): LocalStore => {
   merged.utioBaseUrl = merged.utioBaseUrl || '';
   merged.agentMemory = merged.agentMemory || DEFAULT_SETTING.agentMemory;
   merged.taskRuns = Array.isArray(merged.taskRuns) ? merged.taskRuns : [];
+  merged.backgroundTasks = Array.isArray(merged.backgroundTasks)
+    ? merged.backgroundTasks
+    : [];
   merged.neuraRoadmap = normalizeNeuraRoadmap(merged.neuraRoadmap);
-  merged.connectors = Array.isArray(merged.connectors)
-    ? merged.connectors
-    : DEFAULT_SETTING.connectors;
+  merged.connectors = normalizeConnectors(merged.connectors);
+  merged.connectorAuditLog = Array.isArray(merged.connectorAuditLog)
+    ? merged.connectorAuditLog
+    : [];
   merged.multimodalProviders = merged.multimodalProviders || {};
+  merged.skillsEnabled = merged.skillsEnabled ?? true;
+  merged.selectedSkillName = merged.selectedSkillName || '';
 
   return merged;
 };

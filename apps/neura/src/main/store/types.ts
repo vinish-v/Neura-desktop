@@ -29,7 +29,10 @@ export type AgentRunMode =
   | 'wide_research'
   | 'website_builder'
   | 'artifact_workflow'
-  | 'multimodal_workflow';
+  | 'multimodal_workflow'
+  | 'mcp_autonomous'
+  | 'skill'
+  | 'multi_agent';
 
 export type TaskComplexity = 'simple' | 'multi_step' | 'research';
 
@@ -81,6 +84,31 @@ export type TaskProgressItem = {
   detail?: string;
   status: TaskTodoStatus;
   createdAt: number;
+  completedAt?: number;
+  agentName?: 'planner' | 'researcher' | 'executor' | 'critic';
+  eventType?: string;
+};
+
+export type BackgroundTaskKind = 'mcp_autonomous' | 'skill' | 'multi_agent';
+
+export type BackgroundTaskStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export type BackgroundTaskRecord = {
+  id: string;
+  kind: BackgroundTaskKind;
+  goal: string;
+  status: BackgroundTaskStatus;
+  runId?: string;
+  skillName?: string;
+  arguments?: Record<string, unknown>;
+  error?: string;
+  createdAt: number;
+  startedAt?: number;
   completedAt?: number;
 };
 
@@ -277,13 +305,23 @@ export type ConnectorPermissionLevel = 'read' | 'write' | 'admin';
 export type ConnectorDefinition = {
   id: string;
   displayName: string;
-  type: 'builtin' | 'mcp' | 'webhook' | 'export';
+  type: 'builtin' | 'mcp' | 'webhook' | 'export' | 'oauth' | 'api' | 'rest';
   enabled: boolean;
   authState: 'not_configured' | 'configured' | 'error';
   permissionLevel: ConnectorPermissionLevel;
   tools: string[];
   config?: Record<string, string>;
   updatedAt?: number;
+};
+
+export type ConnectorAuditEvent = {
+  id: string;
+  connectorId: string;
+  toolName: string;
+  permission: ConnectorPermissionLevel;
+  status: 'completed' | 'failed';
+  error?: string;
+  createdAt: number;
 };
 
 export type AppState = {

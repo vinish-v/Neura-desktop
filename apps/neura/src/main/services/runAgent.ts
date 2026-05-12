@@ -46,12 +46,61 @@ import {
   isEmbeddedResearchTask,
   runEmbeddedBrowserResearchTask,
 } from './embeddedBrowserResearchTask';
+import { TaskManager } from './task-manager';
 
 const INTERNAL_AGENT_FEEDBACK_PATTERN =
   /previous response was not executable|authorized benign UI automation|Action Space|previous action had invalid coordinates|browser state has not changed after repeated actions|previous browser DOM action could not be executed|continue autonomously: take a fresh screenshot\/DOM map|do not finish with this recovery message|element id was stale|Could not (?:type into|click) that DOM element|Refresh the DOM map|visible current DOM element|regex|pattern|validator|validated \d+ local computer actor|command output contains|planner checklist|planner step|predictionParsed/i;
 
 const isInternalAgentFeedback = (value?: string) =>
   Boolean(value && INTERNAL_AGENT_FEEDBACK_PATTERN.test(value));
+
+const getMcpGoal = (instructions: string) => {
+  const trimmed = instructions.trim();
+  if (/^\/mcp\b/i.test(trimmed)) {
+    return trimmed.replace(/^\/mcp\b/i, '').trim();
+  }
+  if (/^use\s+mcp\s*:/i.test(trimmed)) {
+    return trimmed.replace(/^use\s+mcp\s*:/i, '').trim();
+  }
+  return '';
+};
+
+const getSkillRequest = (instructions: string) => {
+  const trimmed = instructions.trim();
+  const slashMatch = trimmed.match(/^\/skill\s+([a-z0-9-_.]+)\s*(.*)$/i);
+  if (slashMatch) {
+    return {
+      name: slashMatch[1],
+      goal: slashMatch[2]?.trim() || `Use ${slashMatch[1]} skill`,
+    };
+  }
+  const naturalMatch = trimmed.match(
+    /^use\s+([a-z0-9-_.]+)\s+skill(?:\s+for|\s*:)?\s*(.*)$/i,
+  );
+  if (naturalMatch) {
+    return {
+      name: naturalMatch[1],
+      goal:
+        naturalMatch[2]?.trim() ||
+        `Use ${naturalMatch[1]} skill for the user's task.`,
+    };
+  }
+  return null;
+};
+
+const getMultiAgentGoal = (instructions: string) => {
+  const trimmed = instructions.trim();
+  if (/^\/multi-agent\b/i.test(trimmed)) {
+    return trimmed.replace(/^\/multi-agent\b/i, '').trim();
+  }
+  if (/^\/multiagent\b/i.test(trimmed)) {
+    return trimmed.replace(/^\/multiagent\b/i, '').trim();
+  }
+  if (/^use\s+multi[-\s]?agent\s*:/i.test(trimmed)) {
+    return trimmed.replace(/^use\s+multi[-\s]?agent\s*:/i, '').trim();
+  }
+  return '';
+};
 
 const extractFinalAnswer = (messages: ConversationWithSoM[]) => {
   for (const message of [...messages].reverse()) {
@@ -157,6 +206,28 @@ export const runAgent = async (
 
   const language = settings.language ?? 'en';
   rememberPreferenceFromInstruction(instructions);
+  const multiAgentGoal = getMultiAgentGoal(instructions);
+  if (multiAgentGoal) {
+    await TaskManager.getInstance().startMultiAgentTask(multiAgentGoal);
+    return;
+  }
+  const mcpGoal = getMcpGoal(instructions);
+  if (mcpGoal) {
+    await TaskManager.getInstance().startMcpAutonomousTask(mcpGoal);
+    return;
+  }
+  const skillRequest = getSkillRequest(instructions);
+  if (skillRequest) {
+    await TaskManager.getInstance().startSkillTask({
+      skillName: skillRequest.name,
+      goal: skillRequest.goal,
+      arguments: {
+        query: skillRequest.goal,
+      },
+    });
+    return;
+  }
+
   const intentDecision = await routeIntent({
     configuredOperator: settings.operator,
     instructions,
@@ -224,10 +295,10 @@ export const runAgent = async (
   }
 
   if (
-    (intentDecision.runMode === 'gui_browser' ||
-      intentDecision.taskType === 'browser_navigation' ||
-      intentDecision.taskType === 'browser_research' ||
-      intentDecision.requiredTools.includes('browser'))
+    intentDecision.runMode === 'gui_browser' ||
+    intentDecision.taskType === 'browser_navigation' ||
+    intentDecision.taskType === 'browser_research' ||
+    intentDecision.requiredTools.includes('browser')
   ) {
     const isResearch = isEmbeddedResearchTask(instructions);
     logger.info(
@@ -355,11 +426,11 @@ export const runAgent = async (
             ? 'paused'
             : status === StatusEnum.CALL_USER
               ? 'waiting'
-            : status === StatusEnum.ERROR
-              ? 'failed'
-              : status === StatusEnum.END
-                ? 'completed'
-                : undefined,
+              : status === StatusEnum.ERROR
+                ? 'failed'
+                : status === StatusEnum.END
+                  ? 'completed'
+                  : undefined,
       currentUrl: url,
       display: url,
       activity: latestAction?.action_type

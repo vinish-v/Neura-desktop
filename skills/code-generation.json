@@ -1,0 +1,16 @@
+{
+  "name": "code-generation",
+  "description": "Plan, implement, and verify a scoped code change in a repository.",
+  "instructions": "Inspect the relevant files before editing. Follow the repository's existing patterns. Make tightly scoped changes, avoid mock or hardcoded behavior, and run the most relevant verification command. Return changed files, reasoning, and verification results.",
+  "tools": ["filesystem", "commands"],
+  "chains": [],
+  "examples": [
+    {
+      "input": "Add a settings toggle to a React app",
+      "output": "A scoped implementation with typecheck or test result."
+    }
+  ],
+  "tags": ["code", "implementation", "verification"],
+  "version": "1.0.0",
+  "author": "Neura"
+}

@@ -1,0 +1,16 @@
+{
+  "name": "meeting-prep",
+  "description": "Prepare a meeting brief with context, agenda, questions, and likely decisions.",
+  "instructions": "Use any provided notes, files, names, company, or topic. Research missing public context when useful. Produce a meeting brief with background, agenda, stakeholder notes, key questions, risks, and desired outcomes.",
+  "tools": ["filesystem", "search", "browser"],
+  "chains": [],
+  "examples": [
+    {
+      "input": "Prepare for a sales call with an EV charging startup",
+      "output": "A briefing with company context, agenda, and questions."
+    }
+  ],
+  "tags": ["meeting", "brief", "prep"],
+  "version": "1.0.0",
+  "author": "Neura"
+}

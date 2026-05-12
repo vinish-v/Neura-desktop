@@ -282,6 +282,21 @@ importers:
       '@agent-infra/logger':
         specifier: workspace:*
         version: link:../../packages/agent-infra/logger
+      '@agent-infra/mcp-client':
+        specifier: workspace:*
+        version: link:../../packages/agent-infra/mcp-client
+      '@agent-infra/mcp-server-browser':
+        specifier: workspace:*
+        version: link:../../packages/agent-infra/mcp-servers/browser
+      '@agent-infra/mcp-server-commands':
+        specifier: workspace:*
+        version: link:../../packages/agent-infra/mcp-servers/commands
+      '@agent-infra/mcp-server-filesystem':
+        specifier: workspace:*
+        version: link:../../packages/agent-infra/mcp-servers/filesystem
+      '@agent-infra/mcp-server-search':
+        specifier: workspace:*
+        version: link:../../packages/agent-infra/mcp-servers/search
       '@agent-infra/shared':
         specifier: workspace:*
         version: link:../../packages/agent-infra/shared

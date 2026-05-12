@@ -1,0 +1,16 @@
+{
+  "name": "deep-research-brief",
+  "description": "Create a concise source-backed brief for complex questions.",
+  "instructions": "Break the question into research subtopics. Use search and browser tools to collect credible sources. Compare evidence, note uncertainty, and synthesize a final brief with bullets, source links, and a short executive summary.",
+  "tools": ["search", "browser"],
+  "chains": ["web-scraping-report"],
+  "examples": [
+    {
+      "input": "Current state of AI coding agents",
+      "output": "A short brief with trends, vendors, evidence, and risks."
+    }
+  ],
+  "tags": ["research", "brief", "sources"],
+  "version": "1.0.0",
+  "author": "Neura"
+}

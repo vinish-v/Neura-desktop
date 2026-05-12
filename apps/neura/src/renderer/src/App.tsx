@@ -13,6 +13,9 @@ import './styles/globals.css';
 const Home = lazy(() => import('./pages/home'));
 const LocalOperator = lazy(() => import('./pages/local'));
 const Projects = lazy(() => import('./pages/projects'));
+const Skills = lazy(() => import('./pages/skills'));
+const Dashboard = lazy(() => import('./pages/dashboard'));
+const Connectors = lazy(() => import('./pages/connectors'));
 
 export default function App() {
   return (
@@ -29,6 +32,9 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/local" element={<LocalOperator />} />
             <Route path="/projects" element={<Projects />} />
+            <Route path="/skills" element={<Skills />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/connectors" element={<Connectors />} />
           </Route>
         </Routes>
         <Toaster

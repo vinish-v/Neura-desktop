@@ -1,0 +1,16 @@
+{
+  "name": "data-cleaning",
+  "description": "Inspect and clean CSV, JSON, or spreadsheet-like data files.",
+  "instructions": "Inspect the file schema and sample rows. Identify missing values, inconsistent names, duplicate rows, malformed fields, and suspicious outliers. Create a safe cleaned output file when requested, preserving the original. Return a summary of changes and remaining caveats.",
+  "tools": ["filesystem", "commands"],
+  "chains": [],
+  "examples": [
+    {
+      "input": "Clean this leads CSV",
+      "output": "A cleaned file plus a data quality summary."
+    }
+  ],
+  "tags": ["data", "csv", "cleaning"],
+  "version": "1.0.0",
+  "author": "Neura"
+}

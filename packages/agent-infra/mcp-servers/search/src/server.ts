@@ -17,6 +17,11 @@ import {
 import type { SearchSettings } from '@agent-infra/shared';
 import type { LocalBrowser } from '@agent-infra/browser';
 
+type WebSearchArgs = {
+  query: string;
+  count?: number;
+};
+
 let searchSetting: SearchSettings & { externalBrowser: LocalBrowser | null } = {
   provider: SearchProvider.BrowserSearch,
   providerConfig: {
@@ -176,7 +181,14 @@ export function createServer(config?: SearchSettings): McpServer {
   });
 
   // === Tools ===
-  server.tool(
+  const registerTool = server.tool.bind(server) as unknown as (
+    name: string,
+    description: string,
+    schema: Record<string, z.ZodTypeAny>,
+    handler: (args: WebSearchArgs) => Promise<unknown>,
+  ) => void;
+
+  registerTool(
     'web_search',
     'Search the web for information',
     {

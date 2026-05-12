@@ -174,7 +174,14 @@ function createServer(args: { allowedDirectories: string[] }): McpServer {
     version: process.env.VERSION || '0.0.1',
   });
 
-  server.tool(
+  const registerTool = server.tool.bind(server) as unknown as (
+    name: string,
+    description: string,
+    schema: Record<string, unknown>,
+    handler: (args: unknown) => Promise<unknown>,
+  ) => void;
+
+  registerTool(
     'read_file',
     'Read the complete contents of a file from the file system. ' +
       'Handles various text encodings and provides detailed error messages ' +
@@ -194,7 +201,7 @@ function createServer(args: { allowedDirectories: string[] }): McpServer {
     },
   );
 
-  server.tool(
+  registerTool(
     'read_multiple_files',
     'Read the contents of multiple files simultaneously. This is more ' +
       'efficient than reading files one by one when you need to analyze ' +
@@ -228,7 +235,7 @@ function createServer(args: { allowedDirectories: string[] }): McpServer {
     },
   );
 
-  server.tool(
+  registerTool(
     'write_file',
     'Create a new file or completely overwrite an existing file with new content. ' +
       'Use with caution as it will overwrite existing files without warning. ' +
@@ -249,7 +256,7 @@ function createServer(args: { allowedDirectories: string[] }): McpServer {
     },
   );
 
-  server.tool(
+  registerTool(
     'edit_file',
     'Make line-based edits to a text file. Each edit replaces exact line sequences ' +
       'with new content. Returns a git-style diff showing the changes made. ' +
@@ -272,7 +279,7 @@ function createServer(args: { allowedDirectories: string[] }): McpServer {
     },
   );
 
-  server.tool(
+  registerTool(
     'create_directory',
     'Create a new directory or ensure a directory exists. Can create multiple ' +
       'nested directories in one operation. If the directory already exists, ' +
@@ -299,7 +306,7 @@ function createServer(args: { allowedDirectories: string[] }): McpServer {
     },
   );
 
-  server.tool(
+  registerTool(
     'list_directory',
     'Get a detailed listing of all files and directories in a specified path. ' +
       'Results clearly distinguish between files and directories with [FILE] and [DIR] ' +
@@ -327,7 +334,7 @@ function createServer(args: { allowedDirectories: string[] }): McpServer {
     },
   );
 
-  server.tool(
+  registerTool(
     'directory_tree',
     'Get a recursive tree view of files and directories as a JSON structure. ' +
       "Each entry includes 'name', 'type' (file/directory), and 'children' for directories. " +
@@ -382,7 +389,7 @@ function createServer(args: { allowedDirectories: string[] }): McpServer {
     },
   );
 
-  server.tool(
+  registerTool(
     'move_file',
     'Move or rename files and directories. Can move files between directories ' +
       'and rename them in a single operation. If the destination exists, the ' +
@@ -408,7 +415,7 @@ function createServer(args: { allowedDirectories: string[] }): McpServer {
     },
   );
 
-  server.tool(
+  registerTool(
     'search_files',
     'Recursively search for files and directories matching a pattern. ' +
       'Searches through all subdirectories from the starting path. The search ' +
@@ -438,7 +445,7 @@ function createServer(args: { allowedDirectories: string[] }): McpServer {
     },
   );
 
-  server.tool(
+  registerTool(
     'get_file_info',
     'Retrieve detailed metadata about a file or directory. Returns comprehensive ' +
       'information including size, creation time, last modified time, permissions, ' +
@@ -465,7 +472,7 @@ function createServer(args: { allowedDirectories: string[] }): McpServer {
     },
   );
 
-  server.tool(
+  registerTool(
     'list_allowed_directories',
     'Returns the list of directories that this server is allowed to access. ' +
       'Use this to understand which directories are available before trying to access files.',

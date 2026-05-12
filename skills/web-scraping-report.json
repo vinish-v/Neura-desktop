@@ -1,0 +1,16 @@
+{
+  "name": "web-scraping-report",
+  "description": "Extract useful information from one or more web pages and turn it into a clean report.",
+  "instructions": "Open the target URLs or search for relevant pages if no URL is provided. Extract page title, main claims, tables, links, dates, and source details. Filter boilerplate. Return a report with key findings, quoted data points when available, source links, and any caveats.",
+  "tools": ["browser", "search", "filesystem"],
+  "chains": [],
+  "examples": [
+    {
+      "input": "Scrape pricing pages for three CRM tools",
+      "output": "A structured pricing comparison with source URLs."
+    }
+  ],
+  "tags": ["web", "scraping", "report"],
+  "version": "1.0.0",
+  "author": "Neura"
+}

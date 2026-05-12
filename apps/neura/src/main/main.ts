@@ -31,6 +31,13 @@ import { sanitizeState } from './utils/sanitizeState';
 import { windowManager } from './services/windowManager';
 import { checkBrowserAvailability } from './services/browserCheck';
 import { TaskRunRegistry } from './services/taskRunRegistry';
+import { MCPService, registerMcpIpcHandlers } from './services/mcp-service';
+import { registerSkillsIpcHandlers } from './services/skills-service';
+import {
+  BackgroundTaskService,
+  registerBackgroundTaskIpcHandlers,
+} from './services/background-task-service';
+import { registerConnectorsIpcHandlers } from './services/connectors-service';
 
 const { isProd } = env;
 
@@ -137,6 +144,12 @@ const initializeApp = async () => {
   logger.info('mainZustandBridge');
 
   const { unsubscribe } = registerIPCHandlers([mainWindow]);
+  await MCPService.getInstance()
+    .start()
+    .catch((error) => {
+      logger.warn('[MCPService] startup skipped or failed:', error);
+    });
+  BackgroundTaskService.getInstance().start();
 
   app.on('window-all-closed', () => {
     logger.info('window-all-closed');
@@ -153,6 +166,8 @@ const initializeApp = async () => {
 
   app.on('quit', () => {
     logger.info('app quit');
+    BackgroundTaskService.getInstance().cleanup();
+    void MCPService.getInstance().cleanup();
     unsubscribe();
   });
 
@@ -218,6 +233,10 @@ const registerIPCHandlers = (
   });
 
   registerSettingsHandlers();
+  registerMcpIpcHandlers();
+  registerSkillsIpcHandlers();
+  registerBackgroundTaskIpcHandlers();
+  registerConnectorsIpcHandlers();
   // register ipc services routes
   registerIpcMain(ipcRoutes);
 

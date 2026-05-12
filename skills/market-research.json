@@ -1,0 +1,16 @@
+{
+  "name": "market-research",
+  "description": "Conduct structured market research with sources, trends, risks, and next actions.",
+  "instructions": "Clarify the market, geography, customer segment, and time horizon from the arguments. Use search and browser tools to gather current source-backed facts. Produce a concise report with market overview, demand drivers, customer segments, competitor landscape, risks, opportunities, and recommended next steps. Include sources when tools return URLs.",
+  "tools": ["search", "browser", "filesystem"],
+  "chains": ["competitor-analysis", "web-scraping-report"],
+  "examples": [
+    {
+      "input": "Electric vehicles in India",
+      "output": "A report covering EV demand, policy, charging infrastructure, competitors, and risks."
+    }
+  ],
+  "tags": ["research", "market", "strategy"],
+  "version": "1.0.0",
+  "author": "Neura"
+}

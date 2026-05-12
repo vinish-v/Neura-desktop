@@ -116,6 +116,7 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
   const [workspaceState, setWorkspaceState] = useState<WorkspaceRoot[]>([]);
   const finalAnswer = publicFinalAnswer(taskState?.finalAnswer);
   const artifacts = taskState?.artifacts.slice(-6) || [];
+  const todoItems = taskState?.todoItems || [];
   const latestProgress = useMemo(
     () =>
       (taskState?.progressItems || [])
@@ -262,6 +263,47 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
             <div className="break-words [&_li]:my-1 [&_ol]:pl-5 [&_p]:my-2 [&_pre]:overflow-x-auto [&_ul]:pl-5">
               <Markdown>{finalAnswer}</Markdown>
             </div>
+          </div>
+        </div>
+      )}
+
+      {todoItems.length > 0 && (
+        <div className="mt-4 border-t border-white/10 pt-3">
+          <div className="mb-2 text-xs font-medium text-muted-foreground">
+            Steps
+          </div>
+          <div className="grid gap-2">
+            {todoItems.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-start gap-2 rounded-md border border-white/10 bg-black/10 px-3 py-2 text-xs"
+              >
+                <span
+                  className={cn(
+                    'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
+                    item.status === 'done' &&
+                      'border-emerald-400/40 bg-emerald-400/10 text-emerald-200',
+                    item.status === 'failed' &&
+                      'border-red-400/40 bg-red-400/10 text-red-200',
+                    item.status === 'in_progress' &&
+                      'border-blue-400/40 bg-blue-400/10 text-blue-200',
+                    item.status === 'pending' &&
+                      'border-white/10 bg-white/5 text-muted-foreground',
+                  )}
+                >
+                  {item.status === 'done' ? (
+                    <CheckCircle2 className="h-3 w-3" />
+                  ) : item.status === 'in_progress' ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : item.status === 'failed' ? (
+                    <AlertCircle className="h-3 w-3" />
+                  ) : null}
+                </span>
+                <span className="min-w-0 break-words text-muted-foreground">
+                  {item.text}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -479,14 +521,18 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-4xl max-h-[88vh] overflow-hidden border border-white/20 bg-black/95 text-white">
           <DialogHeader>
-            <DialogTitle className="truncate">{previewState?.title}</DialogTitle>
+            <DialogTitle className="truncate">
+              {previewState?.title}
+            </DialogTitle>
             <DialogDescription className="truncate text-xs text-muted-foreground">
               {previewState?.path}
             </DialogDescription>
           </DialogHeader>
           <div className="mt-2 h-[68vh] overflow-auto rounded-md border border-white/10 bg-black/40 p-3">
             {previewLoading && (
-              <div className="text-sm text-muted-foreground">Loading preview...</div>
+              <div className="text-sm text-muted-foreground">
+                Loading preview...
+              </div>
             )}
             {!previewLoading && previewState?.kind === 'text' && (
               <pre className="whitespace-pre-wrap break-words text-xs leading-5 text-white/90">
@@ -530,7 +576,8 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
                     size="sm"
                     variant="outline"
                     onClick={() =>
-                      previewState?.path && api.openPath({ path: previewState.path })
+                      previewState?.path &&
+                      api.openPath({ path: previewState.path })
                     }
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
@@ -553,7 +600,9 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
           </DialogHeader>
           <div className="mt-2 h-[68vh] overflow-auto space-y-4 rounded-md border border-white/10 bg-black/40 p-3">
             {workspaceLoading && (
-              <div className="text-sm text-muted-foreground">Loading workspace...</div>
+              <div className="text-sm text-muted-foreground">
+                Loading workspace...
+              </div>
             )}
             {!workspaceLoading && workspaceState.length === 0 && (
               <div className="text-sm text-muted-foreground">
@@ -577,7 +626,9 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
                       >
                         {entry.type === 'directory' ? (
                           <FolderOpen className="h-3.5 w-3.5 text-blue-300" />
-                        ) : entry.name.match(/\.(png|jpg|jpeg|webp|gif|svg)$/i) ? (
+                        ) : entry.name.match(
+                            /\.(png|jpg|jpeg|webp|gif|svg)$/i,
+                          ) ? (
                           <FileImage className="h-3.5 w-3.5 text-emerald-300" />
                         ) : (
                           <FileCode2 className="h-3.5 w-3.5 text-slate-300" />
@@ -586,7 +637,9 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
                           {entry.name}
                         </span>
                         <span className="text-[11px] text-muted-foreground">
-                          {entry.type === 'file' ? formatBytes(entry.sizeBytes) : 'dir'}
+                          {entry.type === 'file'
+                            ? formatBytes(entry.sizeBytes)
+                            : 'dir'}
                         </span>
                         <span className="text-[11px] text-muted-foreground">
                           {new Date(entry.modifiedAt).toLocaleString()}

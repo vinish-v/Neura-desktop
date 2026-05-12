@@ -19,7 +19,6 @@ import {
   type Tool,
   CompatibilityCallToolResultSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { z } from 'zod';
 import type {
   BuiltInMCPServer,
   MCPServer,
@@ -641,7 +640,11 @@ export class MCPClient<
     client: ServerNames;
     name: string;
     args: any;
-  }): Promise<z.infer<typeof CompatibilityCallToolResultSchema>> {
+  }): Promise<{
+    isError?: boolean;
+    content?: unknown;
+    _meta?: Record<string, unknown>;
+  }> {
     await this.ensureInitialized();
     try {
       const { client, name, args } = params;

@@ -4,7 +4,7 @@
  */
 import { useCallback, useState, type ComponentProps } from 'react';
 import { useNavigate, useLocation } from 'react-router';
-import { PencilLine } from 'lucide-react';
+import { Activity, BookOpen, Cable, PencilLine } from 'lucide-react';
 import { FolderKanban } from 'lucide-react';
 
 import {
@@ -43,7 +43,13 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
   const { status } = useStore();
   const [isNavDialogOpen, setNavDialogOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<
-    'home' | 'projects' | { type: 'session'; id: string } | null
+    | 'home'
+    | 'projects'
+    | 'skills'
+    | 'dashboard'
+    | 'connectors'
+    | { type: 'session'; id: string }
+    | null
   >(null);
 
   const needsConfirm =
@@ -96,6 +102,45 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
     }
   }, [needsConfirm, goProjects]);
 
+  const goSkills = useCallback(async () => {
+    await navigate('/skills');
+  }, [navigate]);
+
+  const handleSkillsClick = useCallback(() => {
+    if (needsConfirm) {
+      setPendingAction('skills');
+      setNavDialogOpen(true);
+    } else {
+      goSkills();
+    }
+  }, [needsConfirm, goSkills]);
+
+  const goDashboard = useCallback(async () => {
+    await navigate('/dashboard');
+  }, [navigate]);
+
+  const handleDashboardClick = useCallback(() => {
+    if (needsConfirm) {
+      setPendingAction('dashboard');
+      setNavDialogOpen(true);
+    } else {
+      goDashboard();
+    }
+  }, [needsConfirm, goDashboard]);
+
+  const goConnectors = useCallback(async () => {
+    await navigate('/connectors');
+  }, [navigate]);
+
+  const handleConnectorsClick = useCallback(() => {
+    if (needsConfirm) {
+      setPendingAction('connectors');
+      setNavDialogOpen(true);
+    } else {
+      goConnectors();
+    }
+  }, [needsConfirm, goConnectors]);
+
   const handleSessionClick = useCallback(
     (sessionId: string) => {
       if (needsConfirm) {
@@ -116,6 +161,12 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
       await goHome();
     } else if (pendingAction === 'projects') {
       await goProjects();
+    } else if (pendingAction === 'skills') {
+      await goSkills();
+    } else if (pendingAction === 'dashboard') {
+      await goDashboard();
+    } else if (pendingAction === 'connectors') {
+      await goConnectors();
     } else if (pendingAction?.type === 'session') {
       await onSessionClick(pendingAction.id);
     }
@@ -162,6 +213,27 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
             >
               <FolderKanban />
               Projects
+            </SidebarMenuButton>
+            <SidebarMenuButton
+              className="rounded-2xl font-medium text-white/90 hover:bg-white/8 hover:text-white"
+              onClick={handleSkillsClick}
+            >
+              <BookOpen />
+              Skills
+            </SidebarMenuButton>
+            <SidebarMenuButton
+              className="rounded-2xl font-medium text-white/90 hover:bg-white/8 hover:text-white"
+              onClick={handleDashboardClick}
+            >
+              <Activity />
+              Dashboard
+            </SidebarMenuButton>
+            <SidebarMenuButton
+              className="rounded-2xl font-medium text-white/90 hover:bg-white/8 hover:text-white"
+              onClick={handleConnectorsClick}
+            >
+              <Cable />
+              Connectors
             </SidebarMenuButton>
           </SidebarMenu>
         </SidebarHeader>

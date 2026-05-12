@@ -5,3 +5,5 @@
 
 export * from './Memory';
 export * from './Message';
+export * from './autonomous-agent';
+export * from './multi-agent';

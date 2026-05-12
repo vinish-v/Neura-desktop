@@ -63,6 +63,22 @@ const TaskProgressItemSchema = z.object({
   status: z.enum(['pending', 'in_progress', 'done', 'failed']),
   createdAt: z.number(),
   completedAt: z.number().optional(),
+  agentName: z.enum(['planner', 'researcher', 'executor', 'critic']).optional(),
+  eventType: z.string().optional(),
+});
+
+const BackgroundTaskSchema = z.object({
+  id: z.string(),
+  kind: z.enum(['mcp_autonomous', 'skill', 'multi_agent']),
+  goal: z.string(),
+  status: z.enum(['queued', 'running', 'completed', 'failed', 'cancelled']),
+  runId: z.string().optional(),
+  skillName: z.string().optional(),
+  arguments: z.record(z.unknown()).optional(),
+  error: z.string().optional(),
+  createdAt: z.number(),
+  startedAt: z.number().optional(),
+  completedAt: z.number().optional(),
 });
 
 const ApprovalEventSchema = z.object({
@@ -134,6 +150,9 @@ const TaskRunSchema = z.object({
     'website_builder',
     'artifact_workflow',
     'multimodal_workflow',
+    'mcp_autonomous',
+    'skill',
+    'multi_agent',
   ]),
   status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled']),
   workspacePath: z.string().optional(),
@@ -169,13 +188,23 @@ const TaskRunSchema = z.object({
 const ConnectorSchema = z.object({
   id: z.string(),
   displayName: z.string(),
-  type: z.enum(['builtin', 'mcp', 'webhook', 'export']),
+  type: z.enum(['builtin', 'mcp', 'webhook', 'export', 'oauth', 'api', 'rest']),
   enabled: z.boolean(),
   authState: z.enum(['not_configured', 'configured', 'error']),
   permissionLevel: z.enum(['read', 'write', 'admin']),
   tools: z.array(z.string()),
   config: z.record(z.string()).optional(),
   updatedAt: z.number().optional(),
+});
+
+const ConnectorAuditEventSchema = z.object({
+  id: z.string(),
+  connectorId: z.string(),
+  toolName: z.string(),
+  permission: z.enum(['read', 'write', 'admin']),
+  status: z.enum(['completed', 'failed']),
+  error: z.string().optional(),
+  createdAt: z.number(),
 });
 
 const MultimodalProvidersSchema = z.object({
@@ -239,9 +268,13 @@ export const PresetSchema = z.object({
   monitors: z.array(WebMonitorSchema).optional(),
   agentMemory: AgentMemorySchema.optional(),
   taskRuns: z.array(TaskRunSchema).optional(),
+  backgroundTasks: z.array(BackgroundTaskSchema).optional(),
   neuraRoadmap: RoadmapProgressSchema.optional(),
   connectors: z.array(ConnectorSchema).optional(),
+  connectorAuditLog: z.array(ConnectorAuditEventSchema).optional(),
   multimodalProviders: MultimodalProvidersSchema.optional(),
+  skillsEnabled: z.boolean().optional(),
+  selectedSkillName: z.string().optional(),
 });
 
 export type PresetSource = z.infer<typeof PresetSourceSchema>;

@@ -1,0 +1,16 @@
+{
+  "name": "document-analysis",
+  "description": "Analyze documents and extract summaries, risks, decisions, and action items.",
+  "instructions": "Read the provided document or file path. Extract the core thesis, entities, dates, obligations, risks, open questions, and action items. Preserve important source references. Return a structured summary and recommended follow-up.",
+  "tools": ["filesystem"],
+  "chains": [],
+  "examples": [
+    {
+      "input": "Analyze this contract draft",
+      "output": "A summary of key terms, risks, and open questions."
+    }
+  ],
+  "tags": ["documents", "analysis", "summary"],
+  "version": "1.0.0",
+  "author": "Neura"
+}

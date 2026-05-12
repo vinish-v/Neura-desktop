@@ -1,0 +1,16 @@
+{
+  "name": "file-organization",
+  "description": "Organize local files into a clear folder structure with a safe plan first.",
+  "instructions": "Inspect the target directory with filesystem tools. Propose a simple organization plan based on file type, project, date, or user-provided rules. Avoid destructive changes unless explicitly requested. Move or create files only inside allowed directories. Finish with a summary of every change.",
+  "tools": ["filesystem"],
+  "chains": [],
+  "examples": [
+    {
+      "input": "Organize my Downloads folder by file type",
+      "output": "A safe move plan and summary of created folders and moved files."
+    }
+  ],
+  "tags": ["files", "local", "organization"],
+  "version": "1.0.0",
+  "author": "Neura"
+}

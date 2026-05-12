@@ -1,0 +1,16 @@
+{
+  "name": "competitor-analysis",
+  "description": "Compare competitors across positioning, features, pricing, channels, strengths, and weaknesses.",
+  "instructions": "Identify 5 to 8 relevant competitors for the requested company, product, or market. Use search and browser tools for current evidence. Create a comparison table, summarize each competitor's positioning, note strengths and weaknesses, identify gaps, and recommend differentiation moves.",
+  "tools": ["search", "browser"],
+  "chains": [],
+  "examples": [
+    {
+      "input": "Compare Manus AI alternatives",
+      "output": "A competitor matrix with product positioning, capabilities, and differentiation gaps."
+    }
+  ],
+  "tags": ["research", "competitive", "strategy"],
+  "version": "1.0.0",
+  "author": "Neura"
+}

@@ -1,0 +1,16 @@
+{
+  "name": "website-audit",
+  "description": "Audit a website for messaging, UX, SEO basics, performance signals, and conversion issues.",
+  "instructions": "Open the target website, inspect key pages, extract visible messaging, navigation, calls to action, content structure, and obvious technical issues. Return prioritized findings with evidence, severity, and concrete fixes.",
+  "tools": ["browser", "search"],
+  "chains": ["competitor-analysis"],
+  "examples": [
+    {
+      "input": "Audit neura.ai landing page",
+      "output": "A prioritized audit with UX, messaging, and SEO recommendations."
+    }
+  ],
+  "tags": ["website", "audit", "ux"],
+  "version": "1.0.0",
+  "author": "Neura"
+}

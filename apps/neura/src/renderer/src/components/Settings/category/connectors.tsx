@@ -41,6 +41,19 @@ const DEFAULT_CONNECTORS: ConnectorDefinition[] = [
     tools: ['connector_drive_export'],
   },
   {
+    id: 'builtin_mcp',
+    displayName: 'Neura Built-in MCP Tools',
+    type: 'mcp',
+    enabled: false,
+    authState: 'configured',
+    permissionLevel: 'write',
+    tools: ['filesystem', 'commands', 'search', 'browser'],
+    config: {
+      servers: 'filesystem,commands,search,browser',
+      allowedDirectories: '',
+    },
+  },
+  {
     id: 'custom_mcp',
     displayName: 'Custom MCP Server',
     type: 'mcp',
@@ -52,18 +65,22 @@ const DEFAULT_CONNECTORS: ConnectorDefinition[] = [
       command: '',
       args: '',
       env: '',
+      url: '',
     },
   },
 ];
 
 const connectorHelp: Record<string, string> = {
   github:
-    'Set a token and optional default repository like owner/repo. Neura can create issues and export files after approval.',
-  slack_webhook: 'Set config.webhookUrl to allow connector_slack_post.',
+    'Set the token from the Connectors page so it is stored with Electron safeStorage. Repository defaults can stay here.',
+  slack_webhook:
+    'Legacy webhook settings are disabled here. Use the Connectors page for secure Slack webhook storage.',
   google_drive_export:
     'Prepares Drive-compatible exports now; OAuth upload is a later connector worker.',
+  builtin_mcp:
+    'Expose Neura packaged MCP servers to autonomous tasks. Leave disabled until you want MCP tools available in the desktop agent.',
   custom_mcp:
-    'Set command/args/env for a local MCP server. Runtime MCP execution is the next slice.',
+    'Set command/args/env for an additional local MCP server. Enabled servers are connected by the desktop runtime.',
 };
 
 const getConnectors = (connectors?: ConnectorDefinition[]) => {
@@ -142,6 +159,26 @@ export function ConnectorSettings() {
         record approval events on the active run.
       </div>
 
+      <section className="rounded-lg border border-border bg-background p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="font-medium">Skills System</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Allow Neura to load and execute reusable local skills.
+            </p>
+          </div>
+          <Switch
+            checked={settings.skillsEnabled !== false}
+            onCheckedChange={(skillsEnabled) =>
+              updateSetting({
+                ...settings,
+                skillsEnabled,
+              })
+            }
+          />
+        </div>
+      </section>
+
       {connectors.map((connector) => (
         <section
           key={connector.id}
@@ -177,34 +214,17 @@ export function ConnectorSettings() {
 
               {connector.id === 'slack_webhook' && (
                 <div className="mt-4 space-y-2">
-                  <Label htmlFor="slack-webhook">Webhook URL</Label>
-                  <Input
-                    id="slack-webhook"
-                    value={connector.config?.webhookUrl || ''}
-                    placeholder="https://hooks.slack.com/services/..."
-                    onChange={(event) =>
-                      updateConfig(
-                        connector.id,
-                        'webhookUrl',
-                        event.target.value,
-                      )
-                    }
-                  />
+                  <p className="text-sm text-muted-foreground">
+                    Slack webhooks are stored securely from the Connectors page.
+                  </p>
                 </div>
               )}
 
               {connector.id === 'github' && (
                 <div className="mt-4 space-y-2">
-                  <Label htmlFor="github-token">Token</Label>
-                  <Input
-                    id="github-token"
-                    type="password"
-                    value={connector.config?.token || ''}
-                    placeholder="ghp_..."
-                    onChange={(event) =>
-                      updateConfig(connector.id, 'token', event.target.value)
-                    }
-                  />
+                  <p className="text-sm text-muted-foreground">
+                    GitHub tokens are stored securely from the Connectors page.
+                  </p>
                   <Label htmlFor="github-repository">Default repository</Label>
                   <Input
                     id="github-repository"
@@ -232,8 +252,56 @@ export function ConnectorSettings() {
                 </div>
               )}
 
+              {connector.id === 'builtin_mcp' && (
+                <div className="mt-4 grid gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="builtin-mcp-servers">Servers</Label>
+                    <Input
+                      id="builtin-mcp-servers"
+                      value={connector.config?.servers || ''}
+                      placeholder="filesystem,commands,search,browser"
+                      onChange={(event) =>
+                        updateConfig(
+                          connector.id,
+                          'servers',
+                          event.target.value,
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="builtin-mcp-directories">
+                      Allowed directories
+                    </Label>
+                    <Input
+                      id="builtin-mcp-directories"
+                      value={connector.config?.allowedDirectories || ''}
+                      placeholder="Optional ; separated paths. Defaults to Documents and the app workspace."
+                      onChange={(event) =>
+                        updateConfig(
+                          connector.id,
+                          'allowedDirectories',
+                          event.target.value,
+                        )
+                      }
+                    />
+                  </div>
+                </div>
+              )}
+
               {connector.id === 'custom_mcp' && (
                 <div className="mt-4 grid gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="mcp-url">HTTP URL</Label>
+                    <Input
+                      id="mcp-url"
+                      value={connector.config?.url || ''}
+                      placeholder="Optional http://127.0.0.1:8089/mcp"
+                      onChange={(event) =>
+                        updateConfig(connector.id, 'url', event.target.value)
+                      }
+                    />
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="mcp-command">Command</Label>
                     <Input

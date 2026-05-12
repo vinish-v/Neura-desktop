@@ -24,6 +24,10 @@ import {
   always_log,
 } from './exec-utils.js';
 
+type RunCommandPromptArgs = {
+  command: string;
+};
+
 // TODO use .promises? in node api
 const execAsync = promisify(exec);
 
@@ -74,7 +78,19 @@ function createServer(serverConfig?: { cwd?: string }): McpServer {
   );
 
   // ==== Prompts ====
-  server.registerPrompt(
+  const registerPrompt = server.registerPrompt.bind(server) as unknown as (
+    name: string,
+    config: {
+      title: string;
+      description: string;
+      argsSchema: Record<string, z.ZodTypeAny>;
+    },
+    handler: (
+      args: RunCommandPromptArgs,
+    ) => Promise<{ messages: PromptMessage[] }>,
+  ) => void;
+
+  registerPrompt(
     'run_command',
     {
       title: 'Run Command',

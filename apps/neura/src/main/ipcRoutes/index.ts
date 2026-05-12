@@ -10,6 +10,10 @@ import { agentRoute } from './agent';
 import { browserRoute } from './browser';
 import { remoteResourceRouter } from './remoteResource';
 import { settingRoute } from './setting';
+import { mcpRoute } from './mcp';
+import { skillsRoute } from './skills';
+import { tasksRoute } from './tasks';
+import { connectorsRoute } from './connectors';
 
 const t = initIpc.create();
 
@@ -21,6 +25,10 @@ export const ipcRoutes = t.router({
   ...remoteResourceRouter,
   ...browserRoute,
   ...settingRoute,
+  ...mcpRoute,
+  ...skillsRoute,
+  ...tasksRoute,
+  ...connectorsRoute,
 });
 export type Router = typeof ipcRoutes;
 
