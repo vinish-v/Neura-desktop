@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { randomUUID } from 'crypto';
+import { spawn } from 'child_process';
 import { shell } from 'electron';
 import fs from 'fs/promises';
 import os from 'os';
@@ -11,6 +12,17 @@ import path from 'path';
 const CANVAS_ROOT = path.join(os.homedir(), 'Neura-Projects');
 const METADATA_FILE = 'neura-canvas.json';
 const MAX_VERSIONS = 50;
+const MAX_TERMINAL_RUNS = 50;
+const MAX_COMMAND_OUTPUT_BYTES = 128 * 1024;
+const COMMAND_TIMEOUT_MS = 2 * 60 * 1000;
+const IGNORED_SCAN_DIRECTORIES = new Set([
+  '.git',
+  'dist',
+  'node_modules',
+  'out',
+  '.next',
+  '.turbo',
+]);
 
 export type CanvasProjectFile = {
   path: string;
@@ -26,6 +38,45 @@ export type CanvasProjectVersion = {
   files: CanvasProjectFile[];
 };
 
+export type CanvasComposerStepStatus =
+  | 'pending'
+  | 'approved'
+  | 'running'
+  | 'done'
+  | 'failed';
+
+export type CanvasComposerStep = {
+  id: string;
+  title: string;
+  detail: string;
+  kind: 'plan' | 'edit' | 'terminal' | 'verify';
+  status: CanvasComposerStepStatus;
+  filePaths?: string[];
+  command?: string;
+};
+
+export type CanvasComposerPlan = {
+  id: string;
+  prompt: string;
+  status: 'draft' | 'approved' | 'running' | 'completed' | 'failed';
+  steps: CanvasComposerStep[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type CanvasTerminalCommandResult = {
+  id: string;
+  command: string;
+  cwd: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  startedAt: number;
+  completedAt: number;
+  approved: boolean;
+  timedOut: boolean;
+};
+
 export type CanvasProject = {
   id: string;
   title: string;
@@ -33,6 +84,8 @@ export type CanvasProject = {
   entryFile: string;
   files: CanvasProjectFile[];
   versions: CanvasProjectVersion[];
+  composerPlans: CanvasComposerPlan[];
+  terminalRuns: CanvasTerminalCommandResult[];
   sourceRunId?: string;
   createdAt: number;
   updatedAt: number;
@@ -55,6 +108,23 @@ export type UpdateCanvasProjectInput = {
   filePath: string;
   content: string;
   versionLabel?: string;
+};
+
+export type CreateCanvasFileInput = {
+  projectId: string;
+  filePath: string;
+  content?: string;
+};
+
+export type CreateComposerPlanInput = {
+  projectId: string;
+  prompt: string;
+};
+
+export type RunCanvasCommandInput = {
+  projectId: string;
+  command: string;
+  approved: boolean;
 };
 
 type CanvasProjectMetadata = Omit<CanvasProject, 'files'> & {
@@ -142,6 +212,22 @@ const detectLanguage = (filePath: string) => {
   if (extension === '.md' || extension === '.mdx') return 'markdown';
   return 'plaintext';
 };
+
+const isReadableCodeFile = (filePath: string) =>
+  [
+    '.css',
+    '.html',
+    '.js',
+    '.json',
+    '.jsx',
+    '.md',
+    '.mdx',
+    '.ts',
+    '.tsx',
+    '.txt',
+    '.yaml',
+    '.yml',
+  ].includes(path.extname(filePath).toLowerCase());
 
 const normalizeProjectFilePath = (filePath: string) => {
   const normalized = filePath.replace(/\\/g, '/').replace(/^\/+/, '').trim();
@@ -242,6 +328,8 @@ export class CanvasService {
           files,
         },
       ],
+      composerPlans: [],
+      terminalRuns: [],
       sourceRunId: input.sourceRunId,
       createdAt: now,
       updatedAt: now,
@@ -249,6 +337,20 @@ export class CanvasService {
 
     await this.writeMetadata(project);
     return project;
+  }
+
+  async createFile(input: CreateCanvasFileInput) {
+    const filePath = normalizeProjectFilePath(input.filePath);
+    const project = await this.getProject(input.projectId);
+    if (project.files.some((file) => file.path === filePath)) {
+      throw new Error('Canvas file already exists.');
+    }
+    return this.updateProject({
+      projectId: input.projectId,
+      filePath,
+      content: input.content || '',
+      versionLabel: `Created ${filePath}`,
+    });
   }
 
   async updateProject(input: UpdateCanvasProjectInput) {
@@ -293,6 +395,148 @@ export class CanvasService {
     return nextProject;
   }
 
+  async refreshProjectFiles(projectId: string) {
+    const project = await this.getProject(projectId);
+    const files = await this.scanProjectFiles(project.rootPath);
+    const now = Date.now();
+    const nextProject: CanvasProject = {
+      ...project,
+      files,
+      entryFile:
+        files.find((file) => file.path === project.entryFile)?.path ||
+        files.find((file) => file.path === 'index.html')?.path ||
+        files[0]?.path ||
+        project.entryFile,
+      updatedAt: now,
+      versions: [
+        {
+          id: `version_${now}_${randomUUID().slice(0, 8)}`,
+          label: 'Refreshed from disk',
+          createdAt: now,
+          files,
+        },
+        ...project.versions,
+      ].slice(0, MAX_VERSIONS),
+    };
+    await this.writeMetadata(nextProject);
+    return nextProject;
+  }
+
+  async createComposerPlan(input: CreateComposerPlanInput) {
+    const project = await this.getProject(input.projectId);
+    const prompt = input.prompt.trim();
+    if (!prompt) {
+      throw new Error('Composer prompt is required.');
+    }
+
+    const now = Date.now();
+    const targetFiles = this.inferTargetFiles(project, prompt);
+    const verificationCommand = this.inferVerificationCommand(project);
+    const steps: CanvasComposerStep[] = [
+      {
+        id: `step_${randomUUID().slice(0, 8)}`,
+        title: 'Understand project context',
+        detail: `Inspect ${targetFiles.length ? targetFiles.join(', ') : 'the project files'} and identify the safest edit path.`,
+        kind: 'plan',
+        status: 'pending',
+        filePaths: targetFiles,
+      },
+      {
+        id: `step_${randomUUID().slice(0, 8)}`,
+        title: 'Edit affected files',
+        detail:
+          'Apply focused multi-file changes in Canvas and keep unrelated code untouched.',
+        kind: 'edit',
+        status: 'pending',
+        filePaths: targetFiles,
+      },
+      {
+        id: `step_${randomUUID().slice(0, 8)}`,
+        title: verificationCommand
+          ? 'Run verification command'
+          : 'Verify manually',
+        detail: verificationCommand
+          ? `Run ${verificationCommand} from the project root after changes are applied.`
+          : 'Use the live preview and available project evidence to verify the change.',
+        kind: 'verify',
+        status: 'pending',
+        command: verificationCommand,
+      },
+    ];
+
+    const plan: CanvasComposerPlan = {
+      id: `composer_${now}_${randomUUID().slice(0, 8)}`,
+      prompt,
+      status: 'draft',
+      steps,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const nextProject = {
+      ...project,
+      composerPlans: [plan, ...(project.composerPlans || [])].slice(0, 20),
+      updatedAt: now,
+    };
+    await this.writeMetadata(nextProject);
+    return { project: nextProject, plan };
+  }
+
+  async approveComposerPlan(projectId: string, planId: string) {
+    const project = await this.getProject(projectId);
+    const now = Date.now();
+    const nextProject: CanvasProject = {
+      ...project,
+      composerPlans: project.composerPlans.map((plan) =>
+        plan.id === planId
+          ? {
+              ...plan,
+              status: 'approved',
+              updatedAt: now,
+              steps: plan.steps.map((step) => ({
+                ...step,
+                status: 'approved',
+              })),
+            }
+          : plan,
+      ),
+      updatedAt: now,
+    };
+    await this.writeMetadata(nextProject);
+    const plan = nextProject.composerPlans.find((item) => item.id === planId);
+    if (!plan) {
+      throw new Error('Composer plan was not found.');
+    }
+    return { project: nextProject, plan };
+  }
+
+  async runCommand(input: RunCanvasCommandInput) {
+    if (!input.approved) {
+      throw new Error('Command execution requires explicit approval.');
+    }
+    const project = await this.getProject(input.projectId);
+    const command = input.command.trim();
+    if (!command) {
+      throw new Error('Command is required.');
+    }
+
+    const startedAt = Date.now();
+    const result = await this.spawnCommand(
+      command,
+      project.rootPath,
+      startedAt,
+    );
+    const nextProject: CanvasProject = {
+      ...project,
+      terminalRuns: [result, ...(project.terminalRuns || [])].slice(
+        0,
+        MAX_TERMINAL_RUNS,
+      ),
+      updatedAt: result.completedAt,
+    };
+    await this.writeMetadata(nextProject);
+    return { project: nextProject, result };
+  }
+
   async revealProject(projectId: string) {
     const project = await this.getProject(projectId);
     shell.showItemInFolder(project.rootPath);
@@ -302,6 +546,154 @@ export class CanvasService {
   async openProject(projectId: string) {
     const project = await this.getProject(projectId);
     return shell.openPath(project.rootPath);
+  }
+
+  private async scanProjectFiles(rootPath: string) {
+    const files: CanvasProjectFile[] = [];
+
+    const walk = async (directory: string) => {
+      const entries = await fs.readdir(directory, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.name === METADATA_FILE) {
+          continue;
+        }
+        if (entry.isDirectory() && IGNORED_SCAN_DIRECTORIES.has(entry.name)) {
+          continue;
+        }
+
+        const entryPath = path.join(directory, entry.name);
+        const relativePath = path
+          .relative(rootPath, entryPath)
+          .replace(/\\/g, '/');
+        if (entry.isDirectory()) {
+          await walk(entryPath);
+          continue;
+        }
+        if (!entry.isFile() || !isReadableCodeFile(relativePath)) {
+          continue;
+        }
+
+        const stat = await fs.stat(entryPath);
+        files.push({
+          path: normalizeProjectFilePath(relativePath),
+          language: detectLanguage(relativePath),
+          content: await fs.readFile(entryPath, 'utf8'),
+          updatedAt: stat.mtimeMs,
+        });
+      }
+    };
+
+    await walk(rootPath);
+    return files.sort((left, right) => left.path.localeCompare(right.path));
+  }
+
+  private inferTargetFiles(project: CanvasProject, prompt: string) {
+    const lowerPrompt = prompt.toLowerCase();
+    const explicitMatches = project.files.filter((file) =>
+      lowerPrompt.includes(file.path.toLowerCase()),
+    );
+    if (explicitMatches.length) {
+      return explicitMatches.map((file) => file.path);
+    }
+
+    const prioritized = project.files.filter((file) =>
+      ['index.html', 'src/App.tsx', 'src/app.tsx', 'src/main.tsx'].includes(
+        file.path,
+      ),
+    );
+    const sourceFiles = project.files.filter((file) =>
+      /\.(html|tsx|jsx|ts|js|css)$/i.test(file.path),
+    );
+    return [...prioritized, ...sourceFiles]
+      .map((file) => file.path)
+      .filter((filePath, index, all) => all.indexOf(filePath) === index)
+      .slice(0, 8);
+  }
+
+  private inferVerificationCommand(project: CanvasProject) {
+    const packageFile = project.files.find(
+      (file) => file.path === 'package.json',
+    );
+    if (!packageFile) {
+      return '';
+    }
+    try {
+      const packageJson = JSON.parse(packageFile.content) as {
+        scripts?: Record<string, string>;
+      };
+      const scripts = packageJson.scripts || {};
+      if (scripts.test) return 'npm test';
+      if (scripts.typecheck) return 'npm run typecheck';
+      if (scripts.build) return 'npm run build';
+      if (scripts.lint) return 'npm run lint';
+    } catch {
+      return '';
+    }
+    return '';
+  }
+
+  private spawnCommand(
+    command: string,
+    cwd: string,
+    startedAt: number,
+  ): Promise<CanvasTerminalCommandResult> {
+    return new Promise((resolve) => {
+      const child = spawn(command, {
+        cwd,
+        shell: true,
+        windowsHide: true,
+      });
+      let stdout = '';
+      let stderr = '';
+      let timedOut = false;
+
+      const appendOutput = (current: string, chunk: Buffer) =>
+        `${current}${chunk.toString('utf8')}`.slice(-MAX_COMMAND_OUTPUT_BYTES);
+
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        child.kill();
+      }, COMMAND_TIMEOUT_MS);
+
+      child.stdout?.on('data', (chunk: Buffer) => {
+        stdout = appendOutput(stdout, chunk);
+      });
+      child.stderr?.on('data', (chunk: Buffer) => {
+        stderr = appendOutput(stderr, chunk);
+      });
+      child.on('close', (exitCode) => {
+        clearTimeout(timeout);
+        resolve({
+          id: `terminal_${startedAt}_${randomUUID().slice(0, 8)}`,
+          command,
+          cwd,
+          exitCode,
+          stdout,
+          stderr: timedOut
+            ? `${stderr}\nCommand timed out after ${COMMAND_TIMEOUT_MS / 1000}s.`
+            : stderr,
+          startedAt,
+          completedAt: Date.now(),
+          approved: true,
+          timedOut,
+        });
+      });
+      child.on('error', (error) => {
+        clearTimeout(timeout);
+        resolve({
+          id: `terminal_${startedAt}_${randomUUID().slice(0, 8)}`,
+          command,
+          cwd,
+          exitCode: null,
+          stdout,
+          stderr: error.message,
+          startedAt,
+          completedAt: Date.now(),
+          approved: true,
+          timedOut,
+        });
+      });
+    });
   }
 
   private async resolveInitialFiles(
@@ -372,6 +764,8 @@ export class CanvasService {
       ...metadata,
       rootPath,
       files,
+      composerPlans: metadata.composerPlans || [],
+      terminalRuns: metadata.terminalRuns || [],
     };
   }
 

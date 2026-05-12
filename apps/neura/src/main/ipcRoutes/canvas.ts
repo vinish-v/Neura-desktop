@@ -6,7 +6,10 @@ import { initIpc } from '@neura-desktop/electron-ipc/main';
 
 import {
   CanvasService,
+  CreateCanvasFileInput,
+  CreateComposerPlanInput,
   CreateCanvasProjectInput,
+  RunCanvasCommandInput,
   UpdateCanvasProjectInput,
 } from '@main/services/canvas-service';
 
@@ -30,6 +33,34 @@ export const canvasRoute = t.router({
     .input<UpdateCanvasProjectInput>()
     .handle(async ({ input }) => {
       return CanvasService.getInstance().updateProject(input);
+    }),
+  createCanvasFile: t.procedure
+    .input<CreateCanvasFileInput>()
+    .handle(async ({ input }) => {
+      return CanvasService.getInstance().createFile(input);
+    }),
+  refreshCanvasProjectFiles: t.procedure
+    .input<{ projectId: string }>()
+    .handle(async ({ input }) => {
+      return CanvasService.getInstance().refreshProjectFiles(input.projectId);
+    }),
+  createCanvasComposerPlan: t.procedure
+    .input<CreateComposerPlanInput>()
+    .handle(async ({ input }) => {
+      return CanvasService.getInstance().createComposerPlan(input);
+    }),
+  approveCanvasComposerPlan: t.procedure
+    .input<{ projectId: string; planId: string }>()
+    .handle(async ({ input }) => {
+      return CanvasService.getInstance().approveComposerPlan(
+        input.projectId,
+        input.planId,
+      );
+    }),
+  runCanvasCommand: t.procedure
+    .input<RunCanvasCommandInput>()
+    .handle(async ({ input }) => {
+      return CanvasService.getInstance().runCommand(input);
     }),
   revealCanvasProject: t.procedure
     .input<{ projectId: string }>()
