@@ -30,6 +30,7 @@ import { registerSettingsHandlers } from './services/settings';
 import { sanitizeState } from './utils/sanitizeState';
 import { windowManager } from './services/windowManager';
 import { checkBrowserAvailability } from './services/browserCheck';
+import { TaskRunRegistry } from './services/taskRunRegistry';
 
 const { isProd } = env;
 
@@ -99,6 +100,13 @@ const initializeApp = async () => {
   }
 
   await checkBrowserAvailability();
+
+  const staleRuns = TaskRunRegistry.cancelStaleRunningRuns(
+    'Interrupted by previous app session.',
+  );
+  if (staleRuns > 0) {
+    logger.info(`Cancelled ${staleRuns} stale running task(s) on startup`);
+  }
 
   await loadDevDebugTools();
 

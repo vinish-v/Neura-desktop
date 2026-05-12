@@ -4,16 +4,17 @@
  */
 import { StatusEnum } from '@neura-desktop/shared/types';
 
-import { ConversationWithSoM } from '@main/shared/types';
 import {
   AgentRunMode,
   AppState,
   CompletionProof,
   TaskArtifact,
   TaskProgressEventType,
+  TaskProgressItem,
   TaskState,
   TaskTodoItem,
 } from '@main/store/types';
+import { ConversationWithSoM } from '@main/shared/types';
 import { createTaskRun, TaskRunRegistry } from './taskRunRegistry';
 
 type StateAccess = {
@@ -26,27 +27,6 @@ export type TaskProgressEvent = {
   title: string;
   detail?: string;
   status?: 'pending' | 'in_progress' | 'done' | 'failed';
-};
-
-const actionForEvent = (type: TaskProgressEventType) => {
-  switch (type) {
-    case 'task.started':
-      return 'task_started';
-    case 'plan.updated':
-      return 'plan_updated';
-    case 'step.started':
-      return 'step_started';
-    case 'step.completed':
-      return 'step_completed';
-    case 'step.failed':
-      return 'step_failed';
-    case 'validation.completed':
-      return 'validation_completed';
-    case 'task.completed':
-      return 'task_completed';
-    default:
-      return 'step_started';
-  }
 };
 
 const statusToTodoStatus = (
@@ -68,20 +48,18 @@ const normalizeProgressText = (value?: string) =>
   (value || '').replace(/\s+/g, ' ').trim();
 
 const isDuplicateProgressMessage = (
-  messages: ConversationWithSoM[],
+  progressItems: TaskProgressItem[],
   event: TaskProgressEvent,
 ) => {
-  const last = messages[messages.length - 1];
-  const step = last?.predictionParsed?.[0];
-  if (!step) {
+  const last = progressItems[progressItems.length - 1];
+  if (!last) {
     return false;
   }
 
   return (
-    step.action_type === actionForEvent(event.type) &&
-    normalizeProgressText(step.thought) ===
+    normalizeProgressText(last.title) ===
       normalizeProgressText(event.title) &&
-    normalizeProgressText(step.action_inputs?.content) ===
+    normalizeProgressText(last.detail) ===
       normalizeProgressText(event.detail || event.title)
   );
 };
@@ -153,8 +131,7 @@ export class AgentOrchestrator {
   emit(event: TaskProgressEvent) {
     const current = this.getState();
     const taskState = current.taskState;
-    const messages = current.messages || [];
-    if (isDuplicateProgressMessage(messages, event)) {
+    if (isDuplicateProgressMessage(taskState?.progressItems || [], event)) {
       return;
     }
 
@@ -167,7 +144,7 @@ export class AgentOrchestrator {
         ? [
             ...(taskState.progressItems || []),
             {
-              id: `${Date.now()}-${messages.length}`,
+              id: `${Date.now()}-${taskState.progressItems.length}`,
               title: event.title,
               detail: event.detail,
               status: statusToTodoStatus(event.status),
@@ -179,21 +156,6 @@ export class AgentOrchestrator {
             },
           ]
         : taskState?.progressItems || [];
-
-    const message: ConversationWithSoM = {
-      from: 'gpt',
-      value: event.detail ? `${event.title}\n${event.detail}` : event.title,
-      predictionParsed: [
-        {
-          reflection: null,
-          thought: event.title,
-          action_type: actionForEvent(event.type),
-          action_inputs: {
-            content: event.detail || event.title,
-          },
-        },
-      ],
-    };
 
     const nextTaskState = taskState
       ? {
@@ -218,7 +180,6 @@ export class AgentOrchestrator {
     this.setState({
       ...current,
       taskState: nextTaskState,
-      messages: [...messages, message],
     });
   }
 
@@ -302,11 +263,32 @@ export class AgentOrchestrator {
 
   complete(finalAnswer?: string) {
     const current = this.getState();
+    const trimmedAnswer = finalAnswer?.trim();
+    const messages = current.messages || [];
+    const shouldAppendFinalAnswer =
+      Boolean(trimmedAnswer) &&
+      messages[messages.length - 1]?.value?.trim() !== trimmedAnswer;
+    const finalAnswerMessage: ConversationWithSoM | undefined = trimmedAnswer
+      ? {
+          from: 'gpt',
+          value: trimmedAnswer,
+          predictionParsed: [
+            {
+              reflection: null,
+              thought: 'Final answer',
+              action_type: 'finished',
+              action_inputs: {
+                content: trimmedAnswer,
+              },
+            },
+          ],
+        }
+      : undefined;
     const nextTaskState = current.taskState
       ? {
           ...current.taskState,
           status: 'completed' as const,
-          finalAnswer,
+          finalAnswer: trimmedAnswer || finalAnswer,
           validationStatus: 'valid' as const,
           completedAt: Date.now(),
         }
@@ -317,7 +299,12 @@ export class AgentOrchestrator {
     this.setState({
       ...current,
       status: StatusEnum.END,
+      thinking: false,
       taskState: nextTaskState,
+      messages:
+        shouldAppendFinalAnswer && finalAnswerMessage
+          ? [...messages, finalAnswerMessage]
+          : messages,
     });
   }
 
@@ -338,6 +325,7 @@ export class AgentOrchestrator {
     this.setState({
       ...current,
       status: StatusEnum.ERROR,
+      thinking: false,
       errorMsg,
       taskState: nextTaskState,
     });

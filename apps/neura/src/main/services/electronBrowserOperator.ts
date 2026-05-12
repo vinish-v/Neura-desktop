@@ -5,6 +5,7 @@
 import { existsSync } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
+import { createHash } from 'crypto';
 
 import {
   Operator,
@@ -154,6 +155,8 @@ export class ElectronBrowserOperator extends Operator {
 
   private repeatedNavigationTarget = '';
   private repeatedNavigationCount = 0;
+  private lastScreenshotSignature = '';
+  private unchangedScreenshotCount = 0;
 
   constructor() {
     super();
@@ -161,9 +164,20 @@ export class ElectronBrowserOperator extends Operator {
   }
 
   async screenshot(): Promise<ScreenshotOutput> {
-    const domText = await this.captureDomMap();
+    let domText = await this.captureDomMap();
     const image = await embeddedBrowserRuntime.capturePage();
     const scaleFactor = await this.getDeviceScaleFactor();
+    const signature = createHash('sha256')
+      .update(image.base64.slice(0, 120_000))
+      .update(domText)
+      .digest('hex');
+    if (signature === this.lastScreenshotSignature) {
+      this.unchangedScreenshotCount += 1;
+      domText += `\n\nSCREEN_UNCHANGED: This browser screenshot and DOM map are unchanged from the previous observation (${this.unchangedScreenshotCount}). Do not repeat the previous action. If the requested page or answer is already visible, call finished(content='...'). Otherwise choose a different visible element, coordinate action, scroll, or extract_page.`;
+    } else {
+      this.lastScreenshotSignature = signature;
+      this.unchangedScreenshotCount = 0;
+    }
     return {
       base64: image.base64,
       scaleFactor,

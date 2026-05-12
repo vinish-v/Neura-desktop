@@ -66,6 +66,35 @@ export class TaskRunRegistry {
     );
   }
 
+  static cancelStaleRunningRuns(reason: string) {
+    const runs = TaskRunRegistry.list();
+    const completedAt = Date.now();
+    let changed = false;
+    let cancelledCount = 0;
+    const nextRuns = runs.map((run) => {
+      if (run.status !== 'running') {
+        return run;
+      }
+      changed = true;
+      cancelledCount += 1;
+      return normalizeRun({
+        ...run,
+        status: 'cancelled',
+        error: reason,
+        currentStep: 'Interrupted',
+        completedAt,
+      });
+    });
+
+    if (!changed) {
+      return 0;
+    }
+
+    SettingStore.set('taskRuns', nextRuns.slice(0, MAX_STORED_RUNS));
+    TaskRunRegistry.setActiveRunId(null);
+    return cancelledCount;
+  }
+
   static upsert(run: TaskRunRecord) {
     const runs = TaskRunRegistry.list();
     const index = runs.findIndex((item) => item.runId === run.runId);

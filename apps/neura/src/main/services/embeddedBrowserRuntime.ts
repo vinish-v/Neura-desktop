@@ -146,7 +146,7 @@ class EmbeddedBrowserRuntime {
       });
     });
     await Promise.race([navigation, waitForNavigationSettled(view.webContents)]);
-    await this.applyInteractionBlocker();
+    await this.applyInteractionBlockerSafely('navigation');
     this.publishBrowserState();
   }
 
@@ -179,7 +179,7 @@ class EmbeddedBrowserRuntime {
 
   async setInteractionBlocked(blocked: boolean) {
     this.interactionBlocked = blocked;
-    await this.applyInteractionBlocker();
+    await this.applyInteractionBlockerSafely('setInteractionBlocked');
   }
 
   async withInteractionUnblocked<T>(operation: () => Promise<T> | T) {
@@ -192,7 +192,7 @@ class EmbeddedBrowserRuntime {
       return await operation();
     } finally {
       if (wasBlocked) {
-        await this.setInteractionBlocked(true);
+        void this.setInteractionBlocked(true);
       }
     }
   }
@@ -316,6 +316,21 @@ class EmbeddedBrowserRuntime {
       );
     } catch (error) {
       logger.warn('[EmbeddedBrowserRuntime] failed to apply interaction blocker', error);
+    }
+  }
+
+  private async applyInteractionBlockerSafely(reason: string) {
+    try {
+      await withTimeout(
+        this.applyInteractionBlocker(),
+        1_000,
+        `Embedded browser input blocker timed out during ${reason}.`,
+      );
+    } catch (error) {
+      logger.warn('[EmbeddedBrowserRuntime] interaction blocker skipped', {
+        reason,
+        error,
+      });
     }
   }
 

@@ -48,7 +48,14 @@ export const classifyQuickBrowserTask = (instructions: string) => {
     return 'youtube' as const;
   }
   if (
-    /\b(search|look\s+up|lookup|find online|google|bing|latest|current|today|now|news|weather|price|stock|score|top\s+\d+|top|best|popular|trending|review|reviews|article|source|sources)\b/i.test(
+    /\b(latest|current|today|now|news|weather|price|stock|score|top\s+\d+|top|best|popular|trending|review|reviews|article|source|sources|summari[sz]e|research|compare|comparison|verify)\b/i.test(
+      normalized,
+    )
+  ) {
+    return null;
+  }
+  if (
+    /\b(search|look\s+up|lookup|find online|google|bing)\b/i.test(
       normalized,
     )
   ) {
@@ -101,18 +108,26 @@ const extractYoutubeQuery = (instructions: string) => {
   )?.[1];
   const query = (playMatch || '')
     .replace(/^(?:a|any|some)\s+(?:song|music|video)$/i, '')
+    .replace(/^(?:a|any|some)$/i, '')
     .trim();
   return query || 'popular music video';
 };
 
 const waitForPageReady = async () => {
   const startedAt = Date.now();
-  while (Date.now() - startedAt < 8_000) {
+  while (Date.now() - startedAt < 15_000) {
     const ready = await embeddedBrowserRuntime
       .executeJavaScript<string>('document.readyState')
       .catch(() => 'loading');
     if (ready === 'interactive' || ready === 'complete') {
-      break;
+      const textLength = await embeddedBrowserRuntime
+        .executeJavaScript<number>(
+          "(document.body?.innerText || '').trim().length",
+        )
+        .catch(() => 0);
+      if (textLength > 20) {
+        break;
+      }
     }
     await delay(250);
   }
@@ -124,7 +139,7 @@ const readVisiblePageText = async () =>
     (() => (document.body?.innerText || '').replace(/\\s+\\n/g, '\\n').trim())();
   `);
 
-const clickFirstYoutubeVideo = async () =>
+const clickFirstYoutubeVideoOnce = async () =>
   embeddedBrowserRuntime.executeJavaScript<{
     ok: boolean;
     title?: string;
@@ -137,10 +152,19 @@ const clickFirstYoutubeVideo = async () =>
         const style = window.getComputedStyle(node);
         return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
       };
+      const badTitle = /download chrome|sign in|subscribe|mixes|playlist|shorts/i;
       const anchors = Array.from(document.querySelectorAll('a[href*="/watch"]'))
         .filter((anchor) => isVisible(anchor))
-        .filter((anchor) => !/shorts/i.test(anchor.href));
-      const anchor = anchors.find((item) => item.id === 'video-title') || anchors[0];
+        .filter((anchor) => !/shorts/i.test(anchor.href))
+        .map((anchor) => {
+          const title = (anchor.getAttribute('title') || anchor.getAttribute('aria-label') || anchor.textContent || '').replace(/\\s+/g, ' ').trim();
+          return { anchor, title };
+        })
+        .filter((item) => item.title.length >= 3 && !badTitle.test(item.title));
+      const anchor =
+        anchors.find((item) => item.anchor.id === 'video-title')?.anchor ||
+        anchors.find((item) => item.anchor.closest('ytd-video-renderer,ytd-rich-item-renderer'))?.anchor ||
+        anchors[0]?.anchor;
       if (!anchor) {
         return { ok: false, reason: 'No visible YouTube video result is available yet.' };
       }
@@ -151,6 +175,23 @@ const clickFirstYoutubeVideo = async () =>
       return { ok: true, title, href };
     })();
   `);
+
+const clickFirstYoutubeVideo = async () => {
+  const startedAt = Date.now();
+  let lastFailure = 'No visible YouTube video result is available yet.';
+  while (Date.now() - startedAt < 15_000) {
+    const result = await clickFirstYoutubeVideoOnce().catch((error) => ({
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error),
+    }));
+    if (result.ok) {
+      return result;
+    }
+    lastFailure = result.reason || lastFailure;
+    await delay(500);
+  }
+  return { ok: false, reason: lastFailure };
+};
 
 type SearchResult = {
   title: string;
@@ -380,11 +421,18 @@ export async function runQuickEmbeddedBrowserTask({
     display: 'Browser',
     activity: 'Starting browser task',
   });
+  orchestrator.emit({
+    type: 'step.started',
+    title: 'Starting embedded browser',
+    detail: 'Preparing the in-app browser surface.',
+    status: 'in_progress',
+  });
   embeddedBrowserRuntime.ensure();
-  await embeddedBrowserRuntime.setInteractionBlocked(true);
+  void embeddedBrowserRuntime.setInteractionBlocked(true);
   setState({
     ...getState(),
     status: StatusEnum.RUNNING,
+    thinking: true,
   });
 
   try {

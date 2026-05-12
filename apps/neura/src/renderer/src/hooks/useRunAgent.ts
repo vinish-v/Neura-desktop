@@ -48,6 +48,18 @@ const filterAndTransformWithMap = (
     .filter((msg): msg is Message => msg !== undefined);
 };
 
+export const buildMessagesForRun = ({
+  initialMessages,
+  currentMessages: _currentMessages,
+  history: _history,
+}: {
+  currentMessages: ConversationWithSoM[];
+  initialMessages: Conversation[];
+  history: ConversationWithSoM[];
+}) => {
+  return initialMessages;
+};
+
 export const useRunAgent = () => {
   // const dispatch = useDispatch();
 
@@ -71,7 +83,13 @@ export const useRunAgent = () => {
 
     await Promise.all([
       api.setInstructions({ instructions: value }),
-      api.setMessages({ messages: [...currentMessages, ...initialMessages] }),
+      api.setMessages({
+        messages: buildMessagesForRun({
+          currentMessages,
+          initialMessages,
+          history,
+        }),
+      }),
       api.setSessionHistoryMessages({
         messages: sessionHistory,
       }),

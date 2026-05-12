@@ -814,12 +814,12 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
         ) : null}
 
         {shouldShowFinalAnswer ? (
-          <div className="mt-4 max-h-[34vh] overflow-y-auto rounded-lg border border-emerald-400/20 bg-emerald-400/[0.045] p-4">
+          <div className="mt-4 max-h-[52vh] min-h-[140px] overflow-y-auto rounded-lg border border-emerald-400/20 bg-emerald-400/[0.045] p-4">
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-emerald-100">
               <Check className="h-4 w-4 text-emerald-400" />
               Final answer
             </div>
-            <div className="break-words text-sm leading-6 text-white/85">
+            <div className="break-words text-sm leading-6 text-white/85 [&_li]:my-1 [&_ol]:pl-5 [&_p]:my-2 [&_ul]:pl-5">
               <Markdown>{finalAnswer}</Markdown>
             </div>
           </div>

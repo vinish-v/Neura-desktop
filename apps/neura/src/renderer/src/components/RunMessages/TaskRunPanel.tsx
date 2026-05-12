@@ -257,7 +257,7 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
           <div className="mb-2 text-xs font-medium text-muted-foreground">
             Final answer
           </div>
-          <div className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-xl border border-emerald-400/20 bg-emerald-400/[0.04] px-3 py-2 text-xs leading-5 text-white/85">
+          <div className="max-h-[50vh] min-h-[96px] overflow-y-auto whitespace-pre-wrap break-words rounded-xl border border-emerald-400/20 bg-emerald-400/[0.04] px-3 py-2 text-sm leading-6 text-white/85">
             {finalAnswer}
           </div>
         </div>
