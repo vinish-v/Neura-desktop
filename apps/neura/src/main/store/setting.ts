@@ -8,7 +8,7 @@ import yaml from 'js-yaml';
 import * as env from '@main/env';
 import { logger } from '@main/logger';
 import {
-  createDefaultNeuraRoadmap,
+  createStabilizedV1Roadmap,
   normalizeNeuraRoadmap,
 } from '@main/services/neuraRoadmap';
 
@@ -45,7 +45,7 @@ export const DEFAULT_SETTING: LocalStore = {
     updatedAt: Date.now(),
   },
   taskRuns: [],
-  neuraRoadmap: createDefaultNeuraRoadmap(),
+  neuraRoadmap: createStabilizedV1Roadmap(),
   connectors: [
     {
       id: 'github',

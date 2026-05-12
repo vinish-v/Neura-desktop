@@ -136,6 +136,10 @@ const TaskRunSchema = z.object({
     'multimodal_workflow',
   ]),
   status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled']),
+  workspacePath: z.string().optional(),
+  memoryFilePath: z.string().optional(),
+  memorySummary: z.string().optional(),
+  retrievedRunIds: z.array(z.string()).optional(),
   todoItems: z
     .array(
       z.object({

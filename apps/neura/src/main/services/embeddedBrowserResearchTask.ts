@@ -11,6 +11,7 @@ import { type AppState, SearchEngineForSettings } from '@main/store/types';
 import { AgentOrchestrator } from './agentOrchestrator';
 import { ComputerRuntimeController } from './computerRuntimeController';
 import { embeddedBrowserRuntime } from './embeddedBrowserRuntime';
+import { getTaskContextHint } from './taskContextMemory';
 
 export type ResearchSource = {
   title: string;
@@ -23,6 +24,14 @@ export type ResearchSource = {
 
 export type SourceExtractor = {
   extractCurrentPage(): Promise<ResearchSource>;
+};
+
+export type SourceExtractorBackend = 'embedded' | 'obscura_candidate';
+
+export type SourceExtractorBackendReport = {
+  backend: SourceExtractorBackend;
+  status: 'default' | 'evaluation_only';
+  summary: string;
 };
 
 type RunnerArgs = {
@@ -337,6 +346,33 @@ export class EmbeddedBrowserSourceExtractor implements SourceExtractor {
   }
 }
 
+export const getSourceExtractorBackendReports = (): SourceExtractorBackendReport[] => [
+  {
+    backend: 'embedded',
+    status: 'default',
+    summary:
+      'Default extractor uses Neura’s in-app embedded browser DOM and readable page text.',
+  },
+  {
+    backend: 'obscura_candidate',
+    status: 'evaluation_only',
+    summary:
+      'Obscura remains an optional future adapter behind SourceExtractor and is not enabled in runtime.',
+  },
+];
+
+export const createSourceExtractor = (
+  backend: SourceExtractorBackend = 'embedded',
+): SourceExtractor => {
+  if (backend !== 'embedded') {
+    logger.info(
+      '[embeddedBrowserResearchTask] unsupported source extractor backend requested, falling back to embedded',
+      backend,
+    );
+  }
+  return new EmbeddedBrowserSourceExtractor();
+};
+
 const decodeHtmlEntities = (value: string) =>
   value.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity) => {
     const named: Record<string, string> = {
@@ -553,6 +589,7 @@ const synthesizeSources = async (
   instructions: string,
   settings: LocalStore,
   sources: ResearchSource[],
+  taskContextHint = '',
 ) => {
   const config = getResearchModelConfig(settings);
   if (!config) {
@@ -578,6 +615,7 @@ const synthesizeSources = async (
           role: 'user',
           content: [
             `User task: ${instructions}`,
+            taskContextHint.trim(),
             'Write the final answer from these sources. Prefer current dates, names, prices, and direct facts. If sources disagree, say so.',
             sources.map(sourceDigest).join('\n\n---\n\n'),
           ].join('\n\n'),
@@ -614,7 +652,10 @@ export const ensureSourcesSection = (
     .join('\n');
 };
 
-const validateResearchAnswer = (answer: string, sources: ResearchSource[]) => {
+export const validateResearchAnswer = (
+  answer: string,
+  sources: ResearchSource[],
+) => {
   const normalized = answer.trim();
   if (sources.length < 2) {
     throw new Error(
@@ -644,7 +685,7 @@ export async function runEmbeddedBrowserResearchTask({
   const query = normalizeResearchQuery(instructions) || instructions.trim();
   const searchQueries = buildResearchSearchQueries(instructions);
   const orchestrator = new AgentOrchestrator({ getState, setState });
-  const extractor = new EmbeddedBrowserSourceExtractor();
+  const extractor = createSourceExtractor();
 
   orchestrator.begin(instructions, 'gui_browser');
   ComputerRuntimeController.start({
@@ -810,8 +851,9 @@ export async function runEmbeddedBrowserResearchTask({
       detail: `Using ${sources.length} sources.`,
       status: 'in_progress',
     });
+    const taskContextHint = getTaskContextHint(getState().taskState ?? undefined);
     const finalAnswer = ensureSourcesSection(
-      await synthesizeSources(instructions, settings, sources),
+      await synthesizeSources(instructions, settings, sources, taskContextHint),
       sources,
     );
     validateResearchAnswer(finalAnswer, sources);

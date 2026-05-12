@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   requestUserApproval: vi.fn(),
@@ -96,6 +100,68 @@ describe('native GitHub connector tools', () => {
         method: 'POST',
         body: JSON.stringify({ title: 'Test issue', body: 'Body' }),
       }),
+    );
+  });
+});
+
+describe('native local file tools', () => {
+  const originalEnv = { ...process.env };
+  let tempRoot = '';
+
+  beforeEach(async () => {
+    vi.resetAllMocks();
+    tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'neura-native-tools-'));
+  });
+
+  afterEach(async () => {
+    process.env = { ...originalEnv };
+    if (tempRoot) {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('creates inferred Desktop folders on the OneDrive Desktop when that is the active Windows Desktop', async () => {
+    const oneDriveRoot = path.join(tempRoot, 'OneDrive');
+    const desktopPath = path.join(oneDriveRoot, 'Desktop');
+    await fs.mkdir(desktopPath, { recursive: true });
+    process.env.OneDrive = oneDriveRoot;
+    process.env.OneDriveConsumer = '';
+    process.env.OneDriveCommercial = '';
+    process.env.USERPROFILE = path.join(tempRoot, 'UserProfile');
+
+    const result = await executeNativeComputerTool('create_folder', {
+      content: 'create a folder on desktop named hom',
+    } as never);
+
+    const createdPath = path.join(desktopPath, 'hom');
+    await expect(fs.stat(createdPath)).resolves.toEqual(
+      expect.objectContaining({}),
+    );
+    expect(result.status).toBe(StatusEnum.END);
+    expect(result.message).toBe(
+      `Created folder on OneDrive Desktop: ${createdPath}`,
+    );
+  });
+
+  it('reports created files with a clear Desktop label for explicit Desktop paths', async () => {
+    const oneDriveRoot = path.join(tempRoot, 'OneDrive');
+    const desktopPath = path.join(oneDriveRoot, 'Desktop');
+    await fs.mkdir(desktopPath, { recursive: true });
+    process.env.OneDrive = oneDriveRoot;
+    process.env.OneDriveConsumer = '';
+    process.env.OneDriveCommercial = '';
+    process.env.USERPROFILE = path.join(tempRoot, 'UserProfile');
+    const filePath = path.join(desktopPath, 'note.txt');
+
+    const result = await executeNativeComputerTool('write_file', {
+      path: filePath,
+      content: 'hello',
+    } as never);
+
+    await expect(fs.readFile(filePath, 'utf8')).resolves.toBe('hello');
+    expect(result.status).toBe(StatusEnum.END);
+    expect(result.message).toBe(
+      `Created file on OneDrive Desktop: ${filePath}`,
     );
   });
 });

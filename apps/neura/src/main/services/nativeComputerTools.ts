@@ -447,7 +447,8 @@ const expandHomePath = (value: string) => {
 
 const resolveLocalPath = (rawPath: string | undefined) => {
   const value = requireInput(rawPath, 'path');
-  return path.resolve(expandHomePath(value));
+  const normalized = value.replace(/^["'`]|["'`]$/g, '');
+  return path.resolve(expandHomePath(normalized));
 };
 
 const cleanInferredFolderName = (value: string) =>

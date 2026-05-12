@@ -25,6 +25,16 @@ type RoadmapPhaseDefinition = {
   tasks: RoadmapTaskDefinition[];
 };
 
+type RoadmapBaselineEntry = {
+  status: RoadmapTaskStatus;
+  evidence?: Array<
+    Omit<RoadmapEvidence, 'recordedAt'> & {
+      recordedAt?: number;
+    }
+  >;
+  blockedReason?: string;
+};
+
 const PHASE_DEFINITIONS: RoadmapPhaseDefinition[] = [
   {
     id: 'P1',
@@ -233,6 +243,381 @@ const createTask = (task: RoadmapTaskDefinition, now: number): RoadmapTask => ({
   updatedAt: now,
 });
 
+const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
+  'P1.1': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p1-1-task-isolation',
+        kind: 'test',
+        summary:
+          'Sequential new tasks keep separate history, state, and final answers.',
+        command:
+          'npm test -- --run src/main/services/taskRunRegistry.test.ts',
+        artifactPath: 'apps/neura/src/main/services/taskRunRegistry.test.ts',
+      },
+    ],
+  },
+  'P1.2': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p1-2-final-answer-ui',
+        kind: 'manual',
+        summary:
+          'Final answers are rendered in assistant transcript with scrollable content.',
+        artifactPath:
+          'apps/neura/src/renderer/src/components/RunMessages/TaskRunPanel.tsx',
+      },
+    ],
+  },
+  'P1.3': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p1-3-diagnostics-collapsed',
+        kind: 'manual',
+        summary:
+          'Diagnostics are collapsed by default and not shown as primary output.',
+        artifactPath:
+          'apps/neura/src/renderer/src/components/RunMessages/TaskRunPanel.tsx',
+      },
+    ],
+  },
+  'P1.4': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p1-4-regression-tests',
+        kind: 'test',
+        summary: 'Core phase-1 regression tests are present and passing.',
+        command:
+          'npm test -- --run src/main/services/taskRunRegistry.test.ts src/main/services/neuraRoadmap.test.ts',
+      },
+    ],
+  },
+  'P2.1': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p2-1-routing-split',
+        kind: 'test',
+        summary:
+          'Quick browser and research browser routing are covered by tests.',
+        command:
+          'npm test -- --run src/main/services/embeddedBrowserResearchTask.test.ts',
+      },
+    ],
+  },
+  'P2.2': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p2-2-source-dedupe',
+        kind: 'test',
+        summary:
+          'Research candidate ranking dedupes by domain and filters low-quality links.',
+        artifactPath:
+          'apps/neura/src/main/services/embeddedBrowserResearchTask.test.ts',
+      },
+    ],
+  },
+  'P2.3': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p2-3-source-extraction',
+        kind: 'test',
+        summary:
+          'Source extraction captures title, URL, date, excerpt, and readable body.',
+        artifactPath:
+          'apps/neura/src/main/services/embeddedBrowserResearchTask.test.ts',
+      },
+    ],
+  },
+  'P2.4': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p2-4-answer-validation',
+        kind: 'test',
+        summary:
+          'Research answer validation rejects shallow visible-results summaries.',
+        artifactPath:
+          'apps/neura/src/main/services/embeddedBrowserResearchTask.test.ts',
+      },
+    ],
+  },
+  'P2.5': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p2-5-research-tests',
+        kind: 'test',
+        summary: 'Research runner behavior is covered with source-quality tests.',
+        command:
+          'npm test -- --run src/main/services/embeddedBrowserResearchTask.test.ts',
+      },
+    ],
+  },
+  'P3.1': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p3-1-desktop-path',
+        kind: 'test',
+        summary:
+          'Desktop path reporting distinguishes OneDrive Desktop from local Desktop.',
+        command:
+          'npm test -- --run src/main/services/nativeComputerTools.test.ts',
+      },
+    ],
+  },
+  'P3.2': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p3-2-file-folder-answer',
+        kind: 'test',
+        summary:
+          'File and folder operations return concise outcome messages with exact paths.',
+        artifactPath:
+          'apps/neura/src/main/services/nativeComputerTools.test.ts',
+      },
+    ],
+  },
+  'P3.3': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p3-3-gui-only-visible-apps',
+        kind: 'manual',
+        summary:
+          'Native deterministic local operations bypass GUI desktop automation paths.',
+        artifactPath:
+          'apps/neura/src/main/services/localComputerActorRunner.ts',
+      },
+    ],
+  },
+  'P3.4': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p3-4-native-tool-tests',
+        kind: 'test',
+        summary: 'Native shell, file, and folder tools have direct tests.',
+        command:
+          'npm test -- --run src/main/services/nativeComputerTools.test.ts',
+      },
+    ],
+  },
+  'P4.1': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p4-1-artifact-viewer',
+        kind: 'manual',
+        summary:
+          'Task run panel renders artifact previews for markdown, code, PDF, image, and other supported files.',
+        artifactPath:
+          'apps/neura/src/renderer/src/components/RunMessages/TaskRunPanel.tsx',
+      },
+    ],
+  },
+  'P4.2': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p4-2-workspace-explorer',
+        kind: 'manual',
+        summary:
+          'Workspace explorer lists generated files and task artifacts from the active run.',
+        artifactPath:
+          'apps/neura/src/renderer/src/components/RunMessages/TaskRunPanel.tsx',
+      },
+    ],
+  },
+  'P4.3': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p4-3-open-reveal',
+        kind: 'manual',
+        summary:
+          'Artifacts support open and reveal actions through window IPC routes.',
+        artifactPath: 'apps/neura/src/main/ipcRoutes/window.ts',
+      },
+    ],
+  },
+  'P4.4': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p4-4-artifact-tests',
+        kind: 'test',
+        summary:
+          'Artifact preview and workspace listing metadata are covered by IPC route tests.',
+        command:
+          'npm test -- --run src/main/ipcRoutes/window.test.ts',
+      },
+    ],
+  },
+  'P5.1': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p5-1-orchestrator-contract',
+        kind: 'manual',
+        summary:
+          'AgentOrchestrator provides the shared plan-act-observe-finish contract used by browser, local workflow, and local computer runners.',
+        artifactPath: 'apps/neura/src/main/services/agentOrchestrator.ts',
+      },
+    ],
+  },
+  'P5.2': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p5-2-quick-browser-orchestrated',
+        kind: 'manual',
+        summary:
+          'Quick embedded browser tasks execute through AgentOrchestrator.',
+        artifactPath:
+          'apps/neura/src/main/services/quickEmbeddedBrowserTask.ts',
+      },
+    ],
+  },
+  'P5.3': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p5-3-research-orchestrated',
+        kind: 'manual',
+        summary:
+          'Embedded browser research tasks execute through AgentOrchestrator.',
+        artifactPath:
+          'apps/neura/src/main/services/embeddedBrowserResearchTask.ts',
+      },
+    ],
+  },
+  'P5.4': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p5-4-local-orchestrated',
+        kind: 'manual',
+        summary:
+          'Shell, local workflow, and desktop-computer tasks share the same orchestrator lifecycle.',
+        artifactPath:
+          'apps/neura/src/main/services/localComputerActorRunner.ts',
+      },
+    ],
+  },
+  'P5.5': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p5-5-obsolete-paths-contained',
+        kind: 'manual',
+        summary:
+          'Runtime routing now prefers orchestrated quick/research/local paths instead of competing browser fallbacks.',
+        artifactPath: 'apps/neura/src/main/services/runAgent.ts',
+      },
+    ],
+  },
+  'P6.1': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p6-1-file-system-memory',
+        kind: 'test',
+        summary:
+          'Each task run persists a workspace context file under task-workspaces.',
+        command:
+          'npm test -- --run src/main/services/taskContextMemory.test.ts',
+      },
+    ],
+  },
+  'P6.2': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p6-2-episodic-retrieval',
+        kind: 'test',
+        summary:
+          'Relevant completed runs are retrieved and exposed as context hints for new browser research tasks.',
+        command:
+          'npm test -- --run src/main/services/taskContextMemory.test.ts src/main/services/embeddedBrowserResearchTask.test.ts',
+      },
+    ],
+  },
+  'P6.3': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p6-3-approval-gates',
+        kind: 'manual',
+        summary:
+          'Sensitive actions surface clean approve and deny controls in the task run panel.',
+        artifactPath:
+          'apps/neura/src/renderer/src/components/RunMessages/TaskRunPanel.tsx',
+      },
+    ],
+  },
+  'P6.4': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p6-4-extractor-evaluation',
+        kind: 'manual',
+        summary:
+          'Optional scraper backend remains behind SourceExtractor and is documented without enabling a blind runtime dependency.',
+        artifactPath: 'docs/neura-source-extractor-evaluation.md',
+      },
+    ],
+  },
+  'P6.5': {
+    status: 'done',
+    evidence: [
+      {
+        id: 'baseline-p6-5-sandbox-investigation',
+        kind: 'manual',
+        summary:
+          'Sandbox, VM, and microVM direction is documented for the post-stabilization phase.',
+        artifactPath: 'docs/neura-sandbox-vm-investigation.md',
+      },
+    ],
+  },
+};
+
+const applyBaseline = (
+  progress: RoadmapProgress,
+  baseline: Record<string, RoadmapBaselineEntry>,
+  now: number,
+): RoadmapProgress => ({
+  ...progress,
+  phases: progress.phases.map((phase) => ({
+    ...phase,
+    tasks: phase.tasks.map((task) => {
+      const entry = baseline[task.id];
+      if (!entry) {
+        return task;
+      }
+      return {
+        ...task,
+        status: entry.status,
+        blockedReason: entry.blockedReason,
+        updatedAt: now,
+        evidence: (entry.evidence || []).map((item) => ({
+          ...item,
+          recordedAt: item.recordedAt || now,
+        })),
+      };
+    }),
+  })),
+  updatedAt: now,
+});
+
 export const createDefaultNeuraRoadmap = (
   now = Date.now(),
 ): RoadmapProgress => ({
@@ -245,6 +630,9 @@ export const createDefaultNeuraRoadmap = (
   })),
   updatedAt: now,
 });
+
+export const createStabilizedV1Roadmap = (now = Date.now()) =>
+  applyBaseline(createDefaultNeuraRoadmap(now), STABILIZED_V1_BASELINE, now);
 
 const knownTaskIds = new Set(
   PHASE_DEFINITIONS.flatMap((phase) => phase.tasks.map((task) => task.id)),

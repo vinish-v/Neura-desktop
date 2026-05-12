@@ -15,6 +15,7 @@ import {
   TaskTodoItem,
 } from '@main/store/types';
 import { SettingStore } from '@main/store/setting';
+import { persistTaskRunContext } from './taskContextMemory';
 
 const MAX_STORED_RUNS = 100;
 
@@ -47,6 +48,7 @@ const normalizeRun = (run: TaskRunRecord): TaskRunRecord => ({
   sourcesVisited: run.sourcesVisited || [],
   artifacts: run.artifacts || [],
   approvalEvents: run.approvalEvents || [],
+  retrievedRunIds: run.retrievedRunIds || [],
 });
 
 export class TaskRunRegistry {
@@ -104,6 +106,7 @@ export class TaskRunRegistry {
         ? runs.map((item) => (item.runId === run.runId ? nextRun : item))
         : [nextRun, ...runs];
     SettingStore.set('taskRuns', nextRuns.slice(0, MAX_STORED_RUNS));
+    persistTaskRunContext(nextRun);
     if (nextRun.status === 'running') {
       TaskRunRegistry.setActiveRunId(nextRun.runId);
     }

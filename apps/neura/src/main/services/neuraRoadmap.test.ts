@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createDefaultNeuraRoadmap,
+  createStabilizedV1Roadmap,
   normalizeNeuraRoadmap,
   summarizeRoadmapProgress,
   updateRoadmapTaskStatus,
@@ -96,6 +97,24 @@ describe('neuraRoadmap', () => {
     expect(summary.done).toBe(0);
     expect(summary.blocked).toBe(0);
     expect(summary.notStarted).toBe(26);
+  });
+
+  it('builds a stabilized V1 baseline with evidence-backed completed tasks', () => {
+    const roadmap = createStabilizedV1Roadmap(1_000);
+    const byId = new Map(
+      roadmap.phases.flatMap((phase) =>
+        phase.tasks.map((task) => [task.id, task] as const),
+      ),
+    );
+
+    expect(byId.get('P1.1')?.status).toBe('done');
+    expect(byId.get('P2.4')?.status).toBe('done');
+    expect(byId.get('P3.4')?.status).toBe('done');
+    expect(byId.get('P4.1')?.status).toBe('done');
+    expect(byId.get('P5.1')?.status).toBe('done');
+    expect(byId.get('P6.1')?.status).toBe('done');
+    expect(byId.get('P6.5')?.status).toBe('done');
+    expect(byId.get('P1.1')?.evidence.length).toBeGreaterThan(0);
   });
 
   it('rejects unknown task ids', () => {

@@ -165,6 +165,10 @@ export type TaskState = {
   originalGoal: string;
   runMode: AgentRunMode;
   status: TaskRunStatus;
+  workspacePath?: string;
+  memoryFilePath?: string;
+  memorySummary?: string;
+  retrievedRunIds?: string[];
   todoItems: TaskTodoItem[];
   progressItems: TaskProgressItem[];
   currentStep?: string;

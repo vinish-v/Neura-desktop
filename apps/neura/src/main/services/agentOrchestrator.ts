@@ -16,6 +16,7 @@ import {
 } from '@main/store/types';
 import { ConversationWithSoM } from '@main/shared/types';
 import { createTaskRun, TaskRunRegistry } from './taskRunRegistry';
+import { prepareTaskRunContext } from './taskContextMemory';
 
 type StateAccess = {
   getState: () => AppState;
@@ -102,7 +103,10 @@ export class AgentOrchestrator {
   }
 
   begin(originalGoal: string, runMode: AgentRunMode) {
-    const taskState: TaskState = createTaskRun(originalGoal, runMode);
+    const taskState: TaskState = prepareTaskRunContext(
+      createTaskRun(originalGoal, runMode),
+      TaskRunRegistry.list(),
+    );
     TaskRunRegistry.upsert(taskState);
     TaskRunRegistry.setActiveRunId(taskState.runId);
 

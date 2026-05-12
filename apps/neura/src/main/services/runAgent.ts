@@ -227,8 +227,7 @@ export const runAgent = async (
     (intentDecision.runMode === 'gui_browser' ||
       intentDecision.taskType === 'browser_navigation' ||
       intentDecision.taskType === 'browser_research' ||
-      intentDecision.requiredTools.includes('browser')) &&
-    intentDecision.operator !== Operator.RemoteBrowser
+      intentDecision.requiredTools.includes('browser'))
   ) {
     const isResearch = isEmbeddedResearchTask(instructions);
     logger.info(

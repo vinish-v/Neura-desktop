@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildResearchSearchQueries,
+  createSourceExtractor,
   ensureSourcesSection,
   extractSourceFromHtml,
+  getSourceExtractorBackendReports,
   isEmbeddedResearchTask,
   rankSearchCandidates,
+  validateResearchAnswer,
 } from './embeddedBrowserResearchTask';
 
 describe('embeddedBrowserResearchTask routing', () => {
@@ -139,6 +142,25 @@ describe('embeddedBrowserResearchTask routing', () => {
     expect(source.text.length).toBeGreaterThan(300);
   });
 
+  it('keeps the embedded extractor as the runtime default while exposing evaluation-only backends', () => {
+    const reports = getSourceExtractorBackendReports();
+
+    expect(reports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          backend: 'embedded',
+          status: 'default',
+        }),
+        expect.objectContaining({
+          backend: 'obscura_candidate',
+          status: 'evaluation_only',
+        }),
+      ]),
+    );
+    expect(createSourceExtractor()).toBeDefined();
+    expect(createSourceExtractor('obscura_candidate')).toBeDefined();
+  });
+
   it('adds source URLs when the synthesizer omits them', () => {
     const answer = ensureSourcesSection(
       'Tamil Nadu has several current updates from the checked reports.',
@@ -163,5 +185,28 @@ describe('embeddedBrowserResearchTask routing', () => {
     expect(answer).toContain('Sources:');
     expect(answer).toContain('https://source-one.test/report');
     expect(answer).toContain('https://source-two.test/report');
+  });
+
+  it('rejects shallow visible-results answers for research tasks', () => {
+    expect(() =>
+      validateResearchAnswer('Top visible results for latest TN news', [
+        {
+          title: 'Source one',
+          url: 'https://source-one.test/article',
+          sourceName: 'Source One',
+          excerpt: 'excerpt',
+          text: 'body text '.repeat(100),
+        },
+        {
+          title: 'Source two',
+          url: 'https://source-two.test/article',
+          sourceName: 'Source Two',
+          excerpt: 'excerpt',
+          text: 'body text '.repeat(100),
+        },
+      ]),
+    ).toThrowError(
+      'Research answer is too shallow; it must synthesize facts from opened source pages.',
+    );
   });
 });

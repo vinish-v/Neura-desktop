@@ -7,9 +7,14 @@ import {
   ChevronDown,
   ChevronRight,
   CheckCircle2,
+  ExternalLink,
+  FileCode2,
+  FileImage,
+  FileSearch,
   FileText,
   FolderOpen,
   Loader2,
+  MonitorPlay,
   ShieldCheck,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -19,6 +24,36 @@ import { cn } from '@renderer/utils';
 import { api } from '@renderer/api';
 import { Markdown } from '@renderer/components/markdown';
 import { Button } from '@renderer/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@renderer/components/ui/dialog';
+
+type ArtifactPreviewState = {
+  title: string;
+  path: string;
+  kind: 'text' | 'binary' | 'unsupported';
+  text?: string;
+  dataUrl?: string;
+  mimeType?: string;
+  reason?: string;
+};
+
+type WorkspaceEntry = {
+  path: string;
+  name: string;
+  type: 'file' | 'directory';
+  sizeBytes: number;
+  modifiedAt: number;
+};
+
+type WorkspaceRoot = {
+  rootPath: string;
+  entries: WorkspaceEntry[];
+};
 
 const statusIcon = {
   pending: Loader2,
@@ -71,7 +106,16 @@ const publicFinalAnswer = (answer?: string) => {
 
 export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [previewState, setPreviewState] = useState<ArtifactPreviewState | null>(
+    null,
+  );
+  const [workspaceState, setWorkspaceState] = useState<WorkspaceRoot[]>([]);
   const finalAnswer = publicFinalAnswer(taskState?.finalAnswer);
+  const artifacts = taskState?.artifacts.slice(-6) || [];
   const latestProgress = useMemo(
     () =>
       (taskState?.progressItems || [])
@@ -93,8 +137,78 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
     return null;
   }
 
+  const previewArtifact = async (artifact: (typeof artifacts)[number]) => {
+    setPreviewLoading(true);
+    setPreviewOpen(true);
+    try {
+      const preview = await api.readArtifactPreview({ path: artifact.path });
+      if (preview.kind === 'text') {
+        setPreviewState({
+          title: artifact.title,
+          path: artifact.path,
+          kind: 'text',
+          text: preview.text,
+          mimeType: preview.mimeType,
+        });
+        return;
+      }
+      if (preview.kind === 'binary') {
+        setPreviewState({
+          title: artifact.title,
+          path: artifact.path,
+          kind: 'binary',
+          dataUrl: preview.dataUrl,
+          mimeType: preview.mimeType,
+        });
+        return;
+      }
+      setPreviewState({
+        title: artifact.title,
+        path: artifact.path,
+        kind: 'unsupported',
+        reason: preview.reason,
+      });
+    } catch (error) {
+      setPreviewState({
+        title: artifact.title,
+        path: artifact.path,
+        kind: 'unsupported',
+        reason:
+          error instanceof Error
+            ? error.message
+            : 'Unable to preview this artifact.',
+      });
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const openWorkspaceExplorer = async () => {
+    setWorkspaceOpen(true);
+    setWorkspaceLoading(true);
+    try {
+      const roots = await api.listWorkspaceEntries({
+        paths: artifacts.map((artifact) => artifact.path),
+      });
+      setWorkspaceState(roots);
+    } catch {
+      setWorkspaceState([]);
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  };
+
+  const formatBytes = (value: number) => {
+    if (value < 1024) {
+      return `${value} B`;
+    }
+    if (value < 1024 * 1024) {
+      return `${(value / 1024).toFixed(1)} KB`;
+    }
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
   const StatusIcon = statusIcon[taskState.status] || Loader2;
-  const artifacts = taskState.artifacts.slice(-6);
   const requestedApprovals = taskState.approvalEvents.filter(
     (event) => event.status === 'requested',
   );
@@ -219,9 +333,20 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
 
       {artifacts.length > 0 && (
         <div className="mt-3 border-t border-white/10 pt-3">
-          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-            <FolderOpen className="h-3.5 w-3.5" />
-            Artifacts
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <FolderOpen className="h-3.5 w-3.5" />
+              Artifacts
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              onClick={openWorkspaceExplorer}
+            >
+              <FileSearch className="h-3.5 w-3.5" />
+              Browse workspace
+            </Button>
           </div>
           <div className="grid gap-2">
             {artifacts.map((artifact) => (
@@ -243,6 +368,15 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
                   {artifact.path}
                 </div>
                 <div className="mt-2 flex justify-end gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => void previewArtifact(artifact)}
+                  >
+                    <MonitorPlay className="h-3.5 w-3.5" />
+                    Preview
+                  </Button>
                   <Button
                     size="sm"
                     variant="outline"
@@ -341,6 +475,157 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
           )}
         </div>
       )}
+
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-4xl max-h-[88vh] overflow-hidden border border-white/20 bg-black/95 text-white">
+          <DialogHeader>
+            <DialogTitle className="truncate">{previewState?.title}</DialogTitle>
+            <DialogDescription className="truncate text-xs text-muted-foreground">
+              {previewState?.path}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-2 h-[68vh] overflow-auto rounded-md border border-white/10 bg-black/40 p-3">
+            {previewLoading && (
+              <div className="text-sm text-muted-foreground">Loading preview...</div>
+            )}
+            {!previewLoading && previewState?.kind === 'text' && (
+              <pre className="whitespace-pre-wrap break-words text-xs leading-5 text-white/90">
+                {previewState.text}
+              </pre>
+            )}
+            {!previewLoading &&
+              previewState?.kind === 'binary' &&
+              previewState.mimeType?.startsWith('image/') && (
+                <img
+                  src={previewState.dataUrl}
+                  alt={previewState.title}
+                  className="max-h-[64vh] w-auto max-w-full rounded-md border border-white/10"
+                />
+              )}
+            {!previewLoading &&
+              previewState?.kind === 'binary' &&
+              previewState.mimeType === 'application/pdf' && (
+                <iframe
+                  src={previewState.dataUrl}
+                  title={previewState.title}
+                  className="h-[64vh] w-full rounded-md border border-white/10 bg-white"
+                />
+              )}
+            {!previewLoading && previewState?.kind === 'unsupported' && (
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <div>{previewState.reason || 'Preview is not available.'}</div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      previewState?.path &&
+                      api.revealPath({ path: previewState.path })
+                    }
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    Reveal
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      previewState?.path && api.openPath({ path: previewState.path })
+                    }
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Open externally
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={workspaceOpen} onOpenChange={setWorkspaceOpen}>
+        <DialogContent className="max-w-5xl max-h-[88vh] overflow-hidden border border-white/20 bg-black/95 text-white">
+          <DialogHeader>
+            <DialogTitle>Workspace Explorer</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Browse generated files and artifacts for this run.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-2 h-[68vh] overflow-auto space-y-4 rounded-md border border-white/10 bg-black/40 p-3">
+            {workspaceLoading && (
+              <div className="text-sm text-muted-foreground">Loading workspace...</div>
+            )}
+            {!workspaceLoading && workspaceState.length === 0 && (
+              <div className="text-sm text-muted-foreground">
+                No workspace files were found for this run.
+              </div>
+            )}
+            {!workspaceLoading &&
+              workspaceState.map((root) => (
+                <section
+                  key={root.rootPath}
+                  className="rounded-md border border-white/10 bg-black/20 p-3"
+                >
+                  <div className="mb-2 break-words text-xs text-blue-200">
+                    {root.rootPath}
+                  </div>
+                  <div className="space-y-2">
+                    {root.entries.map((entry) => (
+                      <div
+                        key={entry.path}
+                        className="flex flex-wrap items-center gap-2 rounded-md border border-white/10 bg-black/20 px-2 py-1.5"
+                      >
+                        {entry.type === 'directory' ? (
+                          <FolderOpen className="h-3.5 w-3.5 text-blue-300" />
+                        ) : entry.name.match(/\.(png|jpg|jpeg|webp|gif|svg)$/i) ? (
+                          <FileImage className="h-3.5 w-3.5 text-emerald-300" />
+                        ) : (
+                          <FileCode2 className="h-3.5 w-3.5 text-slate-300" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate text-xs text-white">
+                          {entry.name}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {entry.type === 'file' ? formatBytes(entry.sizeBytes) : 'dir'}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {new Date(entry.modifiedAt).toLocaleString()}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => api.revealPath({ path: entry.path })}
+                        >
+                          Reveal
+                        </Button>
+                        {entry.type === 'file' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs"
+                            onClick={() =>
+                              void previewArtifact({
+                                id: entry.path,
+                                title: entry.name,
+                                kind: 'other',
+                                path: entry.path,
+                                sourceRunId: taskState.runId,
+                                createdAt: entry.modifiedAt,
+                              })
+                            }
+                          >
+                            Preview
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
