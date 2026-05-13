@@ -1,6 +1,6 @@
 {
   "name": "neura-desktop",
-  "version": "0.2.20",
+  "version": "0.2.21",
   "private": true,
   "main": "./dist/main/main.js",
   "packageManager": "pnpm@9.10.0",
