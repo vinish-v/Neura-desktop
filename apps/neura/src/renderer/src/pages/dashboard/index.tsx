@@ -18,6 +18,7 @@ import {
   Laptop,
   PauseCircle,
   Play,
+  Plus,
   RefreshCw,
   ShieldCheck,
   Square,
@@ -133,7 +134,16 @@ const RunPrompt = memo(() => {
           placeholder="Assign a task or ask anything"
           className="min-h-[86px] w-full resize-none bg-transparent px-1 py-1 text-[17px] leading-7 text-white outline-none placeholder:text-[#7f7f7f]"
         />
-        <div className="flex items-center justify-end pt-3">
+        <div className="flex items-center justify-between pt-3">
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="h-10 w-10 rounded-full border border-white/10 bg-[#2b2b2b] text-white/80 hover:bg-white/10 hover:text-white"
+            aria-label="Add context"
+          >
+            <Plus className="h-5 w-5" />
+          </Button>
           <div className="ml-auto flex items-center gap-3">
             <Button
               type="submit"
