@@ -2,7 +2,15 @@
  * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { ComponentType, FormEvent, memo, useMemo, useState } from 'react';
+import {
+  ComponentType,
+  ChangeEvent,
+  FormEvent,
+  memo,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   AlertCircle,
   ArrowUp,
@@ -22,6 +30,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Square,
+  X,
   XCircle,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -47,6 +56,26 @@ const statusClass = {
   failed: 'border-red-400/30 bg-red-400/10 text-red-100',
   cancelled: 'border-zinc-500/25 bg-zinc-500/10 text-zinc-200',
 };
+
+type LocalAttachment = File & { path?: string };
+
+const formatBytes = (size: number) => {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${Math.round(size / 1024)} KB`;
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const attachmentSummary = (attachments: LocalAttachment[]) =>
+  attachments
+    .map((file) => {
+      const location = file.path ? `, path: ${file.path}` : '';
+      return `- ${file.name} (${file.type || 'file'}, ${formatBytes(file.size)}${location})`;
+    })
+    .join('\n');
 
 const formatDate = (value?: number) =>
   value ? new Date(value).toLocaleString() : 'Not started';
@@ -89,22 +118,43 @@ const SectionHeader = ({
 
 const RunPrompt = memo(() => {
   const [goal, setGoal] = useState('');
+  const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   const [running, setRunning] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const runNow = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = goal.trim();
-    if (!trimmed) {
+    if (!trimmed && !attachments.length) {
       return;
     }
+    const attachmentText = attachmentSummary(attachments);
+    const instructions = attachmentText
+      ? `${trimmed || 'Analyze the uploaded files.'}\n\nAttached files:\n${attachmentText}`
+      : trimmed;
     setRunning(true);
     try {
-      await api.setInstructions({ instructions: trimmed });
+      await api.setInstructions({ instructions });
       await api.runAgent();
       setGoal('');
+      setAttachments([]);
     } finally {
       setRunning(false);
     }
+  };
+
+  const handleFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(
+      event.target.files || [],
+    ) as LocalAttachment[];
+    if (selected.length) {
+      setAttachments((current) => [...current, ...selected]);
+    }
+    event.target.value = '';
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index));
   };
 
   return (
@@ -128,19 +178,53 @@ const RunPrompt = memo(() => {
         transition={{ delay: 0.08, duration: 0.45, ease: 'easeOut' }}
         className="w-full rounded-[28px] border border-white/10 bg-[#242424] p-4 shadow-[0_30px_90px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.045)]"
       >
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          multiple
+          accept="image/*,video/*,audio/*,.pdf,.txt,.md,.csv,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+          onChange={handleFiles}
+        />
         <textarea
           value={goal}
           onChange={(event) => setGoal(event.target.value)}
           placeholder="Assign a task or ask anything"
           className="min-h-[86px] w-full resize-none bg-transparent px-1 py-1 text-[17px] leading-7 text-white outline-none placeholder:text-[#7f7f7f]"
         />
+        {attachments.length ? (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {attachments.map((file, index) => (
+              <div
+                key={`${file.name}-${file.size}-${index}`}
+                className="flex max-w-[260px] items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs text-white/85"
+                title={file.path || file.name}
+              >
+                <FileText className="h-3.5 w-3.5 shrink-0 text-white/65" />
+                <span className="truncate">{file.name}</span>
+                <span className="shrink-0 text-white/45">
+                  {formatBytes(file.size)}
+                </span>
+                <button
+                  type="button"
+                  className="ml-1 rounded-full text-white/45 transition hover:text-white"
+                  onClick={() => removeAttachment(index)}
+                  aria-label={`Remove ${file.name}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className="flex items-center justify-between pt-3">
           <Button
             type="button"
             size="icon"
             variant="ghost"
             className="h-10 w-10 rounded-full border border-white/10 bg-[#2b2b2b] text-white/80 hover:bg-white/10 hover:text-white"
-            aria-label="Add context"
+            aria-label="Upload media or files"
+            onClick={() => fileInputRef.current?.click()}
           >
             <Plus className="h-5 w-5" />
           </Button>
@@ -148,7 +232,7 @@ const RunPrompt = memo(() => {
             <Button
               type="submit"
               size="icon"
-              disabled={running || !goal.trim()}
+              disabled={running || (!goal.trim() && !attachments.length)}
               className="h-10 w-10 rounded-full bg-[#3b3b3b] text-white hover:bg-[#4a4a4a] disabled:opacity-60"
               aria-label="Run task"
             >
