@@ -19,7 +19,7 @@ export function NavSettings({ onClick }: NavSettingsProps) {
     <SidebarGroup>
       <SidebarMenu className="items-center">
         <SidebarMenuButton
-          className="rounded-lg font-medium text-white/80 hover:bg-white/8 hover:text-white"
+          className="rounded-lg font-medium text-white/80 hover:bg-white/[0.08] hover:text-white"
           onClick={onClick}
         >
           <Settings />

@@ -6,8 +6,6 @@ import { useState } from 'react';
 import {
   MoreHorizontal,
   Trash2,
-  History,
-  ChevronRight,
   Laptop,
   Compass,
 } from 'lucide-react';
@@ -22,7 +20,6 @@ import {
   SidebarGroup,
   SidebarMenu,
   SidebarMenuAction,
-  SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
   SidebarMenuSubButton,
@@ -32,7 +29,6 @@ import {
 import {
   Collapsible,
   CollapsibleContent,
-  CollapsibleTrigger,
 } from '@renderer/components/ui/collapsible';
 import { SessionItem } from '@renderer/db/session';
 import { ShareOptions } from './share';
@@ -73,7 +69,6 @@ export function NavHistory({
 }) {
   const [isShareConfirmOpen, setIsShareConfirmOpen] = useState(false);
   const [id, setId] = useState('');
-  const [isHistoryOpen, setIsHistoryOpen] = useState(true);
   const { setOpen, state } = useSidebar();
 
   const handleDelete = (id: string) => {
@@ -84,9 +79,6 @@ export function NavHistory({
   const handleHistory = () => {
     if (state === 'collapsed') {
       setOpen(true);
-      setTimeout(() => {
-        setIsHistoryOpen(true);
-      }, 10);
     }
   };
 
@@ -97,28 +89,20 @@ export function NavHistory({
           <Collapsible
             key={'History'}
             asChild
-            open={isHistoryOpen}
-            onOpenChange={setIsHistoryOpen}
+            open={true}
             className="group/collapsible"
           >
             <SidebarMenuItem className="w-full flex flex-col items-center">
-              <CollapsibleTrigger asChild>
-                <SidebarMenuButton
-                  className="!pr-2 rounded-2xl font-medium text-white/85 hover:bg-white/8 hover:text-white"
-                  onClick={handleHistory}
-                >
-                  <History strokeWidth={2} />
-                  <span>History</span>
-                  <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-                </SidebarMenuButton>
-              </CollapsibleTrigger>
               <CollapsibleContent className="w-full">
                 <SidebarMenuSub className="!mr-0 !pr-1">
                   {history.map((item) => (
                     <SidebarMenuSubItem key={item.id} className="group/item">
                       <SidebarMenuSubButton
-                        className={`cursor-pointer rounded-2xl py-5 transition-colors hover:bg-white/8 hover:text-white ${item.id === currentSessionId ? 'bg-white/12 text-white' : 'text-white/55'}`}
-                        onClick={() => onSessionClick(item.id)}
+                        className={`cursor-pointer rounded-xl py-5 text-[15px] transition-colors hover:bg-white/[0.08] hover:text-white ${item.id === currentSessionId ? 'bg-white/[0.12] text-white' : 'text-white/75'}`}
+                        onClick={() => {
+                          handleHistory();
+                          onSessionClick(item.id);
+                        }}
                       >
                         {getIcon(
                           item.meta.operator,

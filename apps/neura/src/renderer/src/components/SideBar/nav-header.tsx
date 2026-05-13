@@ -17,19 +17,13 @@ interface HeaderProps {
 export function NeuraHeader({ showTrigger }: HeaderProps) {
   return (
     <SidebarMenu className="items-center">
-      <SidebarMenuButton
-        // size="lg"
-        className="group-data-[collapsible=icon]:p-0! mb-3 h-12 rounded-lg data-[state=open]:bg-white/8 data-[state=open]:text-white hover:bg-white/6"
-      >
-        <div className="flex aspect-square size-9 items-center justify-center rounded-md border border-white/10 bg-[#111]">
+      <SidebarMenuButton className="group-data-[collapsible=icon]:p-0! mb-7 h-12 rounded-xl px-2 data-[state=open]:bg-white/[0.08] data-[state=open]:text-white hover:bg-white/[0.06]">
+        <div className="flex aspect-square size-10 items-center justify-center rounded-xl">
           <img src={logoVector} alt="Neura" className="rounded-xl" />
         </div>
         <div className="grid flex-1 text-left text-sm leading-tight">
-          <span className="truncate text-base font-semibold tracking-normal text-white">
+          <span className="truncate text-xl font-semibold tracking-normal text-white">
             Neura
-          </span>
-          <span className="truncate text-xs text-muted-foreground">
-            Developer Agent
           </span>
         </div>
       </SidebarMenuButton>

@@ -5,19 +5,24 @@
 import { useCallback, useState, type ComponentProps } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import {
+  Bot,
   BookOpen,
   Cable,
-  FolderClock,
-  LayoutDashboard,
-  PanelsTopLeft,
+  Clock3,
+  FolderPlus,
+  Library,
+  Search,
   PencilLine,
+  SlidersHorizontal,
 } from 'lucide-react';
-import { FolderKanban } from 'lucide-react';
 
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
+  SidebarGroup,
+  SidebarGroupAction,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -216,65 +221,103 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
     <>
       <Sidebar
         collapsible="icon"
-        className="select-none border-r border-[#2a2a2a] bg-[#0a0a0a]"
+        className="select-none border-r border-white/10 bg-[#202020]"
         {...props}
       >
         <DragArea></DragArea>
-        <SidebarHeader>
+        <SidebarHeader className="px-3 py-4">
           <NeuraHeader showTrigger={location.pathname === '/'} />
-          <SidebarMenu className="items-center">
+          <SidebarMenu className="items-center gap-2">
             <SidebarMenuButton
-              className="rounded-lg font-medium text-white/85 hover:bg-white/8 hover:text-white"
-              onClick={goHome}
-            >
-              <LayoutDashboard />
-              Agent Workspace
-            </SidebarMenuButton>
-            <SidebarMenuButton
-              className="rounded-lg border border-blue-400/20 bg-blue-500/10 font-medium text-blue-100 hover:bg-blue-500/15 hover:text-white"
+              className="h-11 rounded-xl bg-white/[0.08] text-base font-medium text-white hover:bg-white/[0.12] hover:text-white"
               onClick={handleHomeClick}
             >
               <PencilLine />
               New task
             </SidebarMenuButton>
             <SidebarMenuButton
-              className="rounded-lg font-medium text-white/85 hover:bg-white/8 hover:text-white"
+              className="h-11 rounded-xl text-base font-medium text-white/90 hover:bg-white/[0.08] hover:text-white"
               onClick={handleDashboardClick}
             >
-              <FolderClock />
-              Queue
+              <Bot />
+              Agent
+              <span className="ml-1 rounded-md bg-blue-500/20 px-1.5 py-0.5 text-xs text-blue-300">
+                New
+              </span>
             </SidebarMenuButton>
             <SidebarMenuButton
-              className="rounded-lg font-medium text-white/85 hover:bg-white/8 hover:text-white"
+              className="h-11 rounded-xl text-base font-medium text-white/90 hover:bg-white/[0.08] hover:text-white"
+              onClick={handleDashboardClick}
+            >
+              <Clock3 />
+              Scheduled
+            </SidebarMenuButton>
+            <SidebarMenuButton
+              className="h-11 rounded-xl text-base font-medium text-white/90 hover:bg-white/[0.08] hover:text-white"
+              onClick={handleDashboardClick}
+            >
+              <Search />
+              Search
+            </SidebarMenuButton>
+            <SidebarMenuButton
+              className="h-11 rounded-xl text-base font-medium text-white/90 hover:bg-white/[0.08] hover:text-white"
               onClick={handleSkillsClick}
             >
+              <Library />
+              Library
+            </SidebarMenuButton>
+          </SidebarMenu>
+          <SidebarGroup className="mt-7 p-0">
+            <SidebarGroupLabel className="px-2 text-sm text-muted-foreground">
+              Projects
+            </SidebarGroupLabel>
+            <SidebarGroupAction
+              className="right-2 top-1 text-muted-foreground hover:text-white"
+              onClick={handleProjectsClick}
+            >
+              +
+            </SidebarGroupAction>
+            <SidebarMenu className="mt-2">
+            <SidebarMenuButton
+              className="h-10 rounded-xl text-base font-medium text-white/90 hover:bg-white/[0.08] hover:text-white"
+              onClick={handleProjectsClick}
+            >
+              <FolderPlus />
+              New project
+            </SidebarMenuButton>
+            </SidebarMenu>
+          </SidebarGroup>
+          <SidebarGroup className="mt-5 p-0">
+            <SidebarGroupLabel className="px-2 text-sm text-muted-foreground">
+              Tools
+            </SidebarGroupLabel>
+            <SidebarMenu className="mt-2">
+            <SidebarMenuButton
+              className="h-10 rounded-xl text-base font-medium text-white/90 hover:bg-white/[0.08] hover:text-white"
+              onClick={handleCanvasClick}
+            >
               <BookOpen />
-              Skills
+              Canvas
             </SidebarMenuButton>
             <SidebarMenuButton
-              className="rounded-lg font-medium text-white/85 hover:bg-white/8 hover:text-white"
+              className="h-10 rounded-xl text-base font-medium text-white/90 hover:bg-white/[0.08] hover:text-white"
               onClick={handleConnectorsClick}
             >
               <Cable />
               Connectors
             </SidebarMenuButton>
-            <SidebarMenuButton
-              className="rounded-lg font-medium text-white/85 hover:bg-white/8 hover:text-white"
-              onClick={handleProjectsClick}
-            >
-              <FolderKanban />
-              Projects
-            </SidebarMenuButton>
-            <SidebarMenuButton
-              className="rounded-lg font-medium text-white/85 hover:bg-white/8 hover:text-white"
-              onClick={handleCanvasClick}
-            >
-              <PanelsTopLeft />
-              Canvas
-            </SidebarMenuButton>
           </SidebarMenu>
+          </SidebarGroup>
         </SidebarHeader>
-        <SidebarContent>
+        <SidebarContent className="px-1">
+          <SidebarGroup className="px-2 pb-0 pt-1">
+            <SidebarGroupLabel className="px-0 text-sm text-muted-foreground">
+              All tasks
+            </SidebarGroupLabel>
+            <SidebarGroupAction className="right-2 top-2 text-muted-foreground hover:text-white">
+              <SlidersHorizontal />
+            </SidebarGroupAction>
+          </SidebarGroup>
           <NavHistory
             currentSessionId={currentSessionId}
             history={sessions}

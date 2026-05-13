@@ -125,9 +125,9 @@
   body {
     @apply bg-background text-foreground;
     font-family:
-      Inter,
       Geist,
       'Geist Sans',
+      Inter,
       Outfit,
       ui-sans-serif,
       system-ui,
