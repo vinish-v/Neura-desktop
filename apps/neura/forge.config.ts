@@ -231,7 +231,10 @@ const config: ForgeConfig = {
   packagerConfig: {
     name: 'Neura',
     icon: 'resources/icon',
-    extraResource: ['./resources/app-update.yml'],
+    extraResource: [
+      './resources/app-update.yml',
+      '../../extensions/neura-agent',
+    ],
     asar: {
       unpack,
     },

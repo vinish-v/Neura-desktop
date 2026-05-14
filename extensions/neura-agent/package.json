@@ -1,0 +1,219 @@
+{
+  "name": "neura-ai",
+  "displayName": "Neura AI",
+  "description": "Independent Neura IDE coding Composer with NVIDIA NIM code explanation, planning, file edits, diffs, checkpoints, app builds, and approved terminal commands.",
+  "version": "0.1.0",
+  "publisher": "neura",
+  "license": "Apache-2.0",
+  "icon": "media/neura-logo.png",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Other"],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
+  "activationEvents": [
+    "*",
+    "onStartupFinished",
+    "onView:neura-ai.chat",
+    "onCommand:neura.openAiPanel",
+    "onCommand:neura.openComposer",
+    "onCommand:neura.ask",
+    "onCommand:neura.generatePlan",
+    "onCommand:neura.runAgent",
+    "onCommand:neura.buildApp",
+    "onCommand:neura.applyChanges",
+    "onCommand:neura.restoreCheckpoint",
+    "onCommand:neura.openPreview",
+    "onCommand:neura.runApprovedCommand",
+    "onCommand:neura.addWorktree",
+    "onCommand:neura.installPlugin",
+    "onCommand:neura.toggleInlineCompletions",
+    "onCommand:neura.syncCanvasProject"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "neura-ai",
+          "title": "Neura AI",
+          "icon": "media/neura-logo.svg"
+        }
+      ]
+    },
+    "views": {
+      "neura-ai": [
+        {
+          "id": "neura-ai.chat",
+          "name": "Neura Composer",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Neura IDE",
+      "properties": {
+        "neura.nim.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "NVIDIA NIM API key.",
+          "markdownDescription": "**Required.** NVIDIA NIM API key used by Neura IDE Composer. This secret is never rendered in the Composer UI. Also reads `NVIDIA_NIM_API_KEY`, `NVIDIA_API_KEY`, or the existing Neura Desktop key as a fallback.",
+          "scope": "machine-overridable"
+        },
+        "neura.nim.baseUrl": {
+          "type": "string",
+          "default": "https://integrate.api.nvidia.com/v1",
+          "description": "OpenAI-compatible NVIDIA NIM base URL.",
+          "scope": "resource"
+        },
+        "neura.nim.model": {
+          "type": "string",
+          "default": "nvidia/nemotron-3-nano-30b-a3b",
+          "enum": [
+            "nvidia/nemotron-3-nano-30b-a3b",
+            "nvidia/llama-3.1-nemotron-nano-8b-v1",
+            "moonshotai/kimi-k2.6",
+            "minimaxai/minimax-m2.7",
+            "qwen/qwen3-coder-480b-a35b-instruct",
+            "qwen/qwen3-next-80b-a3b-instruct",
+            "qwen/qwen3-next-80b-a3b-thinking",
+            "bigcode/starcoder2-15b",
+            "mistralai/codestral-22b-instruct-v0.1",
+            "ibm/granite-34b-code-instruct",
+            "ibm/granite-8b-code-instruct",
+            "google/codegemma-7b",
+            "meta/codellama-70b",
+            "deepseek-ai/deepseek-coder-6.7b-instruct",
+            "deepseek-ai/deepseek-v4-flash",
+            "deepseek-ai/deepseek-v4-pro",
+            "nvidia/llama-3.1-nemotron-51b-instruct"
+          ],
+          "description": "NVIDIA NIM model used for Neura Composer coding requests.",
+          "scope": "resource"
+        },
+        "neura.nim.reasoning": {
+          "type": "string",
+          "default": "medium",
+          "enum": ["low", "medium", "high"],
+          "description": "Default reasoning level for Neura Composer coding requests.",
+          "scope": "resource"
+        },
+        "neura.nim.timeoutMs": {
+          "type": "number",
+          "default": 45000,
+          "minimum": 10000,
+          "description": "Request timeout in milliseconds for Neura Composer NVIDIA NIM calls.",
+          "scope": "resource"
+        },
+        "neura.inlineCompletions": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Copilot-style inline ghost text completions. Off by default to avoid background model calls.",
+          "scope": "resource"
+        },
+        "neura.mcp.servers": {
+          "type": "array",
+          "default": [],
+          "description": "Reserved MCP server definitions for the upcoming approved MCP tool layer.",
+          "markdownDescription": "Reserved for the upcoming Neura MCP layer. Servers configured here are not connected until MCP approval cards and transport handling are implemented.",
+          "items": {
+            "type": "object",
+            "required": ["name", "transport"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Unique display name."
+              },
+              "transport": {
+                "type": "string",
+                "enum": ["stdio", "sse"],
+                "default": "stdio"
+              },
+              "command": {
+                "type": "string",
+                "description": "Executable for stdio MCP servers."
+              },
+              "args": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Command-line arguments for stdio MCP servers."
+              },
+              "env": {
+                "type": "object",
+                "description": "Extra environment variables for stdio MCP servers."
+              },
+              "url": {
+                "type": "string",
+                "description": "SSE endpoint URL."
+              }
+            }
+          },
+          "scope": "resource"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "neura.openAiPanel",
+        "title": "Neura: Open AI Panel"
+      },
+      {
+        "command": "neura.openComposer",
+        "title": "Neura: Open Composer"
+      },
+      {
+        "command": "neura.ask",
+        "title": "Neura: Explain Code"
+      },
+      {
+        "command": "neura.generatePlan",
+        "title": "Neura: Generate Plan"
+      },
+      {
+        "command": "neura.runAgent",
+        "title": "Neura: Edit Code"
+      },
+      {
+        "command": "neura.buildApp",
+        "title": "Neura: Build App / Site"
+      },
+      {
+        "command": "neura.applyChanges",
+        "title": "Neura: Apply Changes"
+      },
+      {
+        "command": "neura.restoreCheckpoint",
+        "title": "Neura: Restore Checkpoint"
+      },
+      {
+        "command": "neura.openPreview",
+        "title": "Neura: Open Preview"
+      },
+      {
+        "command": "neura.runApprovedCommand",
+        "title": "Neura: Run Approved Command"
+      },
+      {
+        "command": "neura.addWorktree",
+        "title": "Neura: Add Git Worktree"
+      },
+      {
+        "command": "neura.installPlugin",
+        "title": "Neura: Install Plugin from Git"
+      },
+      {
+        "command": "neura.toggleInlineCompletions",
+        "title": "Neura: Toggle Inline Completions"
+      },
+      {
+        "command": "neura.syncCanvasProject",
+        "title": "Neura: Sync Workspace"
+      }
+    ]
+  }
+}

@@ -88,6 +88,17 @@ type CanvasProject = {
   updatedAt: number;
 };
 
+type CanvasIdeStatus = {
+  available: boolean;
+  executablePath: string | null;
+  configuredBy: 'env' | 'installed' | 'repo' | null;
+  bridge: {
+    running: boolean;
+    url: string | null;
+    activeSessions: number;
+  };
+};
+
 const formatTime = (timestamp: number) =>
   new Intl.DateTimeFormat(undefined, {
     month: 'short',
@@ -145,6 +156,8 @@ export default function Canvas() {
   const [queueing, setQueueing] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [terminalBusy, setTerminalBusy] = useState(false);
+  const [ideOpening, setIdeOpening] = useState(false);
+  const [ideStatus, setIdeStatus] = useState<CanvasIdeStatus | null>(null);
   const [dirty, setDirty] = useState(false);
 
   const activeProject = useMemo(
@@ -192,10 +205,17 @@ export default function Canvas() {
     }
   };
 
+  const refreshIdeStatus = async () => {
+    const status = await api.getCanvasIdeStatus();
+    setIdeStatus(status);
+    return status;
+  };
+
   useEffect(() => {
     (async () => {
       try {
         await refreshProjects(requestedProjectId);
+        await refreshIdeStatus();
       } catch {
         toast.error('Could not load Canvas projects.');
       } finally {
@@ -404,6 +424,40 @@ export default function Canvas() {
     }
   };
 
+  const openNeuraIde = async () => {
+    if (!activeProject) {
+      return;
+    }
+    setIdeOpening(true);
+    try {
+      const status = ideStatus || (await refreshIdeStatus());
+      if (!status.available) {
+        throw new Error(
+          'Neura IDE is not installed. Install the separate Neura IDE app, build apps/neura-ide, or configure NEURA_IDE_EXECUTABLE.',
+        );
+      }
+      if (dirty) {
+        const savedProject = await saveProject('Saved before opening Neura IDE');
+        if (!savedProject) {
+          return;
+        }
+      }
+      const result = await api.openCanvasIde({ projectId: activeProject.id });
+      toast.success(
+        `Neura IDE opened for ${result.rootPath}${result.pid ? ` (pid ${result.pid})` : ''}.`,
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Could not open Neura IDE. Install the separate Neura IDE app or configure NEURA_IDE_EXECUTABLE.',
+      );
+      void refreshIdeStatus().catch(() => undefined);
+    } finally {
+      setIdeOpening(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center bg-[#0a0a0a] text-sm text-muted-foreground">
@@ -561,6 +615,24 @@ export default function Canvas() {
             <Button variant="outline" size="sm" onClick={revealProject}>
               <FolderOpen className="h-4 w-4" />
               Export
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={openNeuraIde}
+              disabled={ideOpening}
+              title={
+                ideStatus?.available === false
+                  ? 'Install Neura IDE or set NEURA_IDE_EXECUTABLE'
+                  : ideStatus?.executablePath || 'Open in Neura IDE'
+              }
+            >
+              {ideOpening ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Code2 className="h-4 w-4" />
+              )}
+              Neura IDE
             </Button>
             <Button
               variant="outline"

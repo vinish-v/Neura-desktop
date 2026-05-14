@@ -77,6 +77,66 @@ export type CanvasTerminalCommandResult = {
   timedOut: boolean;
 };
 
+export type CanvasAiMode = 'ask' | 'plan' | 'agent' | 'builder';
+
+export type CanvasAiMessage = {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  mode: CanvasAiMode;
+  content: string;
+  createdAt: number;
+  referencedFiles?: string[];
+  proposalId?: string;
+  planId?: string;
+  terminalRunId?: string;
+};
+
+export type CanvasAiEditProposal = {
+  id: string;
+  prompt: string;
+  mode: CanvasAiMode;
+  summary: string;
+  status: 'proposed' | 'partially_applied' | 'applied' | 'rejected';
+  edits: Array<{
+    filePath: string;
+    content: string;
+    rationale?: string;
+    status: 'pending' | 'applied' | 'rejected';
+  }>;
+  verificationCommand?: string;
+  checkpointId?: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type CanvasAiCheckpoint = {
+  id: string;
+  label: string;
+  proposalId?: string;
+  files: CanvasProjectFile[];
+  createdAt: number;
+  restoredAt?: number;
+};
+
+export type CanvasAiTerminalCard = {
+  id: string;
+  command: string;
+  status: 'requires_approval' | 'completed' | 'failed';
+  terminalRunId?: string;
+  createdAt: number;
+};
+
+export type CanvasAiSession = {
+  mode: CanvasAiMode;
+  contextFiles: string[];
+  messages: CanvasAiMessage[];
+  proposals: CanvasAiEditProposal[];
+  checkpoints: CanvasAiCheckpoint[];
+  terminalCards: CanvasAiTerminalCard[];
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type CanvasProject = {
   id: string;
   title: string;
@@ -86,6 +146,7 @@ export type CanvasProject = {
   versions: CanvasProjectVersion[];
   composerPlans: CanvasComposerPlan[];
   terminalRuns: CanvasTerminalCommandResult[];
+  aiSession?: CanvasAiSession;
   sourceRunId?: string;
   createdAt: number;
   updatedAt: number;
@@ -119,12 +180,43 @@ export type CreateCanvasFileInput = {
 export type CreateComposerPlanInput = {
   projectId: string;
   prompt: string;
+  aiSteps?: Array<{
+    title: string;
+    detail: string;
+    kind: CanvasComposerStep['kind'];
+    filePaths?: string[];
+    command?: string;
+  }>;
 };
 
 export type RunCanvasCommandInput = {
   projectId: string;
   command: string;
   approved: boolean;
+};
+
+export type AddCanvasAiMessageInput = {
+  projectId: string;
+  role: CanvasAiMessage['role'];
+  mode?: CanvasAiMode;
+  content: string;
+  referencedFiles?: string[];
+  proposalId?: string;
+  planId?: string;
+  terminalRunId?: string;
+};
+
+export type SaveCanvasAiEditProposalInput = {
+  projectId: string;
+  prompt: string;
+  mode: CanvasAiMode;
+  summary: string;
+  edits: Array<{
+    filePath: string;
+    content: string;
+    rationale?: string;
+  }>;
+  verificationCommand?: string;
 };
 
 type CanvasProjectMetadata = Omit<CanvasProject, 'files'> & {
@@ -422,6 +514,325 @@ export class CanvasService {
     return nextProject;
   }
 
+  async getAiSession(projectId: string) {
+    const project = await this.getProject(projectId);
+    const nextProject = await this.persistAiSession(project);
+    return nextProject.aiSession!;
+  }
+
+  async setAiMode(projectId: string, mode: CanvasAiMode) {
+    const project = await this.getProject(projectId);
+    const now = Date.now();
+    const session = this.ensureAiSession(project, now);
+    const nextProject: CanvasProject = {
+      ...project,
+      aiSession: {
+        ...session,
+        mode,
+        updatedAt: now,
+      },
+      updatedAt: now,
+    };
+    await this.writeMetadata(nextProject);
+    return nextProject.aiSession!;
+  }
+
+  async setAiContext(projectId: string, contextFiles: string[]) {
+    const project = await this.getProject(projectId);
+    const allowed = new Set(project.files.map((file) => file.path));
+    const normalizedFiles = contextFiles
+      .map(normalizeProjectFilePath)
+      .filter((filePath, index, all) => {
+        return allowed.has(filePath) && all.indexOf(filePath) === index;
+      })
+      .slice(0, 24);
+    const now = Date.now();
+    const session = this.ensureAiSession(project, now);
+    const nextProject: CanvasProject = {
+      ...project,
+      aiSession: {
+        ...session,
+        contextFiles: normalizedFiles,
+        updatedAt: now,
+      },
+      updatedAt: now,
+    };
+    await this.writeMetadata(nextProject);
+    return nextProject.aiSession!;
+  }
+
+  async addAiMessage(input: AddCanvasAiMessageInput) {
+    const project = await this.getProject(input.projectId);
+    const content = input.content.trim();
+    if (!content) {
+      throw new Error('AI message content is required.');
+    }
+    const now = Date.now();
+    const session = this.ensureAiSession(project, now);
+    const message: CanvasAiMessage = {
+      id: `ai_message_${now}_${randomUUID().slice(0, 8)}`,
+      role: input.role,
+      mode: input.mode || session.mode,
+      content,
+      createdAt: now,
+      referencedFiles: input.referencedFiles,
+      proposalId: input.proposalId,
+      planId: input.planId,
+      terminalRunId: input.terminalRunId,
+    };
+    const nextProject: CanvasProject = {
+      ...project,
+      aiSession: {
+        ...session,
+        messages: [...session.messages, message].slice(-100),
+        updatedAt: now,
+      },
+      updatedAt: now,
+    };
+    await this.writeMetadata(nextProject);
+    return { project: nextProject, message };
+  }
+
+  async saveAiEditProposal(input: SaveCanvasAiEditProposalInput) {
+    const project = await this.getProject(input.projectId);
+    if (!input.edits.length) {
+      throw new Error('At least one AI edit is required.');
+    }
+    const now = Date.now();
+    const session = this.ensureAiSession(project, now);
+    const proposal: CanvasAiEditProposal = {
+      id: `ai_proposal_${now}_${randomUUID().slice(0, 8)}`,
+      prompt: input.prompt.trim(),
+      mode: input.mode,
+      summary: input.summary.trim() || 'Neura proposed code changes.',
+      status: 'proposed',
+      edits: input.edits.map((edit) => ({
+        filePath: normalizeProjectFilePath(edit.filePath),
+        content: edit.content,
+        rationale: edit.rationale,
+        status: 'pending',
+      })),
+      verificationCommand: input.verificationCommand?.trim() || undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const nextProject: CanvasProject = {
+      ...project,
+      aiSession: {
+        ...session,
+        proposals: [proposal, ...session.proposals].slice(0, 30),
+        updatedAt: now,
+      },
+      updatedAt: now,
+    };
+    await this.writeMetadata(nextProject);
+    return { project: nextProject, proposal };
+  }
+
+  async applyAiEditProposal(
+    projectId: string,
+    proposalId: string,
+    filePaths?: string[],
+  ) {
+    const project = await this.getProject(projectId);
+    const session = this.ensureAiSession(project);
+    const proposal = session.proposals.find((item) => item.id === proposalId);
+    if (!proposal) {
+      throw new Error('AI edit proposal was not found.');
+    }
+    const selected = new Set(
+      (filePaths?.length ? filePaths : proposal.edits.map((edit) => edit.filePath))
+        .map(normalizeProjectFilePath),
+    );
+    const editsToApply = proposal.edits.filter(
+      (edit) => selected.has(edit.filePath) && edit.status === 'pending',
+    );
+    if (!editsToApply.length) {
+      throw new Error('No pending AI edits matched the apply request.');
+    }
+
+    const checkpoint = await this.createAiCheckpoint(
+      project,
+      `Before ${proposal.summary.slice(0, 64)}`,
+      proposal.id,
+    );
+
+    for (const edit of editsToApply) {
+      await this.updateProject({
+        projectId,
+        filePath: edit.filePath,
+        content: edit.content,
+        versionLabel: `Neura AI: ${proposal.summary.slice(0, 72)}`,
+      });
+    }
+
+    const refreshed = await this.getProject(projectId);
+    const refreshedSession = this.ensureAiSession(refreshed);
+    const now = Date.now();
+    const nextProposals = refreshedSession.proposals.map((item) => {
+      if (item.id !== proposalId) {
+        return item;
+      }
+      const edits = item.edits.map((edit) =>
+        selected.has(edit.filePath) ? { ...edit, status: 'applied' as const } : edit,
+      );
+      const hasPending = edits.some((edit) => edit.status === 'pending');
+      return {
+        ...item,
+        checkpointId: checkpoint.id,
+        edits,
+        status: hasPending
+          ? ('partially_applied' as const)
+          : ('applied' as const),
+        updatedAt: now,
+      };
+    });
+    const finalProject: CanvasProject = {
+      ...refreshed,
+      aiSession: {
+        ...refreshedSession,
+        proposals: nextProposals,
+        checkpoints: [checkpoint, ...refreshedSession.checkpoints].filter(
+          (item, index, all) =>
+            all.findIndex((candidate) => candidate.id === item.id) === index,
+        ),
+        updatedAt: now,
+      },
+      updatedAt: now,
+    };
+    await this.writeMetadata(finalProject);
+    const appliedProposal = finalProject.aiSession!.proposals.find(
+      (item) => item.id === proposalId,
+    )!;
+    return { project: finalProject, proposal: appliedProposal, checkpoint };
+  }
+
+  async rejectAiEditProposal(
+    projectId: string,
+    proposalId: string,
+    filePaths?: string[],
+  ) {
+    const project = await this.getProject(projectId);
+    const session = this.ensureAiSession(project);
+    const selected = filePaths?.length
+      ? new Set(filePaths.map(normalizeProjectFilePath))
+      : null;
+    const now = Date.now();
+    const proposals = session.proposals.map((proposal) => {
+      if (proposal.id !== proposalId) {
+        return proposal;
+      }
+      const edits = proposal.edits.map((edit) =>
+        !selected || selected.has(edit.filePath)
+          ? { ...edit, status: 'rejected' as const }
+          : edit,
+      );
+      const hasPending = edits.some((edit) => edit.status === 'pending');
+      return {
+        ...proposal,
+        edits,
+        status: hasPending
+          ? ('partially_applied' as const)
+          : ('rejected' as const),
+        updatedAt: now,
+      };
+    });
+    const nextProject: CanvasProject = {
+      ...project,
+      aiSession: {
+        ...session,
+        proposals,
+        updatedAt: now,
+      },
+      updatedAt: now,
+    };
+    await this.writeMetadata(nextProject);
+    const proposal = nextProject.aiSession!.proposals.find(
+      (item) => item.id === proposalId,
+    );
+    if (!proposal) {
+      throw new Error('AI edit proposal was not found.');
+    }
+    return { project: nextProject, proposal };
+  }
+
+  async restoreAiCheckpoint(projectId: string, checkpointId: string) {
+    const project = await this.getProject(projectId);
+    const session = this.ensureAiSession(project);
+    const checkpoint = session.checkpoints.find((item) => item.id === checkpointId);
+    if (!checkpoint) {
+      throw new Error('AI checkpoint was not found.');
+    }
+
+    const checkpointPaths = new Set(checkpoint.files.map((file) => file.path));
+    for (const file of project.files) {
+      if (!checkpointPaths.has(file.path)) {
+        const { target } = resolveWithinProject(project.rootPath, file.path);
+        await fs.rm(target, { force: true });
+      }
+    }
+    for (const file of checkpoint.files) {
+      const { target } = resolveWithinProject(project.rootPath, file.path);
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, file.content, 'utf8');
+    }
+
+    const now = Date.now();
+    const restoredCheckpoint = { ...checkpoint, restoredAt: now };
+    const nextProject: CanvasProject = {
+      ...project,
+      files: checkpoint.files,
+      versions: [
+        {
+          id: `version_${now}_${randomUUID().slice(0, 8)}`,
+          label: `Restored ${checkpoint.label}`,
+          createdAt: now,
+          files: checkpoint.files,
+        },
+        ...project.versions,
+      ].slice(0, MAX_VERSIONS),
+      aiSession: {
+        ...session,
+        checkpoints: session.checkpoints.map((item) =>
+          item.id === checkpointId ? restoredCheckpoint : item,
+        ),
+        updatedAt: now,
+      },
+      updatedAt: now,
+    };
+    await this.writeMetadata(nextProject);
+    return { project: nextProject, checkpoint: restoredCheckpoint };
+  }
+
+  async recordAiTerminalCard(
+    projectId: string,
+    command: string,
+    status: CanvasAiTerminalCard['status'],
+    terminalRunId?: string,
+  ) {
+    const project = await this.getProject(projectId);
+    const now = Date.now();
+    const session = this.ensureAiSession(project, now);
+    const card: CanvasAiTerminalCard = {
+      id: `ai_terminal_${now}_${randomUUID().slice(0, 8)}`,
+      command,
+      status,
+      terminalRunId,
+      createdAt: now,
+    };
+    const nextProject: CanvasProject = {
+      ...project,
+      aiSession: {
+        ...session,
+        terminalCards: [card, ...session.terminalCards].slice(0, 50),
+        updatedAt: now,
+      },
+      updatedAt: now,
+    };
+    await this.writeMetadata(nextProject);
+    return { project: nextProject, card };
+  }
+
   async createComposerPlan(input: CreateComposerPlanInput) {
     const project = await this.getProject(input.projectId);
     const prompt = input.prompt.trim();
@@ -430,9 +841,42 @@ export class CanvasService {
     }
 
     const now = Date.now();
+    const steps: CanvasComposerStep[] = input.aiSteps?.length
+      ? input.aiSteps.map((step) => ({
+          id: `step_${randomUUID().slice(0, 8)}`,
+          title: step.title,
+          detail: step.detail,
+          kind: step.kind,
+          status: 'pending',
+          filePaths: step.filePaths,
+          command: step.command,
+        }))
+      : this.createHeuristicComposerSteps(project, prompt);
+
+    const plan: CanvasComposerPlan = {
+      id: `composer_${now}_${randomUUID().slice(0, 8)}`,
+      prompt,
+      status: 'draft',
+      steps,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const nextProject = {
+      ...project,
+      composerPlans: [plan, ...(project.composerPlans || [])].slice(0, 20),
+      updatedAt: now,
+    };
+    await this.writeMetadata(nextProject);
+    return { project: nextProject, plan };
+  }
+
+  private createHeuristicComposerSteps(
+    project: CanvasProject,
+    prompt: string,
+  ): CanvasComposerStep[] {
     const targetFiles = this.inferTargetFiles(project, prompt);
     const verificationCommand = this.inferVerificationCommand(project);
-    const steps: CanvasComposerStep[] = [
+    return [
       {
         id: `step_${randomUUID().slice(0, 8)}`,
         title: 'Understand project context',
@@ -463,22 +907,6 @@ export class CanvasService {
         command: verificationCommand,
       },
     ];
-
-    const plan: CanvasComposerPlan = {
-      id: `composer_${now}_${randomUUID().slice(0, 8)}`,
-      prompt,
-      status: 'draft',
-      steps,
-      createdAt: now,
-      updatedAt: now,
-    };
-    const nextProject = {
-      ...project,
-      composerPlans: [plan, ...(project.composerPlans || [])].slice(0, 20),
-      updatedAt: now,
-    };
-    await this.writeMetadata(nextProject);
-    return { project: nextProject, plan };
   }
 
   async approveComposerPlan(projectId: string, planId: string) {
@@ -495,6 +923,34 @@ export class CanvasService {
               steps: plan.steps.map((step) => ({
                 ...step,
                 status: 'approved',
+              })),
+            }
+          : plan,
+      ),
+      updatedAt: now,
+    };
+    await this.writeMetadata(nextProject);
+    const plan = nextProject.composerPlans.find((item) => item.id === planId);
+    if (!plan) {
+      throw new Error('Composer plan was not found.');
+    }
+    return { project: nextProject, plan };
+  }
+
+  async rejectComposerPlan(projectId: string, planId: string) {
+    const project = await this.getProject(projectId);
+    const now = Date.now();
+    const nextProject: CanvasProject = {
+      ...project,
+      composerPlans: project.composerPlans.map((plan) =>
+        plan.id === planId
+          ? {
+              ...plan,
+              status: 'failed',
+              updatedAt: now,
+              steps: plan.steps.map((step) => ({
+                ...step,
+                status: step.status === 'done' ? step.status : 'failed',
               })),
             }
           : plan,
@@ -760,12 +1216,16 @@ export class CanvasService {
       }),
     );
 
-    return {
+    const project: CanvasProject = {
       ...metadata,
       rootPath,
       files,
       composerPlans: metadata.composerPlans || [],
       terminalRuns: metadata.terminalRuns || [],
+    };
+    return {
+      ...project,
+      aiSession: this.ensureAiSession(project),
     };
   }
 
@@ -779,5 +1239,61 @@ export class CanvasService {
       JSON.stringify(metadata, null, 2),
       'utf8',
     );
+  }
+
+  private ensureAiSession(project: CanvasProject, now = Date.now()): CanvasAiSession {
+    const session = project.aiSession;
+    if (session) {
+      return {
+        mode: session.mode || 'ask',
+        contextFiles: session.contextFiles || [],
+        messages: session.messages || [],
+        proposals: session.proposals || [],
+        checkpoints: session.checkpoints || [],
+        terminalCards: session.terminalCards || [],
+        createdAt: session.createdAt || project.createdAt || now,
+        updatedAt: session.updatedAt || project.updatedAt || now,
+      };
+    }
+    return {
+      mode: 'ask',
+      contextFiles: [],
+      messages: [],
+      proposals: [],
+      checkpoints: [],
+      terminalCards: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  private async persistAiSession(project: CanvasProject) {
+    if (project.aiSession) {
+      return project;
+    }
+    const now = Date.now();
+    const nextProject: CanvasProject = {
+      ...project,
+      aiSession: this.ensureAiSession(project, now),
+      updatedAt: now,
+    };
+    await this.writeMetadata(nextProject);
+    return nextProject;
+  }
+
+  private async createAiCheckpoint(
+    project: CanvasProject,
+    label: string,
+    proposalId?: string,
+  ): Promise<CanvasAiCheckpoint> {
+    const now = Date.now();
+    const files = project.files.map((file) => ({ ...file }));
+    return {
+      id: `ai_checkpoint_${now}_${randomUUID().slice(0, 8)}`,
+      label,
+      proposalId,
+      files,
+      createdAt: now,
+    };
   }
 }

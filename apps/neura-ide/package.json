@@ -1,0 +1,12 @@
+{
+  "name": "neura-ide",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Neura-branded VSCodium downstream build configuration.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build:win32": "powershell -ExecutionPolicy Bypass -File ./scripts/build-windows.ps1",
+    "install:dev:win32": "powershell -ExecutionPolicy Bypass -File ./scripts/install-dev-windows.ps1",
+    "verify:product": "node ./scripts/verify-product.js"
+  }
+}

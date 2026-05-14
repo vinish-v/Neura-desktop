@@ -1,0 +1,91 @@
+{
+  "nameShort": "Neura IDE",
+  "nameLong": "Neura IDE",
+  "applicationName": "neura-ide",
+  "urlProtocol": "neura-ide",
+  "dataFolderName": ".neura-ide",
+  "win32MutexName": "neuraide",
+  "win32DirName": "Neura IDE",
+  "win32NameVersion": "Neura IDE",
+  "win32RegValueName": "Neura IDE",
+  "licenseName": "Apache-2.0",
+  "licenseUrl": "https://github.com/vinish-v/Neura-desktop/blob/main/LICENSE",
+  "licenseFileName": "LICENSE.txt",
+  "serverApplicationName": "neura-ide-server",
+  "serverDataFolderName": ".neura-ide-server",
+  "quality": "stable",
+  "updateUrl": "",
+  "downloadUrl": "",
+  "extensionsGallery": {
+    "serviceUrl": "https://open-vsx.org/vscode/gallery",
+    "itemUrl": "https://open-vsx.org/vscode/item",
+    "cacheUrl": "",
+    "controlUrl": "",
+    "extensionUrlTemplate": "https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest",
+    "resourceUrlTemplate": ""
+  },
+  "extensionEnabledApiProposals": {},
+  "extensionAllowedProposedApi": [],
+  "builtInExtensions": [],
+  "builtInExtensionsEnabledWithAutoUpdates": [],
+  "defaultChatAgent": {
+    "extensionId": "neura.neura-native-chat",
+    "chatExtensionId": "neura.neura-native-chat",
+    "chatExtensionOutputId": "neura-native-chat",
+    "chatExtensionOutputExtensionStateCommand": "neura.openAiPanel",
+    "documentationUrl": "https://github.com/vinish-v/Neura-desktop",
+    "skusDocumentationUrl": "https://github.com/vinish-v/Neura-desktop",
+    "publicCodeMatchesUrl": "https://github.com/vinish-v/Neura-desktop",
+    "manageSettingsUrl": "https://neura.local/settings",
+    "managePlanUrl": "https://neura.local/plan",
+    "manageOverageUrl": "https://neura.local/usage",
+    "upgradePlanUrl": "https://neura.local/upgrade",
+    "signUpUrl": "https://neura.local/signup",
+    "termsStatementUrl": "https://github.com/vinish-v/Neura-desktop",
+    "privacyStatementUrl": "https://github.com/vinish-v/Neura-desktop",
+    "provider": {
+      "default": {
+        "id": "neura",
+        "name": "Neura"
+      },
+      "enterprise": {
+        "id": "neura-enterprise",
+        "name": "Neura Enterprise"
+      },
+      "google": {
+        "id": "google",
+        "name": "Google"
+      },
+      "apple": {
+        "id": "apple",
+        "name": "Apple"
+      }
+    },
+    "providerExtensionId": "neura.neura-native-chat",
+    "providerUriSetting": "neura.auth.providerUri",
+    "providerScopes": [],
+    "entitlementUrl": "",
+    "entitlementSignupLimitedUrl": "",
+    "tokenEntitlementUrl": "",
+    "mcpRegistryDataUrl": "",
+    "chatQuotaExceededContext": "neura.chatQuotaExceeded",
+    "completionsQuotaExceededContext": "neura.completionsQuotaExceeded",
+    "walkthroughCommand": "neura.openAiPanel",
+    "completionsMenuCommand": "neura.openAiPanel",
+    "completionsRefreshTokenCommand": "neura.syncCanvasProject",
+    "chatRefreshTokenCommand": "neura.syncCanvasProject",
+    "generateCommitMessageCommand": "neura.generatePlan",
+    "resolveMergeConflictsCommand": "neura.openAiPanel",
+    "completionsAdvancedSetting": "neura.completions.advanced",
+    "completionsEnablementSetting": "neura.completions.enabled",
+    "nextEditSuggestionsSetting": "neura.nextEditSuggestions.enabled"
+  },
+  "linkProtectionTrustedDomains": [
+    "https://open-vsx.org",
+    "https://neura.local"
+  ],
+  "documentationUrl": "https://github.com/vinish-v/Neura-desktop",
+  "keyboardShortcutsUrlMac": "https://code.visualstudio.com/shortcuts/keyboard-shortcuts-macos.pdf",
+  "keyboardShortcutsUrlLinux": "https://code.visualstudio.com/shortcuts/keyboard-shortcuts-linux.pdf",
+  "keyboardShortcutsUrlWin": "https://code.visualstudio.com/shortcuts/keyboard-shortcuts-windows.pdf"
+}

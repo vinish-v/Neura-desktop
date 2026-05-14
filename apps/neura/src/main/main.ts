@@ -37,6 +37,7 @@ import {
   BackgroundTaskService,
   registerBackgroundTaskIpcHandlers,
 } from './services/background-task-service';
+import { CanvasIdeBridge } from './services/canvas-ide-bridge';
 import { registerConnectorsIpcHandlers } from './services/connectors-service';
 
 const { isProd } = env;
@@ -167,6 +168,7 @@ const initializeApp = async () => {
   app.on('quit', () => {
     logger.info('app quit');
     BackgroundTaskService.getInstance().cleanup();
+    void CanvasIdeBridge.getInstance().stop();
     void MCPService.getInstance().cleanup();
     unsubscribe();
   });

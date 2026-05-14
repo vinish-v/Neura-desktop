@@ -12,6 +12,7 @@ import {
   RunCanvasCommandInput,
   UpdateCanvasProjectInput,
 } from '@main/services/canvas-service';
+import { CanvasIdeLauncher } from '@main/services/canvas-ide-launcher';
 
 const t = initIpc.create();
 
@@ -72,4 +73,12 @@ export const canvasRoute = t.router({
     .handle(async ({ input }) => {
       return CanvasService.getInstance().openProject(input.projectId);
     }),
+  openCanvasIde: t.procedure
+    .input<{ projectId: string }>()
+    .handle(async ({ input }) => {
+      return CanvasIdeLauncher.getInstance().openProject(input.projectId);
+    }),
+  getCanvasIdeStatus: t.procedure.input<void>().handle(async () => {
+    return CanvasIdeLauncher.getInstance().getStatus();
+  }),
 });

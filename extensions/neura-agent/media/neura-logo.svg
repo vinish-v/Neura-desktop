@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Neura">
+  <rect width="128" height="128" rx="28" fill="#f8fafc"/>
+  <path d="M34 95V33h15l31 38V33h15v62H80L49 57v38H34Z" fill="#050505"/>
+  <circle cx="46" cy="42" r="7" fill="#050505"/>
+  <circle cx="46" cy="86" r="7" fill="#050505"/>
+  <circle cx="91" cy="42" r="7" fill="#050505"/>
+  <circle cx="91" cy="86" r="7" fill="#050505"/>
+  <path d="M48 42h17l27 44H75L48 42Z" fill="#050505"/>
+</svg>
