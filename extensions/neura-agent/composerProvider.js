@@ -23,7 +23,10 @@ const {
   agentObservationBytes,
   agentSearchFileLimit,
   agentSearchMatchLimit,
+  backgroundAgentMaxAttempts,
   agentTools,
+  swarmRoles,
+  swarmRoleById,
 } = require('./constants');
 const { findBrowserExecutable } = require('./browser');
 const { McpStdioClient, McpSseClient } = require('./mcpClient');
@@ -60,6 +63,7 @@ class NeuraComposerProvider {
     this.loadedPlugins = new Map();
     this.backgroundRuns = new Map();
     this.backgroundCancels = new Map();
+    this.swarmRuns = new Map();
     this.semanticIndexTimer = null;
     this.proposalDecoration = vscode.window.createTextEditorDecorationType({
       isWholeLine: true,
@@ -92,6 +96,7 @@ class NeuraComposerProvider {
       checkpoints: [],
       artifacts: [],
       backgroundAgents: [],
+      swarmMissions: [],
       mcpCards: [],
       promptQueue: [],
       stoppedTrajectory: null,
@@ -116,6 +121,7 @@ class NeuraComposerProvider {
       checkpoints: [],
       artifacts: [],
       backgroundAgents: [],
+      swarmMissions: [],
       mcpCards: [],
       promptQueue: [],
       stoppedTrajectory: null,
@@ -150,6 +156,7 @@ class NeuraComposerProvider {
     this.state.checkpoints = session.checkpoints || [];
     this.state.artifacts = session.artifacts || [];
     this.state.backgroundAgents = session.backgroundAgents || [];
+    this.state.swarmMissions = session.swarmMissions || [];
     this.state.mcpCards = session.mcpCards || [];
     this.state.promptQueue = session.promptQueue || [];
     this.state.stoppedTrajectory = session.stoppedTrajectory || null;
@@ -183,6 +190,7 @@ class NeuraComposerProvider {
       checkpoints: this.state.checkpoints || [],
       artifacts: this.state.artifacts || [],
       backgroundAgents: this.state.backgroundAgents || [],
+      swarmMissions: this.state.swarmMissions || [],
       mcpCards: this.state.mcpCards || [],
       promptQueue: this.state.promptQueue || [],
       stoppedTrajectory: this.state.stoppedTrajectory || null,
@@ -207,6 +215,7 @@ class NeuraComposerProvider {
         checkpoints: this.state.checkpoints || [],
         artifacts: this.state.artifacts || [],
         backgroundAgents: this.state.backgroundAgents || [],
+        swarmMissions: this.state.swarmMissions || [],
         mcpCards: this.state.mcpCards || [],
         promptQueue: this.state.promptQueue || [],
         stoppedTrajectory: this.state.stoppedTrajectory || null,
@@ -224,6 +233,7 @@ class NeuraComposerProvider {
     this.copySessionToState(this.activeSession());
     if (!Array.isArray(this.state.artifacts)) this.state.artifacts = [];
     if (!Array.isArray(this.state.backgroundAgents)) this.state.backgroundAgents = [];
+    if (!Array.isArray(this.state.swarmMissions)) this.state.swarmMissions = [];
     if (!Array.isArray(this.state.mcpCards)) this.state.mcpCards = [];
     if (!Array.isArray(this.state.promptQueue)) this.state.promptQueue = [];
     if (!this.state.semanticIndex) this.state.semanticIndex = { files: [], symbols: [], updatedAt: '' };
@@ -461,6 +471,10 @@ class NeuraComposerProvider {
 
   get backgroundAgentsDir() {
     return this.neuraDir ? path.join(this.neuraDir, 'background-agents') : '';
+  }
+
+  get swarmMissionsDir() {
+    return this.neuraDir ? path.join(this.neuraDir, 'swarm-missions') : '';
   }
 
   async refresh() {
@@ -4049,9 +4063,55 @@ class NeuraComposerProvider {
     await this.refresh();
   }
 
-  async createBackgroundAgent() {
+  slugForText(value, fallback = 'task', limit = 36) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, limit) || fallback;
+  }
+
+  async createBackgroundAgentRecord(task, options = {}) {
     this.ensureWorkspace();
     await execFileAsync('git', ['rev-parse', '--show-toplevel'], this.rootPath);
+    const role = swarmRoleById[options.roleId] || null;
+    const slug = this.slugForText(`${role?.id || ''}-${task}`, 'task');
+    const stamp = options.stamp || new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 12);
+    const branchPrefix = options.missionId ? `neura-swarm/${this.slugForText(options.missionId, 'mission', 18)}` : 'neura-agent';
+    const branch = `${branchPrefix}/${stamp}-${slug}`;
+    const destination = path.join(path.dirname(this.rootPath), `${path.basename(this.rootPath)}-${stamp}-${slug}`);
+    await execFileAsync('git', ['worktree', 'add', '-b', branch, destination], this.rootPath);
+    const agent = {
+      id: id('bg'),
+      task: String(task || '').trim(),
+      roleId: role?.id || 'agent',
+      roleLabel: role?.label || 'Agent',
+      squad: role?.squad || 'Solo',
+      missionId: options.missionId || '',
+      missionTask: options.missionTask || '',
+      dependencies: options.dependencies || [],
+      writes: role ? Boolean(role.writes) : true,
+      ownership: Array.isArray(role?.ownership) ? role.ownership : [],
+      branch,
+      path: destination,
+      status: 'ready',
+      priority: options.priority || 0,
+      followUps: [],
+      events: [],
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    this.state.backgroundAgents = [agent, ...(this.state.backgroundAgents || [])].slice(0, 80);
+    await this.persistBackgroundAgent(agent, 'created', {
+      roleId: agent.roleId,
+      squad: agent.squad,
+      missionId: agent.missionId,
+    });
+    this.recordArtifact('background-agent', agent.task, `Created isolated ${agent.roleLabel} worktree ${branch}.`, agent);
+    return agent;
+  }
+
+  async createBackgroundAgent() {
     const task = await vscode.window.showInputBox({
       title: 'Neura: Background Agent Task',
       prompt: 'Describe the coding task to isolate in a new worktree.',
@@ -4059,33 +4119,10 @@ class NeuraComposerProvider {
       validateInput: (value) => (String(value || '').trim() ? undefined : 'Enter a task.'),
     });
     if (!task) return;
-    const slug = String(task)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 36) || 'task';
-    const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 12);
-    const branch = `neura-agent/${stamp}-${slug}`;
-    const destination = path.join(path.dirname(this.rootPath), `${path.basename(this.rootPath)}-${stamp}-${slug}`);
-    await execFileAsync('git', ['worktree', 'add', '-b', branch, destination], this.rootPath);
-    const agent = {
-      id: id('bg'),
-      task: task.trim(),
-      branch,
-      path: destination,
-      status: 'ready',
-      priority: 0,
-      followUps: [],
-      events: [],
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-    };
-    this.state.backgroundAgents = [agent, ...(this.state.backgroundAgents || [])].slice(0, 20);
-    await this.persistBackgroundAgent(agent, 'created');
-    this.recordArtifact('background-agent', task.trim(), `Created isolated worktree ${branch}.`, agent);
+    const agent = await this.createBackgroundAgentRecord(task, {});
     await this.saveState();
     const open = await vscode.window.showInformationMessage(
-      `Created background agent worktree ${branch}.`,
+      `Created background agent worktree ${agent.branch}.`,
       'Open',
     );
     if (open === 'Open') {
@@ -4147,6 +4184,12 @@ class NeuraComposerProvider {
       if (agent?.id && agent?.path) {
         agent.followUps = Array.isArray(agent.followUps) ? agent.followUps : [];
         agent.events = Array.isArray(agent.events) ? agent.events : [];
+        agent.roleId = agent.roleId || 'agent';
+        agent.roleLabel = agent.roleLabel || swarmRoleById[agent.roleId]?.label || 'Agent';
+        agent.squad = agent.squad || swarmRoleById[agent.roleId]?.squad || 'Solo';
+        agent.dependencies = Array.isArray(agent.dependencies) ? agent.dependencies : [];
+        agent.ownership = Array.isArray(agent.ownership) ? agent.ownership : (swarmRoleById[agent.roleId]?.ownership || []);
+        agent.missionId = agent.missionId || '';
         agents.push(agent);
       }
     }
@@ -4164,6 +4207,324 @@ class NeuraComposerProvider {
         }
       }
     }
+  }
+
+  async persistSwarmMission(mission, event = 'updated', details = {}) {
+    if (!this.swarmMissionsDir || !mission?.id) return;
+    await fs.mkdir(this.swarmMissionsDir, { recursive: true });
+    const entry = {
+      at: nowIso(),
+      event,
+      status: mission.status,
+      details,
+    };
+    mission.events = [entry, ...(mission.events || [])].slice(0, 100);
+    mission.updatedAt = nowIso();
+    const filePath = path.join(this.swarmMissionsDir, `${mission.id}.json`);
+    await fs.writeFile(filePath, `${JSON.stringify(mission, null, 2)}\n`, 'utf8');
+    mission.stateFile = filePath;
+  }
+
+  refreshSwarmMissionStatus(mission) {
+    const agents = (this.state.backgroundAgents || []).filter((agent) => agent.missionId === mission.id);
+    const statuses = agents.map((agent) => agent.status);
+    if (mission.conflicts?.length) {
+      mission.status = 'blocked';
+    } else if (statuses.some((status) => ['running', 'queued', 'cancelling'].includes(status))) {
+      mission.status = 'running';
+    } else if (statuses.length && statuses.every((status) => status === 'completed')) {
+      mission.status = 'completed';
+    } else if (statuses.some((status) => status === 'failed')) {
+      mission.status = 'failed';
+    } else if (statuses.some((status) => status === 'cancelled')) {
+      mission.status = 'cancelled';
+    } else if (statuses.some((status) => status === 'interrupted')) {
+      mission.status = 'interrupted';
+    } else {
+      mission.status = mission.status || 'ready';
+    }
+    mission.agentStatus = Object.fromEntries(agents.map((agent) => [agent.roleId || agent.id, agent.status]));
+    mission.updatedAt = nowIso();
+    return mission;
+  }
+
+  detectSwarmConflicts(mission) {
+    const agents = (this.state.backgroundAgents || [])
+      .filter((agent) => mission.agentIds?.includes(agent.id))
+      .filter((agent) => Array.isArray(agent.edits) && agent.edits.length);
+    const byFile = new Map();
+    for (const agent of agents) {
+      for (const edit of agent.edits || []) {
+        const filePath = normalizeSlashes(edit.filePath || '');
+        if (!filePath) continue;
+        const owners = byFile.get(filePath) || [];
+        if (!owners.some((owner) => owner.agentId === agent.id)) {
+          owners.push({
+            agentId: agent.id,
+            roleId: agent.roleId || 'agent',
+            roleLabel: agent.roleLabel || agent.roleId || 'Agent',
+            operation: edit.operation || 'update',
+            status: agent.status,
+          });
+        }
+        byFile.set(filePath, owners);
+      }
+    }
+    return [...byFile.entries()]
+      .filter(([, owners]) => owners.length > 1)
+      .map(([filePath, owners]) => ({ filePath, owners }));
+  }
+
+  async blockSwarmMissionForConflicts(mission, conflicts) {
+    mission.status = 'blocked';
+    mission.conflicts = conflicts;
+    mission.error = `Swarm edit conflict in ${conflicts.length} file(s). Review role worktrees before merging.`;
+    await this.persistSwarmMission(mission, 'conflicts-detected', { conflicts });
+    this.recordArtifact('swarm-conflict', `Swarm conflict: ${mission.task}`, mission.error, {
+      missionId: mission.id,
+      conflicts,
+    });
+  }
+
+  globPatternToRegex(pattern) {
+    const escaped = String(pattern || '')
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*\*/g, '::DOUBLE_STAR::')
+      .replace(/\*/g, '[^/]*');
+    return new RegExp(`^${escaped.replace(/::DOUBLE_STAR::/g, '.*')}$`);
+  }
+
+  pathMatchesOwnership(filePath, ownership = []) {
+    if (!ownership.length) return true;
+    const normalized = normalizeSlashes(filePath || '');
+    return ownership.some((pattern) => this.globPatternToRegex(normalizeSlashes(pattern)).test(normalized));
+  }
+
+  async createSwarmMission() {
+    this.ensureWorkspace();
+    const task = await vscode.window.showInputBox({
+      title: 'Neura: Create Agent Swarm',
+      prompt: 'Describe the production task the swarm should complete.',
+      ignoreFocusOut: true,
+      validateInput: (value) => (String(value || '').trim() ? undefined : 'Enter a mission task.'),
+    });
+    if (!task) return;
+    const picked = await vscode.window.showQuickPick(
+      swarmRoles.map((role) => ({
+        label: role.label,
+        description: role.squad,
+        detail: role.mission,
+        picked: role.default,
+        role,
+      })),
+      {
+        title: 'Choose Neura swarm roles',
+        canPickMany: true,
+        matchOnDescription: true,
+        matchOnDetail: true,
+      },
+    );
+    if (!picked) return;
+    const selectedRoles = (picked.length ? picked.map((item) => item.role) : swarmRoles.filter((role) => role.default));
+    const selectedIds = new Set(selectedRoles.map((role) => role.id));
+    const mission = {
+      id: id('swarm'),
+      task: task.trim(),
+      status: 'ready',
+      roles: selectedRoles.map((role) => role.id),
+      agentIds: [],
+      events: [],
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 12);
+    for (const [index, role] of selectedRoles.entries()) {
+      const dependencies = (role.dependencies || []).filter((dependency) => selectedIds.has(dependency));
+      const agentTask = [
+        `Mission: ${task.trim()}`,
+        `Role: ${role.label} (${role.squad} squad).`,
+        `Responsibility: ${role.mission}`,
+        dependencies.length ? `Wait for roles: ${dependencies.join(', ')}.` : '',
+      ].filter(Boolean).join('\n');
+      const agent = await this.createBackgroundAgentRecord(agentTask, {
+        roleId: role.id,
+        missionId: mission.id,
+        missionTask: task.trim(),
+        dependencies,
+        priority: index,
+        stamp,
+      });
+      mission.agentIds.push(agent.id);
+    }
+    this.state.swarmMissions = [mission, ...(this.state.swarmMissions || [])].slice(0, 30);
+    await this.persistSwarmMission(mission, 'created', {
+      roles: mission.roles,
+      agentIds: mission.agentIds,
+    });
+    this.recordArtifact('swarm', `Swarm mission: ${task.trim()}`, `Created ${mission.agentIds.length} role agent(s).`, {
+      missionId: mission.id,
+      roles: mission.roles,
+      agentIds: mission.agentIds,
+    });
+    await this.saveState();
+    const runNow = await vscode.window.showInformationMessage(
+      `Created Neura swarm with ${mission.agentIds.length} agents.`,
+      'Run Swarm',
+      'Open Mission Control',
+    );
+    if (runNow === 'Run Swarm') {
+      await this.runSwarmMission(mission.id, { skipApproval: true });
+    } else {
+      this.activeTab = 'agents';
+      await this.refresh();
+    }
+  }
+
+  async runSwarmMission(missionId, options = {}) {
+    const mission = (this.state.swarmMissions || []).find((item) => item.id === missionId);
+    if (!mission) throw new Error('Swarm mission was not found.');
+    if (!this.config.configured) throw new Error('NVIDIA NIM is not configured.');
+    if (this.swarmRuns.has(mission.id)) {
+      await vscode.window.showInformationMessage('This swarm mission is already running.');
+      return this.swarmRuns.get(mission.id);
+    }
+    if (!options.skipApproval) {
+      const approval = await vscode.window.showWarningMessage(
+        `Run Neura swarm mission?\n\n${mission.task}`,
+        { modal: true },
+        'Run Swarm',
+      );
+      if (approval !== 'Run Swarm') return;
+    }
+    const run = (async () => {
+      mission.status = 'running';
+      mission.error = '';
+      mission.conflicts = [];
+      mission.waves = Array.isArray(mission.waves) ? mission.waves : [];
+      await this.persistSwarmMission(mission, 'run-started');
+      await this.saveState();
+      this.renderIfVisible();
+      const missionAgents = () => (this.state.backgroundAgents || []).filter((agent) => mission.agentIds.includes(agent.id));
+      const completedRoles = new Set(missionAgents().filter((agent) => agent.status === 'completed').map((agent) => agent.roleId));
+      const pending = new Set(missionAgents().filter((agent) => agent.status !== 'completed').map((agent) => agent.id));
+      while (pending.size) {
+        const agents = missionAgents().filter((agent) => pending.has(agent.id));
+        const runnable = agents.filter((agent) => (agent.dependencies || []).every((dependency) => completedRoles.has(dependency)));
+        if (!runnable.length) {
+          throw new Error('Swarm mission dependency graph is blocked. Check selected roles and failed agents.');
+        }
+        const wave = {
+          id: id('wave'),
+          startedAt: nowIso(),
+          roles: runnable.map((agent) => agent.roleId),
+          agentIds: runnable.map((agent) => agent.id),
+        };
+        mission.waves.push(wave);
+        await this.persistSwarmMission(mission, 'wave-started', wave);
+        await this.saveState();
+        this.renderIfVisible();
+        await Promise.all(runnable.map(async (agent) => {
+          await this.runBackgroundAgent(agent.id, { skipApproval: true });
+          const run = this.backgroundRuns.get(agent.id);
+          if (run) await run;
+          pending.delete(agent.id);
+          if (agent.status === 'completed') completedRoles.add(agent.roleId);
+        }));
+        const failedAgents = missionAgents().filter((agent) => ['failed', 'cancelled', 'interrupted'].includes(agent.status));
+        if (failedAgents.length) {
+          throw new Error(`Swarm wave stopped because ${failedAgents.map((agent) => agent.roleLabel || agent.roleId).join(', ')} did not complete.`);
+        }
+        wave.finishedAt = nowIso();
+        const conflicts = this.detectSwarmConflicts(mission);
+        if (conflicts.length) {
+          await this.blockSwarmMissionForConflicts(mission, conflicts);
+          throw new Error(mission.error);
+        }
+        this.refreshSwarmMissionStatus(mission);
+        await this.persistSwarmMission(mission, 'wave-completed', {
+          waveId: wave.id,
+          completedRoles: [...completedRoles],
+          remaining: pending.size,
+        });
+        await this.saveState();
+        this.renderIfVisible();
+        if (mission.status === 'failed' || mission.status === 'cancelled') break;
+      }
+      this.refreshSwarmMissionStatus(mission);
+      await this.persistSwarmMission(mission, 'run-finished');
+      this.recordArtifact('swarm', `Swarm mission ${mission.status}: ${mission.task}`, `${mission.agentIds.length} agent(s) finished with status ${mission.status}.`, {
+        missionId: mission.id,
+        status: mission.status,
+        agentIds: mission.agentIds,
+      });
+      await this.saveState();
+      await this.refresh();
+    })();
+    this.swarmRuns.set(mission.id, run);
+    try {
+      await run;
+    } catch (error) {
+      if (mission.status !== 'blocked' && mission.status !== 'cancelled') {
+        mission.status = 'failed';
+      }
+      mission.error = mission.error || errorMessageFor(error);
+      await this.persistSwarmMission(mission, mission.status === 'blocked' ? 'run-blocked' : 'run-failed', { error: mission.error });
+      this.recordArtifact('swarm', `Swarm mission ${mission.status}: ${mission.task}`, mission.error, {
+        missionId: mission.id,
+        status: mission.status,
+        agentIds: mission.agentIds,
+      });
+      await this.saveState();
+      await this.refresh();
+      throw error;
+    } finally {
+      this.swarmRuns.delete(mission.id);
+    }
+  }
+
+  async cancelSwarmMission(missionId) {
+    const mission = (this.state.swarmMissions || []).find((item) => item.id === missionId);
+    if (!mission) throw new Error('Swarm mission was not found.');
+    for (const agent of (this.state.backgroundAgents || []).filter((item) => mission.agentIds.includes(item.id))) {
+      if (['queued', 'running', 'cancelling'].includes(agent.status)) {
+        await this.cancelBackgroundAgent(agent.id);
+      }
+    }
+    mission.status = 'cancelled';
+    await this.persistSwarmMission(mission, 'cancelled');
+    await this.saveState();
+    await this.refresh();
+  }
+
+  async reviewSwarmMission(missionId) {
+    const mission = (this.state.swarmMissions || []).find((item) => item.id === missionId);
+    if (!mission) throw new Error('Swarm mission was not found.');
+    const conflicts = this.detectSwarmConflicts(mission);
+    if (conflicts.length) {
+      await this.blockSwarmMissionForConflicts(mission, conflicts);
+      await this.saveState();
+      await this.refresh();
+      throw new Error('Swarm mission has overlapping file edits. Open the role worktrees and resolve conflicts before creating merge reviews.');
+    }
+    const completed = (this.state.backgroundAgents || [])
+      .filter((agent) => mission.agentIds.includes(agent.id) && agent.status === 'completed');
+    if (!completed.length) {
+      throw new Error('No completed swarm agents are ready for merge review.');
+    }
+    for (const agent of completed) {
+      if (!agent.mergeReviewId) {
+        await this.createBackgroundAgentReview(agent.id).catch((error) => {
+          logNeura('Swarm review skipped agent', { agentId: agent.id, error: errorMessageFor(error) });
+        });
+      }
+    }
+    this.recordArtifact('swarm-review', `Swarm review: ${mission.task}`, `Prepared merge review proposals for ${completed.length} agent(s).`, {
+      missionId: mission.id,
+      agentIds: completed.map((agent) => agent.id),
+    });
+    await this.persistSwarmMission(mission, 'review-created');
+    await this.saveState();
+    await this.refresh();
   }
 
   safeRelativeForRoot(rootPath, inputPath) {
@@ -4198,7 +4559,89 @@ class NeuraComposerProvider {
     return out;
   }
 
-  async callBackgroundAgent(agent, tree, externalSignal) {
+  roleFileHints(roleId) {
+    const common = ['package.json', 'pnpm-lock.yaml', 'package-lock.json', 'tsconfig.json', 'vite.config', 'next.config', 'README', 'AGENTS.md'];
+    const byRole = {
+      frontend: ['src/', 'app/', 'pages/', 'components/', 'renderer/', '.tsx', '.jsx', '.css', '.scss', '.html'],
+      backend: ['server/', 'main/', 'api/', 'routes/', 'services/', 'ipc', 'database', '.ts', '.js', '.sql'],
+      'data-state': ['store', 'state', 'schema', 'migration', 'database', 'model', '.sql', '.json'],
+      integration: ['ipc', 'bridge', 'api', 'routes', 'services', 'package.json', 'config'],
+      qa: ['test', 'spec', 'vitest', 'jest', 'playwright', 'package.json', 'tsconfig'],
+      reviewer: ['package.json', 'src/', 'app/', 'extensions/', 'README', 'AGENTS.md'],
+      browser: ['index.html', 'src/', 'app/', 'pages/', 'components/', 'vite.config', 'next.config'],
+      ship: ['package.json', 'scripts/', 'forge', 'electron', 'README', 'CHANGELOG', 'docs/'],
+      context: ['src/', 'app/', 'extensions/', 'package.json', 'README', 'AGENTS.md'],
+      planner: ['package.json', 'README', 'AGENTS.md', 'docs/', 'src/', 'app/'],
+      orchestrator: ['package.json', 'README', 'AGENTS.md', 'docs/'],
+    };
+    return [...common, ...(byRole[roleId] || [])].map((item) => item.toLowerCase());
+  }
+
+  async readFilesForRoot(rootPath, relativePaths, byteLimit = 9000) {
+    const files = [];
+    const seen = new Set();
+    for (const inputPath of relativePaths) {
+      if (!inputPath || seen.has(inputPath)) continue;
+      seen.add(inputPath);
+      try {
+        const relative = this.safeRelativeForRoot(rootPath, inputPath);
+        const absolute = path.join(rootPath, relative);
+        const stat = await fs.stat(absolute);
+        if (!stat.isFile() || stat.size > 450_000) continue;
+        const bytes = await fs.readFile(absolute);
+        const clipped = bytes.length > byteLimit ? bytes.subarray(0, byteLimit) : bytes;
+        files.push({
+          filePath: relative,
+          content: clipped.toString('utf8'),
+          truncated: bytes.length > byteLimit,
+        });
+      } catch {
+        continue;
+      }
+      if (files.length >= 12) break;
+    }
+    return files;
+  }
+
+  async backgroundAgentContextPack(agent, tree) {
+    const role = swarmRoleById[agent.roleId] || {};
+    const hints = this.roleFileHints(agent.roleId);
+    const treeMatches = tree
+      .filter((filePath) => {
+        const lower = filePath.toLowerCase();
+        return hints.some((hint) => lower.includes(hint));
+      })
+      .slice(0, 12);
+    const semanticHits = await this.semanticSearch(`${agent.missionTask || ''}\n${agent.task}\n${role.focus?.join(' ') || ''}`, 16).catch(() => []);
+    const semanticFiles = semanticHits
+      .map((hit) => hit.filePath)
+      .filter((filePath) => filePath && tree.includes(filePath))
+      .slice(0, 10);
+    const selectedFiles = [...new Set([...semanticFiles, ...treeMatches])].slice(0, 12);
+    const files = await this.readFilesForRoot(agent.path, selectedFiles, 9000);
+    const peers = (this.state.backgroundAgents || [])
+      .filter((item) => item.missionId && item.missionId === agent.missionId && item.id !== agent.id)
+      .map((item) => ({
+        roleId: item.roleId,
+        roleLabel: item.roleLabel,
+        status: item.status,
+        summary: item.summary || '',
+        error: item.error || '',
+        edits: (item.edits || []).slice(0, 12),
+        verification: (item.verification || []).slice(-4),
+      }));
+    const dependencySummaries = peers.filter((item) => (agent.dependencies || []).includes(item.roleId));
+    return {
+      role,
+      selectedFiles,
+      files,
+      dependencySummaries,
+      peerSummaries: peers,
+      semanticHits: semanticHits.slice(0, 10),
+    };
+  }
+
+  async callBackgroundAgent(agent, tree, externalSignal, attemptContext = {}) {
     const controller = new AbortController();
     const abortListener = () => controller.abort();
     if (externalSignal) {
@@ -4206,6 +4649,16 @@ class NeuraComposerProvider {
       else externalSignal.addEventListener('abort', abortListener, { once: true });
     }
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
+    const contextPack = await this.backgroundAgentContextPack(agent, tree);
+    const role = contextPack.role?.id ? contextPack.role : {
+      label: agent.roleLabel || 'Agent',
+      squad: agent.squad || 'Solo',
+      mission: 'Complete the assigned coding task in the isolated worktree.',
+      writes: agent.writes !== false,
+    };
+    const writePolicy = role.writes
+      ? 'You may propose and apply complete file edits that are necessary for your role.'
+      : 'This is a non-writing role. Prefer analysis, plans, review notes, and verification commands. Return an empty edits array unless a small coordination artifact is essential.';
     try {
       const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
         method: 'POST',
@@ -4223,19 +4676,42 @@ class NeuraComposerProvider {
               role: 'system',
               content: [
                 'You are a Neura background coding agent working in an isolated git worktree.',
+                `Role: ${role.label}. Squad: ${role.squad}.`,
+                `Role responsibility: ${role.mission}`,
+                role.focus?.length ? `Focus areas: ${role.focus.join(', ')}.` : '',
+                role.deliverables?.length ? `Required deliverables: ${role.deliverables.join('; ')}.` : '',
+                agent.ownership?.length ? `File ownership lane: ${agent.ownership.join(', ')}. Stay in this lane unless the dependency handoff proves a cross-lane edit is required.` : '',
+                writePolicy,
+                agent.dependencies?.length ? `This role depends on completed roles: ${agent.dependencies.join(', ')}.` : '',
+                attemptContext.attempt > 1 ? 'This is a repair attempt. Use the verification failure and previous result to fix the worktree, not to restart blindly.' : '',
                 'Return exactly one JSON object. No markdown.',
                 'Produce complete file edits for the task. Use relative paths inside the worktree.',
+                'Do not invent fake files, fake commands, fake test outputs, or fake screenshots.',
+                'Use the provided context files and dependency handoff notes. Make the smallest coherent production change for your role.',
+                'If the role is implementation-focused and context is insufficient, propose targeted read/search commands instead of guessing.',
                 'Schema: {"message":"summary","edits":[{"operation":"create|update|delete","filePath":"path","content":"full content","rationale":"why"}],"commands":[{"command":"verification command","purpose":"why"}]}',
-              ].join('\n'),
+              ].filter(Boolean).join('\n'),
             },
             {
               role: 'user',
               content: [
                 `Task: ${agent.task}`,
+                agent.missionTask ? `Overall swarm mission: ${agent.missionTask}` : '',
                 agent.followUps?.length
                   ? `Follow-up instructions:\n${agent.followUps.map((item, index) => `${index + 1}. ${item.content}`).join('\n')}`
                   : '',
+                `Attempt: ${attemptContext.attempt || 1} of ${backgroundAgentMaxAttempts}`,
+                attemptContext.previousResults?.length
+                  ? `Previous attempt summaries:\n${JSON.stringify(attemptContext.previousResults, null, 2).slice(0, 9000)}`
+                  : '',
+                attemptContext.failure
+                  ? `Verification failure to repair:\n${JSON.stringify(attemptContext.failure, null, 2).slice(0, 9000)}`
+                  : '',
                 `Worktree path: ${agent.path}`,
+                `Dependency handoffs:\n${contextPack.dependencySummaries.length ? JSON.stringify(contextPack.dependencySummaries, null, 2).slice(0, 9000) : 'none'}`,
+                `Other mission agents:\n${contextPack.peerSummaries.length ? JSON.stringify(contextPack.peerSummaries, null, 2).slice(0, 9000) : 'none'}`,
+                `Selected semantic hits:\n${contextPack.semanticHits.length ? JSON.stringify(contextPack.semanticHits, null, 2).slice(0, 6000) : 'none'}`,
+                `Context files:\n${contextPack.files.map((file) => `--- ${file.filePath}${file.truncated ? ' (truncated)' : ''} ---\n${file.content}`).join('\n\n') || 'none'}`,
                 `Files:\n${tree.join('\n') || '(empty)'}`,
               ].filter(Boolean).join('\n\n'),
             },
@@ -4253,6 +4729,52 @@ class NeuraComposerProvider {
       clearTimeout(timeout);
       if (externalSignal) externalSignal.removeEventListener('abort', abortListener);
     }
+  }
+
+  async applyBackgroundAgentEdits(agent, edits, controller) {
+    for (const edit of edits) {
+      if (controller.signal.aborted || agent.cancelRequested) throw new Error('Background agent was cancelled.');
+      const relative = this.safeRelativeForRoot(agent.path, edit.filePath);
+      const absolute = path.join(agent.path, relative);
+      if (edit.operation === 'delete') {
+        if (fsSync.existsSync(absolute)) await fs.unlink(absolute);
+      } else {
+        await fs.mkdir(path.dirname(absolute), { recursive: true });
+        await fs.writeFile(absolute, String(edit.content || ''), 'utf8');
+      }
+    }
+  }
+
+  async verifyBackgroundAgentCommands(agent, commands, controller) {
+    const verification = [];
+    for (const command of commands.slice(0, 4)) {
+      if (controller.signal.aborted || agent.cancelRequested) throw new Error('Background agent was cancelled.');
+      const startedAt = nowIso();
+      try {
+        const output = await execFileAsync(
+          process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : process.env.SHELL || 'sh',
+          process.platform === 'win32' ? ['/d', '/s', '/c', command.command] : ['-lc', command.command],
+          agent.path,
+        );
+        const result = { command: command.command, status: 'passed', output: output.slice(-4000), startedAt, completedAt: nowIso() };
+        verification.push(result);
+        await this.persistBackgroundAgent(agent, 'verification-passed', { command: command.command });
+      } catch (error) {
+        const result = {
+          command: command.command,
+          status: 'failed',
+          error: errorMessageFor(error),
+          startedAt,
+          completedAt: nowIso(),
+        };
+        verification.push(result);
+        await this.persistBackgroundAgent(agent, 'verification-failed', { command: command.command, error: result.error });
+        return { verification, failed: result };
+      }
+      await this.saveState();
+      this.renderIfVisible();
+    }
+    return { verification, failed: null };
   }
 
   async runBackgroundAgent(agentId, options = {}) {
@@ -4299,56 +4821,101 @@ class NeuraComposerProvider {
     this.renderIfVisible();
     try {
       if (agent.cancelRequested) throw new Error('Background agent was cancelled before it started.');
-      const tree = await this.treeForRoot(agent.path, 220);
-      await this.persistBackgroundAgent(agent, 'context-read', { files: tree.length });
-      await this.saveState();
-      this.renderIfVisible();
-      const result = await this.callBackgroundAgent(agent, tree, controller.signal);
-      if (controller.signal.aborted || agent.cancelRequested) throw new Error('Background agent was cancelled.');
-      const edits = this.normalizeResultEdits(result);
-      agent.edits = edits.map((edit) => ({
-        operation: edit.operation,
-        filePath: edit.filePath,
-        rationale: edit.rationale || '',
-      }));
-      await this.persistBackgroundAgent(agent, 'edits-proposed', { files: edits.map((edit) => edit.filePath) });
-      await this.saveState();
-      this.renderIfVisible();
-      for (const edit of edits) {
-        if (controller.signal.aborted || agent.cancelRequested) throw new Error('Background agent was cancelled.');
-        const relative = this.safeRelativeForRoot(agent.path, edit.filePath);
-        const absolute = path.join(agent.path, relative);
-        if (edit.operation === 'delete') {
-          if (fsSync.existsSync(absolute)) await fs.unlink(absolute);
-        } else {
-          await fs.mkdir(path.dirname(absolute), { recursive: true });
-          await fs.writeFile(absolute, String(edit.content || ''), 'utf8');
-        }
-      }
-      agent.status = 'completed';
-      agent.summary = String(result.message || `Applied ${edits.length} edit(s).`);
-      agent.commands = this.normalizeResultCommands(result);
       agent.verification = [];
-      for (const command of agent.commands.slice(0, 3)) {
+      agent.attempts = [];
+      let failure = null;
+      let completed = false;
+      for (let attempt = 1; attempt <= backgroundAgentMaxAttempts; attempt += 1) {
+        const tree = await this.treeForRoot(agent.path, 260);
+        await this.persistBackgroundAgent(agent, attempt === 1 ? 'context-read' : 'repair-context-read', { files: tree.length, attempt });
+        await this.saveState();
+        this.renderIfVisible();
+        const previousResults = (agent.attempts || []).map((item) => ({
+          attempt: item.attempt,
+          summary: item.summary,
+          edits: item.edits,
+          commands: item.commands,
+          failed: item.failed,
+        }));
+        const result = await this.callBackgroundAgent(agent, tree, controller.signal, {
+          attempt,
+          previousResults,
+          failure,
+        });
         if (controller.signal.aborted || agent.cancelRequested) throw new Error('Background agent was cancelled.');
-        try {
-          const startedAt = nowIso();
-          const output = await execFileAsync(
-            process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : process.env.SHELL || 'sh',
-            process.platform === 'win32' ? ['/d', '/s', '/c', command.command] : ['-lc', command.command],
-            agent.path,
-          );
-          agent.verification.push({ command: command.command, status: 'passed', output: output.slice(-4000), startedAt, completedAt: nowIso() });
-          await this.persistBackgroundAgent(agent, 'verification-passed', { command: command.command });
-          await this.saveState();
-          this.renderIfVisible();
-        } catch (error) {
-          agent.verification.push({ command: command.command, status: 'failed', error: errorMessageFor(error), startedAt: nowIso(), completedAt: nowIso() });
-          await this.persistBackgroundAgent(agent, 'verification-failed', { command: command.command, error: errorMessageFor(error) });
-          await this.saveState();
-          this.renderIfVisible();
+        const edits = agent.writes === false ? [] : this.normalizeResultEdits(result);
+        const resultCommands = this.normalizeResultCommands(result);
+        if (agent.writes !== false && !edits.length && !resultCommands.length) {
+          failure = {
+            status: 'weak-response',
+            error: `${agent.roleLabel || 'Agent'} returned no edits or verification commands.`,
+          };
+          agent.attempts.push({
+            attempt,
+            summary: String(result.message || failure.error).slice(0, 500),
+            edits: [],
+            commands: [],
+            failed: failure,
+          });
+          await this.persistBackgroundAgent(agent, 'weak-response', { attempt, error: failure.error });
+          if (attempt === backgroundAgentMaxAttempts) throw new Error(`${failure.error} The response was too weak to accept after ${attempt} attempt(s).`);
+          continue;
+        }
+        const outsideOwnership = agent.writes === false || !agent.ownership?.length
+          ? []
+          : edits.filter((edit) => !this.pathMatchesOwnership(edit.filePath, agent.ownership));
+        if (outsideOwnership.length) {
+          failure = {
+            status: 'ownership-violation',
+            error: `${agent.roleLabel || 'Agent'} tried to edit outside its ownership lane: ${outsideOwnership.map((edit) => edit.filePath).join(', ')}`,
+            allowed: agent.ownership,
+          };
+          agent.attempts.push({
+            attempt,
+            summary: String(result.message || failure.error).slice(0, 500),
+            edits: edits.map((edit) => edit.filePath),
+            commands: resultCommands.map((command) => command.command),
+            failed: failure,
+          });
+          await this.persistBackgroundAgent(agent, 'ownership-violation', { attempt, error: failure.error, allowed: agent.ownership });
+          if (attempt === backgroundAgentMaxAttempts) throw new Error(`${failure.error}. The agent stayed outside its lane after ${attempt} attempt(s).`);
+          continue;
+        }
+        await this.applyBackgroundAgentEdits(agent, edits, controller);
+        const verificationResult = await this.verifyBackgroundAgentCommands(agent, resultCommands, controller);
+        agent.edits = [
+          ...(agent.edits || []),
+          ...edits.map((edit) => ({
+            operation: edit.operation,
+            filePath: edit.filePath,
+            rationale: edit.rationale || '',
+            attempt,
+          })),
+        ].slice(-80);
+        agent.commands = resultCommands;
+        agent.verification = [...(agent.verification || []), ...verificationResult.verification].slice(-20);
+        const attemptRecord = {
+          attempt,
+          summary: String(result.message || `Applied ${edits.length} edit(s).`).slice(0, 700),
+          edits: edits.map((edit) => edit.filePath),
+          commands: resultCommands.map((command) => command.command),
+          failed: verificationResult.failed,
+          completedAt: nowIso(),
+        };
+        agent.attempts.push(attemptRecord);
+        await this.persistBackgroundAgent(agent, verificationResult.failed ? 'attempt-failed' : 'attempt-passed', attemptRecord);
+        await this.saveState();
+        this.renderIfVisible();
+        if (!verificationResult.failed) {
+          agent.status = 'completed';
+          agent.summary = String(result.message || `Applied ${edits.length} edit(s).`);
+          completed = true;
           break;
         }
+        failure = verificationResult.failed;
+      }
+      if (!completed) {
+        throw new Error(failure?.error || 'Background agent did not pass verification.');
       }
       agent.updatedAt = nowIso();
       await this.persistBackgroundAgent(agent, 'completed');
@@ -4624,6 +5191,10 @@ class NeuraComposerProvider {
       if (message.command === 'openWorktree') await this.openWorktree(message.worktreePath);
       if (message.command === 'removeWorktree') await this.removeWorktree(message.worktreePath);
       if (message.command === 'createBackgroundAgent') await this.createBackgroundAgent();
+      if (message.command === 'createSwarmMission') await this.createSwarmMission();
+      if (message.command === 'runSwarmMission') await this.runSwarmMission(message.missionId);
+      if (message.command === 'cancelSwarmMission') await this.cancelSwarmMission(message.missionId);
+      if (message.command === 'reviewSwarmMission') await this.reviewSwarmMission(message.missionId);
       if (message.command === 'openBackgroundAgent') await this.openBackgroundAgent(message.agentId);
       if (message.command === 'openBackgroundAgentLog') await this.openBackgroundAgentLog(message.agentId);
       if (message.command === 'runBackgroundAgent') await this.runBackgroundAgent(message.agentId);
@@ -5160,7 +5731,8 @@ class NeuraComposerProvider {
 
   renderAgentsPanel() {
     const agents = this.state.backgroundAgents || [];
-    const counts = ['ready', 'queued', 'running', 'cancelling', 'completed', 'failed', 'cancelled', 'interrupted']
+    const missions = this.state.swarmMissions || [];
+    const counts = ['ready', 'queued', 'running', 'cancelling', 'completed', 'blocked', 'failed', 'cancelled', 'interrupted']
       .map((status) => [status, agents.filter((agent) => agent.status === status).length])
       .filter(([, count]) => count);
     const queueSummary = counts.length
@@ -5180,10 +5752,15 @@ class NeuraComposerProvider {
                 .slice(-4)
                 .map((item) => `<li>${escapeHtml(item.content)}</li>`)
                 .join('');
+              const attempts = (agent.attempts || [])
+                .slice(-4)
+                .map((item) => `<li><span>Attempt ${escapeHtml(item.attempt)}</span>${item.failed ? `<p class="error-text">${escapeHtml(item.failed.error || item.failed.status || 'failed')}</p>` : '<p>passed</p>'}<small>${escapeHtml(item.summary || '')}</small></li>`)
+                .join('');
               return `<div class="agent-card">
               <div class="agent-card-head">
                 <div>
-                  <div class="agent-title">${escapeHtml(agent.task)}</div>
+                  <div class="agent-title">${escapeHtml(agent.roleLabel || 'Agent')} <span>${escapeHtml(agent.squad || 'Solo')}</span></div>
+                  <p>${escapeHtml(agent.task)}</p>
                   <p>${escapeHtml(agent.path)}</p>
                   <code>${escapeHtml(agent.branch)}</code>
                 </div>
@@ -5192,6 +5769,7 @@ class NeuraComposerProvider {
               ${agent.summary ? `<p class="agent-summary">${escapeHtml(agent.summary)}</p>` : ''}
               ${agent.verification?.length ? `<div class="agent-verification">${escapeHtml(agent.verification.map((item) => `${item.status}: ${item.command}`).join(' | '))}</div>` : ''}
               ${agent.error ? `<p class="error-text">${escapeHtml(agent.error)}</p>` : ''}
+              ${attempts ? `<details class="agent-details"><summary>Attempts <span>${(agent.attempts || []).length}</span></summary><ol>${attempts}</ol></details>` : ''}
               ${followUps ? `<details class="agent-details"><summary>Follow-ups <span>${(agent.followUps || []).length}</span></summary><ol>${followUps}</ol></details>` : ''}
               ${events ? `<details class="agent-details"><summary>Live log <span>${(agent.events || []).length}</span></summary><ol>${events}</ol></details>` : ''}
               <div class="actions agent-actions">
@@ -5207,10 +5785,52 @@ class NeuraComposerProvider {
           )
           .join('')
       : '<section class="empty"><strong>No background agents yet.</strong><p>Create an isolated git worktree for a coding task. Neura persists each agent state and log under this workspace memory.</p></section>';
+    const missionRows = missions.length
+      ? missions.map((mission) => {
+        const missionAgents = agents.filter((agent) => mission.agentIds.includes(agent.id));
+        const missionCounts = ['ready', 'queued', 'running', 'completed', 'blocked', 'failed', 'cancelled', 'interrupted']
+          .map((status) => [status, missionAgents.filter((agent) => agent.status === status).length])
+          .filter(([, count]) => count)
+          .map(([status, count]) => `<span class="agent-pill ${escapeHtml(status)}">${escapeHtml(status)} ${count}</span>`)
+          .join('');
+        const roleLine = missionAgents
+          .map((agent) => `${agent.roleLabel || agent.roleId}: ${agent.status}`)
+          .join(' | ');
+        const running = ['queued', 'running', 'cancelling'].includes(mission.status);
+        const conflicts = (mission.conflicts || [])
+          .map((conflict) => `<li><strong>${escapeHtml(conflict.filePath)}</strong><span>${escapeHtml((conflict.owners || []).map((owner) => owner.roleLabel || owner.roleId).join(' vs '))}</span></li>`)
+          .join('');
+        const waves = (mission.waves || [])
+          .slice(-4)
+          .map((wave) => `<li><strong>${escapeHtml((wave.roles || []).join(', '))}</strong><span>${escapeHtml(wave.finishedAt ? 'finished' : 'running')}</span></li>`)
+          .join('');
+        return `<div class="agent-card swarm-card">
+          <div class="agent-card-head">
+            <div>
+              <div class="agent-title">Swarm Mission <span>${escapeHtml(mission.status || 'ready')}</span></div>
+              <p>${escapeHtml(mission.task)}</p>
+              <code>${escapeHtml(mission.id)}</code>
+            </div>
+            <span class="agent-status ${escapeHtml(mission.status || 'ready')}">${escapeHtml(mission.status || 'ready')}</span>
+          </div>
+          <div class="mission-summary">${missionCounts || '<span class="muted">No role agents yet.</span>'}</div>
+          <p class="agent-summary">${escapeHtml(roleLine)}</p>
+          ${conflicts ? `<details class="agent-details conflict-details" open><summary>Conflicts <span>${(mission.conflicts || []).length}</span></summary><ol>${conflicts}</ol></details>` : ''}
+          ${waves ? `<details class="agent-details"><summary>Parallel waves <span>${(mission.waves || []).length}</span></summary><ol>${waves}</ol></details>` : ''}
+          ${mission.error ? `<p class="error-text">${escapeHtml(mission.error)}</p>` : ''}
+          <div class="actions agent-actions">
+            <button data-command="runSwarmMission" data-mission-id="${escapeHtml(mission.id)}" ${running ? 'disabled' : ''}>Run Swarm</button>
+            ${running ? `<button data-command="cancelSwarmMission" data-mission-id="${escapeHtml(mission.id)}">Cancel Swarm</button>` : ''}
+            <button class="primary-action" data-command="reviewSwarmMission" data-mission-id="${escapeHtml(mission.id)}">Review Mission</button>
+          </div>
+        </div>`;
+      }).join('')
+      : '<section class="empty"><strong>No swarm missions yet.</strong><p>Create a role-based squad to split production work across isolated agents.</p></section>';
     return `<section class="card mission-control">
       <div class="card-title">Mission Control</div>
       <div class="mission-summary">${queueSummary}</div>
-      <div class="actions"><button data-command="createBackgroundAgent">Create Agent Worktree</button><button data-command="refresh">Refresh</button></div>
+      <div class="actions"><button class="primary-action" data-command="createSwarmMission">Create Agent Swarm</button><button data-command="createBackgroundAgent">Create Solo Agent</button><button data-command="refresh">Refresh</button></div>
+      ${missionRows}
       ${rows}
     </section>`;
   }
@@ -5394,7 +6014,7 @@ class NeuraComposerProvider {
     .continuation-row { border-left: 1px solid #3b3b44; padding-left: 10px; }
     .mission-summary { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .agent-pill { border: 1px solid #33333a; border-radius: 999px; padding: 3px 8px; color: #c9c9d1; font-size: 11px; text-transform: uppercase; }
-    .agent-pill.running, .agent-pill.queued, .agent-pill.cancelling { color: #fde68a; border-color: #5f4b1b; }
+    .agent-pill.running, .agent-pill.queued, .agent-pill.cancelling, .agent-pill.blocked { color: #fde68a; border-color: #5f4b1b; }
     .agent-pill.completed { color: #86efac; border-color: #235c35; }
     .agent-pill.failed, .agent-pill.cancelled, .agent-pill.interrupted { color: #fca5a5; border-color: #693030; }
     .agent-card { border: 1px solid #2c2c31; border-radius: 12px; background: #151517; padding: 12px; }
@@ -5402,7 +6022,7 @@ class NeuraComposerProvider {
     .agent-title { color: #f5f5f5; font-weight: 700; line-height: 1.35; }
     .agent-card p { color: #9f9fa8; margin: 5px 0 0; word-break: break-all; }
     .agent-status { flex: 0 0 auto; border: 1px solid #34343a; border-radius: 999px; padding: 3px 8px; color: #c9c9d1; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
-    .agent-status.running, .agent-status.queued, .agent-status.cancelling { color: #fde68a; border-color: #5f4b1b; }
+    .agent-status.running, .agent-status.queued, .agent-status.cancelling, .agent-status.blocked { color: #fde68a; border-color: #5f4b1b; }
     .agent-status.completed { color: #86efac; border-color: #235c35; }
     .agent-status.failed, .agent-status.cancelled, .agent-status.interrupted { color: #fca5a5; border-color: #693030; }
     .agent-summary, .agent-verification { color: #d7d7dc; font-size: 12px; margin-top: 8px; }
@@ -5415,6 +6035,7 @@ class NeuraComposerProvider {
     .agent-details li span { color: #e5e5e8; font-weight: 600; }
     .agent-details li small { color: #85858e; margin-left: 6px; }
     .agent-details li p { margin: 2px 0 0; }
+    .conflict-details { border-color: #5f4b1b; }
     .agent-actions { margin-top: 10px; }
     button:disabled { opacity: .45; cursor: not-allowed; }
     .error-text { color: #fca5a5 !important; }
@@ -5570,6 +6191,7 @@ class NeuraComposerProvider {
         worktreePath: element.dataset.worktreePath,
         sessionId: element.dataset.sessionId,
         agentId: element.dataset.agentId,
+        missionId: element.dataset.missionId,
         mcpCardId: element.dataset.mcpCardId,
         pluginName: element.dataset.pluginName,
         queueId: element.dataset.queueId

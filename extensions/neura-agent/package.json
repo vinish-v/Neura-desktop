@@ -42,8 +42,12 @@
     "onCommand:neura.runApprovedCommand",
     "onCommand:neura.addWorktree",
     "onCommand:neura.createBackgroundAgent",
+    "onCommand:neura.createSwarmMission",
+    "onCommand:neura.runSwarmMission",
     "onCommand:neura.followUpBackgroundAgent",
     "onCommand:neura.reviewBackgroundAgent",
+    "onCommand:neura.reviewSwarmMission",
+    "onCommand:neura.cancelSwarmMission",
     "onCommand:neura.cancelBackgroundAgent",
     "onCommand:neura.installPlugin",
     "onCommand:neura.toggleInlineCompletions",
@@ -285,12 +289,28 @@
         "title": "Neura: Create Background Agent Worktree"
       },
       {
+        "command": "neura.createSwarmMission",
+        "title": "Neura: Create Agent Swarm"
+      },
+      {
+        "command": "neura.runSwarmMission",
+        "title": "Neura: Run Agent Swarm"
+      },
+      {
         "command": "neura.followUpBackgroundAgent",
         "title": "Neura: Follow Up Background Agent"
       },
       {
         "command": "neura.reviewBackgroundAgent",
         "title": "Neura: Review Background Agent Merge"
+      },
+      {
+        "command": "neura.reviewSwarmMission",
+        "title": "Neura: Review Agent Swarm"
+      },
+      {
+        "command": "neura.cancelSwarmMission",
+        "title": "Neura: Cancel Agent Swarm"
       },
       {
         "command": "neura.cancelBackgroundAgent",

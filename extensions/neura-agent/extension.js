@@ -117,6 +117,49 @@ function activate(context) {
     })),
     vscode.commands.registerCommand('neura.addWorktree', wrap(() => provider.addWorktree())),
     vscode.commands.registerCommand('neura.createBackgroundAgent', wrap(() => provider.createBackgroundAgent())),
+    vscode.commands.registerCommand('neura.createSwarmMission', wrap(() => provider.createSwarmMission())),
+    vscode.commands.registerCommand('neura.runSwarmMission', wrap(async () => {
+      const missions = provider.state.swarmMissions || [];
+      if (!missions.length) throw new Error('No Neura swarm mission was found.');
+      const picked = await vscode.window.showQuickPick(
+        missions.map((mission) => ({
+          label: mission.task,
+          description: mission.status,
+          detail: mission.id,
+          mission,
+        })),
+        { title: 'Run Neura swarm mission', matchOnDescription: true, matchOnDetail: true },
+      );
+      if (picked?.mission) await provider.runSwarmMission(picked.mission.id);
+    })),
+    vscode.commands.registerCommand('neura.reviewSwarmMission', wrap(async () => {
+      const missions = provider.state.swarmMissions || [];
+      if (!missions.length) throw new Error('No Neura swarm mission was found.');
+      const picked = await vscode.window.showQuickPick(
+        missions.map((mission) => ({
+          label: mission.task,
+          description: mission.status,
+          detail: mission.id,
+          mission,
+        })),
+        { title: 'Review Neura swarm mission', matchOnDescription: true, matchOnDetail: true },
+      );
+      if (picked?.mission) await provider.reviewSwarmMission(picked.mission.id);
+    })),
+    vscode.commands.registerCommand('neura.cancelSwarmMission', wrap(async () => {
+      const missions = (provider.state.swarmMissions || []).filter((mission) => ['queued', 'running'].includes(mission.status));
+      if (!missions.length) throw new Error('No running Neura swarm mission was found.');
+      const picked = await vscode.window.showQuickPick(
+        missions.map((mission) => ({
+          label: mission.task,
+          description: mission.status,
+          detail: mission.id,
+          mission,
+        })),
+        { title: 'Cancel Neura swarm mission', matchOnDescription: true, matchOnDetail: true },
+      );
+      if (picked?.mission) await provider.cancelSwarmMission(picked.mission.id);
+    })),
     vscode.commands.registerCommand('neura.followUpBackgroundAgent', wrap(async () => {
       const agent = await pickBackgroundAgent();
       if (agent) await provider.followUpBackgroundAgent(agent.id);
