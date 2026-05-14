@@ -26,11 +26,25 @@
     "onCommand:neura.generatePlan",
     "onCommand:neura.runAgent",
     "onCommand:neura.buildApp",
+    "onCommand:neura.editSelection",
+    "onCommand:neura.explainCurrentFile",
+    "onCommand:neura.reviewCurrentFileProposal",
+    "onCommand:neura.acceptCurrentFileHunk",
+    "onCommand:neura.rejectCurrentFileHunk",
+    "onCommand:neura.continueTrajectory",
     "onCommand:neura.applyChanges",
     "onCommand:neura.restoreCheckpoint",
     "onCommand:neura.openPreview",
+    "onCommand:neura.verifyPreview",
+    "onCommand:neura.rebuildSemanticIndex",
+    "onCommand:neura.exportProofBundle",
+    "onCommand:neura.newMcpToolCard",
     "onCommand:neura.runApprovedCommand",
     "onCommand:neura.addWorktree",
+    "onCommand:neura.createBackgroundAgent",
+    "onCommand:neura.followUpBackgroundAgent",
+    "onCommand:neura.reviewBackgroundAgent",
+    "onCommand:neura.cancelBackgroundAgent",
     "onCommand:neura.installPlugin",
     "onCommand:neura.toggleInlineCompletions",
     "onCommand:neura.syncCanvasProject"
@@ -110,6 +124,30 @@
           "description": "Request timeout in milliseconds for Neura Composer NVIDIA NIM calls.",
           "scope": "resource"
         },
+        "neura.nim.embeddings.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable dense NVIDIA NIM embeddings for the Neura semantic codebase index. Sparse local indexing remains available when this is off.",
+          "scope": "resource"
+        },
+        "neura.nim.embeddings.baseUrl": {
+          "type": "string",
+          "default": "https://integrate.api.nvidia.com/v1",
+          "description": "OpenAI-compatible NVIDIA NIM embeddings base URL. Defaults to the chat base URL when empty.",
+          "scope": "resource"
+        },
+        "neura.nim.embeddings.model": {
+          "type": "string",
+          "default": "",
+          "description": "NVIDIA NIM embedding model ID for dense semantic indexing. Leave empty to keep dense indexing disabled even when a chat model is configured.",
+          "scope": "resource"
+        },
+        "neura.nim.embeddings.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Optional NVIDIA NIM embeddings API key. Falls back to the main Neura NIM API key when empty.",
+          "scope": "machine-overridable"
+        },
         "neura.inlineCompletions": {
           "type": "boolean",
           "default": false,
@@ -119,8 +157,8 @@
         "neura.mcp.servers": {
           "type": "array",
           "default": [],
-          "description": "Reserved MCP server definitions for the upcoming approved MCP tool layer.",
-          "markdownDescription": "Reserved for the upcoming Neura MCP layer. Servers configured here are not connected until MCP approval cards and transport handling are implemented.",
+          "description": "MCP server definitions used by Neura approval cards.",
+          "markdownDescription": "List MCP servers Neura can connect to. Stdio servers are available through approval cards before tool execution.",
           "items": {
             "type": "object",
             "required": ["name", "transport"],
@@ -183,6 +221,30 @@
         "title": "Neura: Build App / Site"
       },
       {
+        "command": "neura.editSelection",
+        "title": "Neura: Edit Selection"
+      },
+      {
+        "command": "neura.explainCurrentFile",
+        "title": "Neura: Explain Current File"
+      },
+      {
+        "command": "neura.reviewCurrentFileProposal",
+        "title": "Neura: Review Pending Edit"
+      },
+      {
+        "command": "neura.acceptCurrentFileHunk",
+        "title": "Neura: Accept Current File Hunk"
+      },
+      {
+        "command": "neura.rejectCurrentFileHunk",
+        "title": "Neura: Reject Current File Hunk"
+      },
+      {
+        "command": "neura.continueTrajectory",
+        "title": "Neura: Continue Last Stopped Agent Run"
+      },
+      {
         "command": "neura.applyChanges",
         "title": "Neura: Apply Changes"
       },
@@ -195,12 +257,44 @@
         "title": "Neura: Open Preview"
       },
       {
+        "command": "neura.verifyPreview",
+        "title": "Neura: Verify Preview"
+      },
+      {
+        "command": "neura.rebuildSemanticIndex",
+        "title": "Neura: Rebuild Semantic Index"
+      },
+      {
+        "command": "neura.exportProofBundle",
+        "title": "Neura: Export Proof of Work Bundle"
+      },
+      {
+        "command": "neura.newMcpToolCard",
+        "title": "Neura: New MCP Tool Card"
+      },
+      {
         "command": "neura.runApprovedCommand",
         "title": "Neura: Run Approved Command"
       },
       {
         "command": "neura.addWorktree",
         "title": "Neura: Add Git Worktree"
+      },
+      {
+        "command": "neura.createBackgroundAgent",
+        "title": "Neura: Create Background Agent Worktree"
+      },
+      {
+        "command": "neura.followUpBackgroundAgent",
+        "title": "Neura: Follow Up Background Agent"
+      },
+      {
+        "command": "neura.reviewBackgroundAgent",
+        "title": "Neura: Review Background Agent Merge"
+      },
+      {
+        "command": "neura.cancelBackgroundAgent",
+        "title": "Neura: Cancel Background Agent"
       },
       {
         "command": "neura.installPlugin",
