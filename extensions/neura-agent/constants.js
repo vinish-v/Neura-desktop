@@ -3,6 +3,7 @@ const modeLabels = {
   plan: 'Plan',
   agent: 'Edit',
   builder: 'Build',
+  ship: 'Ship',
 };
 
 const reasoningLabels = {
@@ -39,12 +40,12 @@ const nvidiaModels = [
   { id: 'nvidia/llama-3.1-nemotron-51b-instruct', label: 'Llama Nemotron 51B', description: 'Larger coding/general reasoning model' },
 ];
 
-const editableModes = new Set(['agent', 'builder']);
+const editableModes = new Set(['agent', 'builder', 'ship']);
 const ignoredGlob = '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/coverage/**}';
 const maxContextBytes = 12000;
 const maxAttachmentBytes = 2_000_000;
 const defaultNimTimeoutMs = 45000;
-const agentMaxSteps = 6;
+const agentMaxSteps = 12;
 const agentObservationBytes = 9000;
 const agentSearchFileLimit = 240;
 const agentSearchMatchLimit = 30;
@@ -54,11 +55,17 @@ const agentTools = [
   { action: 'list_files', args: '{"limit":120}', description: 'List workspace files while respecting ignored build/dependency folders.' },
   { action: 'read_file', args: '{"filePath":"relative/path"}', description: 'Read a workspace file before editing it.' },
   { action: 'search', args: '{"query":"text","limit":20}', description: 'Search workspace text across source files.' },
+  { action: 'inspect_package_scripts', args: '{"filePath":"package.json"}', description: 'Read package manager scripts and dependencies to choose targeted install/build/test/dev commands.' },
+  { action: 'production_profile', args: '{}', description: 'Detect framework, package manager, build output, verification scripts, deploy config, and recommended production shipping commands.' },
+  { action: 'git_status', args: '{}', description: 'Inspect current git status for changed files before deciding edits or merge risk.' },
   { action: 'get_diagnostics', args: '{"filePath":"optional/relative/path"}', description: 'Read current VS Code diagnostics for the workspace or one file.' },
   { action: 'shadcn_info', args: '{}', description: 'Inspect shadcn/ui configuration when a project has components.json.' },
   { action: 'preview_status', args: '{}', description: 'Read the latest preview URL and verification result known to Neura.' },
   { action: 'semantic_search', args: '{"query":"symbol or concept","limit":20}', description: 'Search the local semantic index for symbols and relevant files.' },
   { action: 'browser_verify', args: '{"url":"http://localhost:3000"}', description: 'Run headless browser verification with screenshot when a local browser is installed.' },
+  { action: 'browser_agent', args: '{"url":"http://localhost:3000","steps":[{"action":"click","selector":"button"},{"action":"type","selector":"input","text":"hello"},{"action":"scroll","y":600}]}', description: 'Drive a local preview through a browser agent: capture DOM, screenshots, console/runtime errors, click/type/scroll actions, and a replay artifact.' },
+  { action: 'run_command', args: '{"command":"npm test","purpose":"why this is safe and useful"}', description: 'Run a verification command only when Full Auto permission is enabled and the command passes safety guardrails; otherwise the agent must propose it at finish.' },
+  { action: 'tool_batch', args: '{"actions":[{"action":"list_files","args":{"limit":120}},{"action":"git_status","args":{}}]}', description: 'Run multiple observation tools in one step when they are independent. Do not include mutating commands in a batch.' },
 ];
 
 const swarmRoles = [
@@ -152,7 +159,7 @@ const swarmRoles = [
     squad: 'Quality',
     default: true,
     writes: true,
-    dependencies: ['integration'],
+    dependencies: ['integration', 'browser'],
     mission: 'Discover and run targeted tests, lint, typecheck, build, and repair obvious verification failures.',
     focus: ['test discovery', 'targeted checks', 'lint/type errors', 'build failures', 'repair loop'],
     deliverables: ['test fixes if needed', 'verification commands', 'failure evidence'],
@@ -172,14 +179,14 @@ const swarmRoles = [
   },
   {
     id: 'browser',
-    label: 'Browser Verifier',
+    label: 'Browser Agent',
     squad: 'Quality',
-    default: false,
+    default: true,
     writes: false,
-    dependencies: ['frontend', 'integration'],
-    mission: 'Verify local preview behavior, capture screenshots, and report UI/runtime failures.',
-    focus: ['browser launch', 'console errors', 'visual smoke checks', 'preview screenshots'],
-    deliverables: ['browser verification report', 'screenshot path if available', 'runtime issue list'],
+    dependencies: ['integration'],
+    mission: 'Interact with the running local app through Chrome/Edge DevTools, capture DOM, screenshots, console errors, and browser replay evidence.',
+    focus: ['DOM capture', 'console/runtime errors', 'click/type/scroll flows', 'visual smoke checks', 'preview screenshots', 'browser replay artifacts'],
+    deliverables: ['browser agent report', 'DOM snapshot', 'screenshot paths', 'console/runtime issue list', 'interaction recording path'],
     ownership: [],
   },
   {

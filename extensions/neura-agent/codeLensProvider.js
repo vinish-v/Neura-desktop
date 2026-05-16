@@ -32,6 +32,18 @@ class NeuraCodeLensProvider {
           title: 'Neura: Review Pending Edit',
           command: 'neura.reviewCurrentFileProposal',
         }),
+        new vscode.CodeLens(top, {
+          title: 'Neura: Accept File',
+          command: 'neura.acceptCurrentFileProposal',
+        }),
+        new vscode.CodeLens(top, {
+          title: 'Neura: Reject File',
+          command: 'neura.rejectCurrentFileProposal',
+        }),
+        new vscode.CodeLens(top, {
+          title: 'Neura: Reapply File',
+          command: 'neura.reapplyCurrentFileProposal',
+        }),
       );
     }
     return lenses;

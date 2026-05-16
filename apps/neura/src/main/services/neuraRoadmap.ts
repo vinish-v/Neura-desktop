@@ -300,12 +300,11 @@ const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
     status: 'done',
     evidence: [
       {
-        id: 'baseline-p2-1-routing-split',
-        kind: 'test',
+        id: 'hermes-p2-1-runtime-routing',
+        kind: 'manual',
         summary:
-          'Quick browser and research browser routing are covered by tests.',
-        command:
-          'npm test -- --run src/main/services/embeddedBrowserResearchTask.test.ts',
+          'Browser, research, shell, local, and direct-answer tasks now route through the Hermes backend.',
+        artifactPath: 'apps/neura/src/main/services/runAgent.ts',
       },
     ],
   },
@@ -313,12 +312,11 @@ const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
     status: 'done',
     evidence: [
       {
-        id: 'baseline-p2-2-source-dedupe',
-        kind: 'test',
+        id: 'hermes-p2-2-source-stack',
+        kind: 'manual',
         summary:
-          'Research candidate ranking dedupes by domain and filters low-quality links.',
-        artifactPath:
-          'apps/neura/src/main/services/embeddedBrowserResearchTask.test.ts',
+          'Hermes provides the research/browser tool stack instead of Neura maintaining a separate embedded research backend.',
+        artifactPath: 'apps/neura/src/main/services/hermesRuntime.ts',
       },
     ],
   },
@@ -326,12 +324,11 @@ const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
     status: 'done',
     evidence: [
       {
-        id: 'baseline-p2-3-source-extraction',
-        kind: 'test',
+        id: 'hermes-p2-3-source-extraction',
+        kind: 'manual',
         summary:
-          'Source extraction captures title, URL, date, excerpt, and readable body.',
-        artifactPath:
-          'apps/neura/src/main/services/embeddedBrowserResearchTask.test.ts',
+          'Source extraction is delegated to Hermes toolsets and returned through Neura task progress.',
+        artifactPath: 'apps/neura/src/main/services/task-manager.ts',
       },
     ],
   },
@@ -339,12 +336,11 @@ const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
     status: 'done',
     evidence: [
       {
-        id: 'baseline-p2-4-answer-validation',
-        kind: 'test',
+        id: 'hermes-p2-4-answer-validation',
+        kind: 'manual',
         summary:
-          'Research answer validation rejects shallow visible-results summaries.',
-        artifactPath:
-          'apps/neura/src/main/services/embeddedBrowserResearchTask.test.ts',
+          'Hermes final answers are recorded with completion proof and task-run evidence.',
+        artifactPath: 'apps/neura/src/main/services/task-manager.ts',
       },
     ],
   },
@@ -352,11 +348,11 @@ const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
     status: 'done',
     evidence: [
       {
-        id: 'baseline-p2-5-research-tests',
-        kind: 'test',
-        summary: 'Research runner behavior is covered with source-quality tests.',
+        id: 'hermes-p2-5-smoke',
+        kind: 'manual',
+        summary: 'Hermes one-shot execution was smoke-tested from the vendored backend.',
         command:
-          'npm test -- --run src/main/services/embeddedBrowserResearchTask.test.ts',
+          'uv run --python 3.12 --project third_party/hermes-agent python -m hermes_cli.main -z "Reply exactly: Neura Hermes backend online"',
       },
     ],
   },
@@ -390,12 +386,11 @@ const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
     status: 'done',
     evidence: [
       {
-        id: 'baseline-p3-3-gui-only-visible-apps',
+        id: 'hermes-p3-3-no-gui-runner',
         kind: 'manual',
         summary:
-          'Native deterministic local operations bypass GUI desktop automation paths.',
-        artifactPath:
-          'apps/neura/src/main/services/localComputerActorRunner.ts',
+          'Legacy GUI desktop automation runner was removed from the Neura backend path.',
+        artifactPath: 'apps/neura/src/main/services/task-manager.ts',
       },
     ],
   },
@@ -469,8 +464,8 @@ const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
         id: 'baseline-p5-1-orchestrator-contract',
         kind: 'manual',
         summary:
-          'AgentOrchestrator provides the shared plan-act-observe-finish contract used by browser, local workflow, and local computer runners.',
-        artifactPath: 'apps/neura/src/main/services/agentOrchestrator.ts',
+          'TaskManager now provides the Neura task lifecycle while Hermes owns planning and execution.',
+        artifactPath: 'apps/neura/src/main/services/task-manager.ts',
       },
     ],
   },
@@ -478,12 +473,11 @@ const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
     status: 'done',
     evidence: [
       {
-        id: 'baseline-p5-2-quick-browser-orchestrated',
+        id: 'hermes-p5-2-quick-browser',
         kind: 'manual',
         summary:
-          'Quick embedded browser tasks execute through AgentOrchestrator.',
-        artifactPath:
-          'apps/neura/src/main/services/quickEmbeddedBrowserTask.ts',
+          'Quick browser tasks execute through Hermes instead of a Neura-specific browser runner.',
+        artifactPath: 'apps/neura/src/main/services/hermesRuntime.ts',
       },
     ],
   },
@@ -491,12 +485,11 @@ const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
     status: 'done',
     evidence: [
       {
-        id: 'baseline-p5-3-research-orchestrated',
+        id: 'hermes-p5-3-research',
         kind: 'manual',
         summary:
-          'Embedded browser research tasks execute through AgentOrchestrator.',
-        artifactPath:
-          'apps/neura/src/main/services/embeddedBrowserResearchTask.ts',
+          'Research tasks execute through Hermes toolsets instead of the removed embedded research runner.',
+        artifactPath: 'apps/neura/src/main/services/hermesRuntime.ts',
       },
     ],
   },
@@ -504,12 +497,11 @@ const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
     status: 'done',
     evidence: [
       {
-        id: 'baseline-p5-4-local-orchestrated',
+        id: 'hermes-p5-4-local',
         kind: 'manual',
         summary:
-          'Shell, local workflow, and desktop-computer tasks share the same orchestrator lifecycle.',
-        artifactPath:
-          'apps/neura/src/main/services/localComputerActorRunner.ts',
+          'Shell and local workflows execute through Hermes with Neura preserving progress and cancellation state.',
+        artifactPath: 'apps/neura/src/main/services/task-manager.ts',
       },
     ],
   },
@@ -517,10 +509,10 @@ const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
     status: 'done',
     evidence: [
       {
-        id: 'baseline-p5-5-obsolete-paths-contained',
+        id: 'hermes-p5-5-legacy-paths-removed',
         kind: 'manual',
         summary:
-          'Runtime routing now prefers orchestrated quick/research/local paths instead of competing browser fallbacks.',
+          'Legacy Neura browser/local workflow runners were removed; runAgent delegates to Hermes.',
         artifactPath: 'apps/neura/src/main/services/runAgent.ts',
       },
     ],
@@ -545,9 +537,9 @@ const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
         id: 'baseline-p6-2-episodic-retrieval',
         kind: 'test',
         summary:
-          'Relevant completed runs are retrieved and exposed as context hints for new browser research tasks.',
+          'Relevant completed runs are retrieved and exposed as context hints for new Hermes-backed tasks.',
         command:
-          'npm test -- --run src/main/services/taskContextMemory.test.ts src/main/services/embeddedBrowserResearchTask.test.ts',
+          'npm test -- --run src/main/services/taskContextMemory.test.ts',
       },
     ],
   },

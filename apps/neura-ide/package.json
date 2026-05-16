@@ -7,6 +7,6 @@
   "scripts": {
     "build:win32": "powershell -ExecutionPolicy Bypass -File ./scripts/build-windows.ps1",
     "install:dev:win32": "powershell -ExecutionPolicy Bypass -File ./scripts/install-dev-windows.ps1",
-    "verify:product": "node ./scripts/verify-product.js"
+    "verify:product": "node ./scripts/verify-product.js && node ./scripts/verify-neura-agent.js"
   }
 }

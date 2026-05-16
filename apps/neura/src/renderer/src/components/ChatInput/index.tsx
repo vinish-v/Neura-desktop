@@ -37,10 +37,6 @@ import { cn } from '@renderer/utils';
 
 import { Operator } from '@main/store/types';
 import { useSetting } from '../../hooks/useSetting';
-import {
-  classifyInteractionForInstructions,
-  selectOperatorForInstructions,
-} from '../../utils/operatorRouting';
 
 type LocalAttachment = File & { path?: string };
 
@@ -155,8 +151,7 @@ const ChatInput = ({
   const [localInstructions, setLocalInstructions] = useState('');
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   const { run, stopAgentRuning } = useRunAgent();
-  const { getSession, updateSession, updateMessages, chatMessages } =
-    useSession();
+  const { getSession, updateSession, chatMessages } = useSession();
   const { settings, updateSetting } = useSetting();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -223,36 +218,6 @@ const ChatInput = ({
       : rawInstructions;
 
     let history = chatMessages;
-    const appendTextExchange = async (answer: string) => {
-      const now = Date.now();
-      const userMessage = {
-        from: 'human' as const,
-        value: instructions,
-        timing: {
-          start: now,
-          end: now,
-          cost: 0,
-        },
-      };
-      const end = Date.now();
-      const assistantMessage = {
-        from: 'gpt' as const,
-        value: answer,
-        timing: {
-          start: now,
-          end,
-          cost: end - now,
-        },
-      };
-
-      await updateMessages(sessionId, [
-        ...history,
-        userMessage,
-        assistantMessage,
-      ]);
-      setLocalInstructions('');
-      setAttachments([]);
-    };
 
     const followUpAutomation = buildFollowUpAutomationInstructions(
       instructions,
@@ -263,56 +228,9 @@ const ChatInput = ({
       selectedSkill && !followUpAutomation.shouldAutomate
         ? `/skill ${selectedSkill} ${followUpAutomation.instructions}`
         : followUpAutomation.instructions;
-    const interaction = followUpAutomation.shouldAutomate
-      ? {
-          mode: 'automation' as const,
-          operator: Operator.LocalComputer,
-          reason: 'confirmed pending automation',
-        }
-      : classifyInteractionForInstructions(effectiveInstructions, operator);
-
-    if (interaction.mode === 'automation') {
-      const quickTask = await api.runQuickLocalTask({
-        instructions: effectiveInstructions,
-      });
-      if (quickTask.handled) {
-        const session = await getSession(sessionId);
-        await updateSession(sessionId, {
-          name: session?.name === 'New Session' ? instructions : session?.name,
-          meta: {
-            ...(session?.meta || {}),
-            operator: Operator.LocalComputer,
-          },
-        });
-        await appendTextExchange(
-          quickTask.message || 'Completed the local task.',
-        );
-        return;
-      }
-    }
-
-    if (interaction.mode === 'direct') {
-      const session = await getSession(sessionId);
-      await updateSession(sessionId, {
-        name: session?.name === 'New Session' ? instructions : session?.name,
-        meta: {
-          ...(session?.meta || {}),
-          operator,
-        },
-      });
-
-      const answer = await api.directChat({
-        instructions,
-        history,
-      });
-      await appendTextExchange(answer);
-      return;
-    }
-
-    const routedOperator = selectOperatorForInstructions(
-      effectiveInstructions,
-      operator,
-    );
+    const routedOperator = followUpAutomation.shouldAutomate
+      ? Operator.LocalComputer
+      : operator;
 
     await updateSetting({ ...settings, operator: routedOperator });
 

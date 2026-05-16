@@ -234,6 +234,7 @@ const config: ForgeConfig = {
     extraResource: [
       './resources/app-update.yml',
       '../../extensions/neura-agent',
+      '../../third_party/hermes-agent',
     ],
     asar: {
       unpack,

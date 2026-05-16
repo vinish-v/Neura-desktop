@@ -30,6 +30,8 @@ const {
 } = require('./constants');
 const { findBrowserExecutable } = require('./browser');
 const { McpStdioClient, McpSseClient } = require('./mcpClient');
+const { PermissionEngine, redactSecrets } = require('./permissionEngine');
+const { groupArtifactsByRun, artifactMarkdown, artifactPreviewPath, writeArtifactBundle } = require('./artifactStore');
 const {
   logNeura,
   errorMessageFor,
@@ -47,11 +49,15 @@ const {
   execFileAsync,
 } = require('./utils');
 
+const localConfigKey = (section, name) => `neura.localConfig.${section}.${name}`;
+const secretConfigKey = (section, name) => `neura.secret.${section}.${name}`;
+
 class NeuraComposerProvider {
   constructor(context, statusBarItem = null) {
     this.context = context;
     this.statusBar = statusBarItem;
     this.view = undefined;
+    this.missionPanel = undefined;
     this.state = this.defaultState();
     this.config = this.readNimConfig();
     this.suggestions = [];
@@ -64,7 +70,10 @@ class NeuraComposerProvider {
     this.backgroundRuns = new Map();
     this.backgroundCancels = new Map();
     this.swarmRuns = new Map();
+    this.toolCache = new Map();
+    this.providerStats = new Map();
     this.semanticIndexTimer = null;
+    this.permissionEngine = new PermissionEngine({ workspaceRoot: this.rootPath });
     this.proposalDecoration = vscode.window.createTextEditorDecorationType({
       isWholeLine: true,
       borderWidth: '0 0 0 2px',
@@ -95,6 +104,7 @@ class NeuraComposerProvider {
       terminalCards: [],
       checkpoints: [],
       artifacts: [],
+      policyAudit: [],
       backgroundAgents: [],
       swarmMissions: [],
       mcpCards: [],
@@ -120,6 +130,7 @@ class NeuraComposerProvider {
       terminalCards: [],
       checkpoints: [],
       artifacts: [],
+      policyAudit: [],
       backgroundAgents: [],
       swarmMissions: [],
       mcpCards: [],
@@ -155,6 +166,7 @@ class NeuraComposerProvider {
     this.state.terminalCards = session.terminalCards || [];
     this.state.checkpoints = session.checkpoints || [];
     this.state.artifacts = session.artifacts || [];
+    this.state.policyAudit = session.policyAudit || [];
     this.state.backgroundAgents = session.backgroundAgents || [];
     this.state.swarmMissions = session.swarmMissions || [];
     this.state.mcpCards = session.mcpCards || [];
@@ -189,6 +201,7 @@ class NeuraComposerProvider {
       terminalCards: this.state.terminalCards || [],
       checkpoints: this.state.checkpoints || [],
       artifacts: this.state.artifacts || [],
+      policyAudit: this.state.policyAudit || [],
       backgroundAgents: this.state.backgroundAgents || [],
       swarmMissions: this.state.swarmMissions || [],
       mcpCards: this.state.mcpCards || [],
@@ -214,6 +227,7 @@ class NeuraComposerProvider {
         terminalCards: this.state.terminalCards || [],
         checkpoints: this.state.checkpoints || [],
         artifacts: this.state.artifacts || [],
+        policyAudit: this.state.policyAudit || [],
         backgroundAgents: this.state.backgroundAgents || [],
         swarmMissions: this.state.swarmMissions || [],
         mcpCards: this.state.mcpCards || [],
@@ -232,6 +246,7 @@ class NeuraComposerProvider {
     }
     this.copySessionToState(this.activeSession());
     if (!Array.isArray(this.state.artifacts)) this.state.artifacts = [];
+    if (!Array.isArray(this.state.policyAudit)) this.state.policyAudit = [];
     if (!Array.isArray(this.state.backgroundAgents)) this.state.backgroundAgents = [];
     if (!Array.isArray(this.state.swarmMissions)) this.state.swarmMissions = [];
     if (!Array.isArray(this.state.mcpCards)) this.state.mcpCards = [];
@@ -258,9 +273,14 @@ class NeuraComposerProvider {
 
   async resolveWebviewView(webviewView) {
     this.view = webviewView;
+    const localRoots = [
+      this.context.extensionUri,
+      ...(this.rootFolder ? [this.rootFolder.uri] : []),
+      ...(this.neuraDir ? [vscode.Uri.file(this.neuraDir)] : []),
+    ];
     webviewView.webview.options = {
       enableScripts: true,
-      localResourceRoots: [this.context.extensionUri],
+      localResourceRoots: localRoots,
     };
     webviewView.webview.onDidReceiveMessage((message) => {
       void this.handleMessage(message);
@@ -273,8 +293,36 @@ class NeuraComposerProvider {
     await this.refresh();
   }
 
+  async openMissionControl() {
+    if (this.missionPanel) {
+      this.missionPanel.reveal(vscode.ViewColumn.One);
+      this.missionPanel.webview.html = this.renderMissionControl();
+      return;
+    }
+    this.missionPanel = vscode.window.createWebviewPanel(
+      'neuraMissionControl',
+      'Neura Mission Control',
+      vscode.ViewColumn.One,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [
+          this.context.extensionUri,
+          ...(this.rootFolder ? [this.rootFolder.uri] : []),
+          ...(this.neuraDir ? [vscode.Uri.file(this.neuraDir)] : []),
+        ],
+      },
+    );
+    this.missionPanel.onDidDispose(() => {
+      this.missionPanel = undefined;
+    });
+    this.missionPanel.webview.onDidReceiveMessage((message) => void this.handleMessage(message));
+    this.missionPanel.webview.html = this.renderMissionControl();
+  }
+
   async loadState() {
     this.state = this.context.workspaceState.get(this.stateKey, this.defaultState());
+    this.permissionEngine = new PermissionEngine({ workspaceRoot: this.rootPath });
     this.migrateSessionsIfNeeded();
     this.state.memory = await this.loadMemory();
     if (!modeLabels[this.state.mode]) {
@@ -307,16 +355,54 @@ class NeuraComposerProvider {
     return this.state.permissionMode !== 'read';
   }
 
+  evaluatePolicy(action, resource, metadata = {}) {
+    const result = this.permissionEngine.evaluate(action, resource, metadata);
+    const entry = {
+      id: id('policy'),
+      runId: metadata.runId || this.state.activeRunId || this.state.activeSessionId || '',
+      action: result.action,
+      resource: redactSecrets(result.resource),
+      decision: result.decision,
+      reason: result.reason,
+      createdAt: nowIso(),
+    };
+    this.state.policyAudit = [entry, ...(this.state.policyAudit || [])].slice(0, 300);
+    return { ...result, auditId: entry.id };
+  }
+
+  async enforcePolicy(action, resource, metadata = {}) {
+    const decision = this.evaluatePolicy(action, resource, metadata);
+    if (decision.decision === 'deny') {
+      throw new Error(`Neura policy denied ${action}: ${decision.reason}`);
+    }
+    if (decision.decision === 'ask' && !metadata.skipPrompt) {
+      const approval = await vscode.window.showWarningMessage(
+        `Allow Neura ${action}?\n\n${resource}\n\n${decision.reason}`,
+        { modal: true },
+        'Allow Once',
+        'Deny',
+      );
+      if (approval !== 'Allow Once') {
+        decision.decision = 'deny';
+        decision.reason = 'User denied policy prompt.';
+        throw new Error(`Neura policy denied ${action}.`);
+      }
+    }
+    return decision;
+  }
+
   recordArtifact(kind, title, summary, data = {}) {
     const runId = data.runId || this.state.activeRunId || this.state.activeSessionId || 'workspace';
+    const redactedData = redactSecrets(data);
     const artifact = {
       id: id('artifact'),
       runId,
       sequence: (this.state.artifacts || []).filter((item) => item.runId === runId).length + 1,
       kind: String(kind || 'note'),
       title: String(title || 'Artifact').slice(0, 140),
-      summary: String(summary || '').slice(0, 800),
-      data,
+      summary: redactSecrets(String(summary || '').slice(0, 800)),
+      data: redactedData,
+      comments: [],
       createdAt: nowIso(),
     };
     this.state.artifacts = [artifact, ...(this.state.artifacts || [])].slice(0, 80);
@@ -334,17 +420,17 @@ class NeuraComposerProvider {
     await fs.mkdir(bundleDir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
     const baseName = `${stamp}-${idValue.replace(/[^a-zA-Z0-9_.-]+/g, '-')}`;
-    const jsonPath = path.join(bundleDir, `${baseName}.json`);
-    const mdPath = path.join(bundleDir, `${baseName}.md`);
     const proposals = (this.state.proposals || []).filter((proposal) => artifacts.some((artifact) => artifact.data?.proposalId === proposal.id));
     const terminals = (this.state.terminalCards || []).filter((card) => artifacts.some((artifact) => artifact.data?.terminalId === card.id));
     const previews = artifacts.filter((artifact) => artifact.kind === 'preview');
+    const browserArtifacts = artifacts.filter((artifact) => artifact.kind === 'browser-agent' || artifact.kind === 'browser' || artifact.kind === 'browser-verify');
     const bundle = {
       id: idValue,
       project: this.projectName,
       rootPath: this.rootPath,
       createdAt: nowIso(),
       artifacts,
+      policyAudit: (this.state.policyAudit || []).filter((entry) => entry.runId === idValue || !entry.runId).slice(-200),
       proposals: proposals.map((proposal) => ({
         id: proposal.id,
         summary: proposal.summary,
@@ -357,10 +443,11 @@ class NeuraComposerProvider {
         command: card.command,
         status: card.status,
         exitCode: card.exitCode,
-        stdoutTail: String(card.stdout || '').slice(-6000),
-        stderrTail: String(card.stderr || '').slice(-6000),
+        stdoutTail: redactSecrets(String(card.stdout || '').slice(-6000)),
+        stderrTail: redactSecrets(String(card.stderr || '').slice(-6000)),
       })),
       previews: previews.map((artifact) => artifact.data || {}),
+      browserEvidence: browserArtifacts.map((artifact) => artifact.data || {}),
     };
     const markdown = [
       `# Neura Proof of Work`,
@@ -371,13 +458,7 @@ class NeuraComposerProvider {
       `- Workspace: ${this.rootPath}`,
       '',
       `## Timeline`,
-      ...artifacts.map((artifact) => [
-        '',
-        `### ${artifact.sequence}. ${artifact.title}`,
-        `- Kind: ${artifact.kind}`,
-        `- Time: ${artifact.createdAt}`,
-        artifact.summary ? `- Summary: ${artifact.summary}` : '',
-      ].filter(Boolean).join('\n')),
+      ...artifacts.map((artifact) => `\n${artifactMarkdown(artifact)}`),
       '',
       `## Proposals`,
       proposals.length
@@ -394,13 +475,28 @@ class NeuraComposerProvider {
         ? previews.map((artifact) => `- ${artifact.title}: ${artifact.summary}`).join('\n')
         : 'No preview evidence recorded.',
       '',
+      `## Browser Agent Evidence`,
+      browserArtifacts.length
+        ? browserArtifacts.map((artifact) => [
+          `- ${artifact.title}: ${artifact.summary}`,
+          artifact.data?.screenshotPath ? `  - Screenshot: ${artifact.data.screenshotPath}` : '',
+          artifact.data?.domPath ? `  - DOM: ${artifact.data.domPath}` : '',
+          artifact.data?.recordingPath ? `  - Recording: ${artifact.data.recordingPath}` : '',
+        ].filter(Boolean).join('\n')).join('\n')
+        : 'No browser agent evidence recorded.',
+      '',
+      `## Policy Audit`,
+      bundle.policyAudit.length
+        ? bundle.policyAudit.map((entry) => `- ${entry.createdAt}: ${entry.decision} ${entry.action} ${entry.resource} (${entry.reason})`).join('\n')
+        : 'No policy decisions recorded.',
+      '',
     ].join('\n');
-    await fs.writeFile(jsonPath, `${JSON.stringify(bundle, null, 2)}\n`, 'utf8');
-    await fs.writeFile(mdPath, markdown, 'utf8');
+    const { jsonPath, mdPath, htmlPath } = await writeArtifactBundle({ bundleDir, baseName, bundle, markdown });
     const artifact = this.recordArtifact('proof-bundle', 'Proof of work bundle', `Exported ${artifacts.length} artifact(s) for ${idValue}.`, {
       runId: idValue,
       jsonPath,
       mdPath,
+      htmlPath,
     });
     await this.saveState();
     return { artifact, jsonPath, mdPath };
@@ -408,11 +504,59 @@ class NeuraComposerProvider {
 
   async exportProofBundle() {
     const result = await this.writeProofBundle();
-    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(result.mdPath));
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(result.htmlPath || result.mdPath));
     await vscode.window.showTextDocument(document, { preview: false });
-    await vscode.window.showInformationMessage(`Neura proof bundle exported: ${result.mdPath}`);
+    await vscode.window.showInformationMessage(`Neura proof bundle exported: ${result.htmlPath || result.mdPath}`);
     this.renderIfVisible();
     return result;
+  }
+
+  async addArtifactComment(artifactId) {
+    const artifact = (this.state.artifacts || []).find((item) => item.id === artifactId);
+    if (!artifact) throw new Error('Artifact was not found.');
+    const text = await vscode.window.showInputBox({
+      title: `Comment on ${artifact.title}`,
+      prompt: 'Add reviewer/user context for this trust artifact.',
+      ignoreFocusOut: true,
+      validateInput: (value) => (String(value || '').trim() ? undefined : 'Enter a comment.'),
+    });
+    if (!text) return;
+    artifact.comments = [
+      ...(artifact.comments || []),
+      { id: id('comment'), text: redactSecrets(text.trim()).slice(0, 600), createdAt: nowIso() },
+    ].slice(-20);
+    this.recordArtifact('artifact-comment', `Comment: ${artifact.title}`, text.trim(), {
+      artifactId,
+      targetKind: artifact.kind,
+      targetRunId: artifact.runId,
+    });
+    await this.saveState();
+    this.renderIfVisible();
+  }
+
+  async openArtifactFile(artifactId) {
+    const artifact = (this.state.artifacts || []).find((item) => item.id === artifactId);
+    const target = artifact?.data?.htmlPath || artifact?.data?.mdPath || artifact?.data?.jsonPath || artifactPreviewPath(artifact);
+    if (!target) {
+      await vscode.window.showInformationMessage('This artifact does not have a local file to open.');
+      return;
+    }
+    const uri = vscode.Uri.file(target);
+    if (/\.(png|jpg|jpeg|webp|gif)$/i.test(target)) {
+      await vscode.commands.executeCommand('vscode.open', uri);
+      return;
+    }
+    const document = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(document, { preview: false });
+  }
+
+  webviewFileUri(filePath) {
+    if (!filePath || !this.view?.webview) return '';
+    try {
+      return this.view.webview.asWebviewUri(vscode.Uri.file(filePath)).toString();
+    } catch {
+      return '';
+    }
   }
 
   async saveState() {
@@ -461,6 +605,44 @@ class NeuraComposerProvider {
     return this.neuraDir ? path.join(this.neuraDir, 'neura-vector-index.json') : '';
   }
 
+  workspaceRoots() {
+    const folders = vscode.workspace.workspaceFolders || [];
+    return folders.map((folder) => ({
+      name: folder.name,
+      uri: folder.uri,
+      path: folder.uri.fsPath,
+      id: hashKey(folder.uri.fsPath).slice(0, 12),
+    }));
+  }
+
+  rootForPath(filePath) {
+    const roots = this.workspaceRoots();
+    const normalized = path.resolve(filePath);
+    return roots
+      .filter((root) => {
+        const relative = path.relative(root.path, normalized);
+        return !relative.startsWith('..') && !path.isAbsolute(relative);
+      })
+      .sort((a, b) => b.path.length - a.path.length)[0] || null;
+  }
+
+  indexedPathForUri(uri) {
+    const root = this.rootForPath(uri.fsPath) || this.workspaceRoots()[0];
+    const relative = root ? normalizeSlashes(path.relative(root.path, uri.fsPath)) : normalizeSlashes(path.relative(this.rootPath, uri.fsPath));
+    const multiRoot = this.workspaceRoots().length > 1;
+    return {
+      root,
+      workspacePath: relative,
+      filePath: multiRoot && root ? `${root.name}/${relative}` : relative,
+    };
+  }
+
+  get sharedSemanticIndexPath() {
+    const configured = String(vscode.workspace.getConfiguration('neura.index').get('sharedPath') || process.env.NEURA_SHARED_INDEX_PATH || '').trim();
+    if (!configured) return '';
+    return path.isAbsolute(configured) ? configured : path.join(this.rootPath || process.cwd(), configured);
+  }
+
   get pluginTrustPath() {
     return this.neuraDir ? path.join(this.neuraDir, 'plugin-trust.json') : '';
   }
@@ -506,7 +688,7 @@ class NeuraComposerProvider {
     const decorations = [
       {
         range: new vscode.Range(0, 0, lastLine, editor.document.lineAt(lastLine).text.length),
-        hoverMessage: new vscode.MarkdownString(`Neura has ${pending.length} pending proposed edit(s) for \`${relative}\`. Open the Neura panel to review, diff, accept, or reject.`),
+        hoverMessage: new vscode.MarkdownString(`Neura has ${pending.length} pending proposed edit(s) for \`${relative}\`.\n\nCommands: \`Neura: Review Pending Edit\`, \`Neura: Accept Current File\`, \`Neura: Reject Current File\`, \`Neura: Reapply Current File\`.`),
       },
     ];
     editor.setDecorations(this.proposalDecoration, decorations);
@@ -526,17 +708,58 @@ class NeuraComposerProvider {
     return Boolean(this.pendingProposalForFile(relative));
   }
 
+  async currentFilePendingEdit() {
+    const filePath = await this.activeEditorFile();
+    if (!filePath) throw new Error('Open a workspace file with a pending Neura edit first.');
+    const proposal = this.pendingProposalForFile(filePath);
+    const edit = proposal?.edits?.find((item) => item.filePath === filePath && item.status === 'proposed');
+    if (!proposal || !edit) throw new Error('No pending Neura edit was found for the active file.');
+    return { proposal, edit, filePath };
+  }
+
+  localConfig(section, name) {
+    const key = localConfigKey(section, name);
+    return this.context.workspaceState.get(key, this.context.globalState.get(key));
+  }
+
+  async readSecretConfig(section, name) {
+    return (await this.context.secrets.get(secretConfigKey(section, name))) || '';
+  }
+
+  async updateConfigOrLocal(section, name, value, target) {
+    const normalized = Array.isArray(value) ? value : String(value || '').trim();
+    if (!Array.isArray(normalized) && !normalized) return;
+    try {
+      await vscode.workspace.getConfiguration(section).update(name, normalized, target);
+    } catch (error) {
+      await this.context.workspaceState.update(localConfigKey(section, name), normalized);
+      logNeura('Stored Neura setting in extension workspace storage', {
+        section,
+        name,
+        reason: errorMessageFor(error),
+      });
+    }
+  }
+
   async readNimConfig() {
     const config = vscode.workspace.getConfiguration('neura.nim');
+    const providerConfig = vscode.workspace.getConfiguration('neura.provider');
+    const openRouterConfig = vscode.workspace.getConfiguration('neura.openrouter');
+    const ollamaConfig = vscode.workspace.getConfiguration('neura.ollama');
     const persisted = await this.readPersistedNeuraSettings();
-    const baseUrl =
+    const openRouterSecret = await this.readSecretConfig('neura.openrouter', 'apiKey');
+    const ollamaSecret = await this.readSecretConfig('neura.ollama', 'apiKey');
+    const nimSecret = await this.readSecretConfig('neura.nim', 'apiKey');
+    const nimBaseUrl =
       config.get('baseUrl') ||
+      this.localConfig('neura.nim', 'baseUrl') ||
       persisted.plannerBaseUrl ||
       persisted.vlmBaseUrl ||
       process.env.PLANNER_BASE_URL ||
       process.env.NVIDIA_NIM_BASE_URL ||
       'https://integrate.api.nvidia.com/v1';
-    const apiKey =
+    const nimApiKey =
+      nimSecret ||
       config.get('apiKey') ||
       persisted.plannerApiKey ||
       persisted.vlmApiKey ||
@@ -544,21 +767,83 @@ class NeuraComposerProvider {
       process.env.NVIDIA_NIM_API_KEY ||
       process.env.NVIDIA_API_KEY ||
       '';
-    const model =
+    const nimModel =
       config.get('model') ||
+      this.localConfig('neura.nim', 'model') ||
       persisted.plannerModelName ||
       process.env.PLANNER_MODEL ||
       process.env.NVIDIA_NIM_MODEL ||
       'nvidia/nemotron-3-nano-30b-a3b';
+    const openRouterBaseUrl = openRouterConfig.get('baseUrl') || this.localConfig('neura.openrouter', 'baseUrl') || process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
+    const openRouterApiKey = openRouterSecret || openRouterConfig.get('apiKey') || process.env.OPENROUTER_API_KEY || '';
+    const openRouterModel = openRouterConfig.get('model') || this.localConfig('neura.openrouter', 'model') || process.env.OPENROUTER_MODEL || '';
+    const ollamaBaseUrl = ollamaConfig.get('baseUrl') || this.localConfig('neura.ollama', 'baseUrl') || process.env.OLLAMA_BASE_URL || 'https://ollama.com';
+    const ollamaApiKey = ollamaSecret || ollamaConfig.get('apiKey') || process.env.OLLAMA_API_KEY || process.env.OLLAMA_CLOUD_API_KEY || '';
+    const ollamaModel = ollamaConfig.get('model') || this.localConfig('neura.ollama', 'model') || process.env.OLLAMA_MODEL || '';
+    const providerOrderRaw = providerConfig.get('order') || this.localConfig('neura.provider', 'order') || process.env.NEURA_PROVIDER_ORDER || ['openrouter', 'ollama', 'nim'];
+    const providerOrder = (Array.isArray(providerOrderRaw) ? providerOrderRaw : String(providerOrderRaw).split(','))
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter(Boolean);
+    const openRouterReferer = openRouterConfig.get('httpReferer') || process.env.OPENROUTER_HTTP_REFERER || 'https://neura.local';
+    const openRouterTitle = openRouterConfig.get('appTitle') || process.env.OPENROUTER_APP_TITLE || 'Neura IDE';
+    const isLocalOllama = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(String(ollamaBaseUrl || ''));
+    const isOllamaOpenAiCompat = /\/v1\/?$/i.test(String(ollamaBaseUrl || '').replace(/\/+$/, ''));
+    const providersById = {
+      openrouter: {
+        id: 'openrouter',
+        label: 'OpenRouter',
+        baseUrl: String(openRouterBaseUrl || '').replace(/\/+$/, ''),
+        apiKey: String(openRouterApiKey || ''),
+        model: String(openRouterModel || ''),
+        headers: {
+          'HTTP-Referer': String(openRouterReferer || ''),
+          'X-Title': String(openRouterTitle || 'Neura IDE'),
+        },
+        configured: Boolean(openRouterApiKey && openRouterBaseUrl && openRouterModel),
+      },
+      ollama: {
+        id: 'ollama',
+        label: isLocalOllama ? 'Ollama Local' : 'Ollama Cloud',
+        baseUrl: String(ollamaBaseUrl || '').replace(/\/+$/, ''),
+        apiKey: String(ollamaApiKey || ''),
+        model: String(ollamaModel || ''),
+        headers: {},
+        apiStyle: isOllamaOpenAiCompat ? 'openai' : 'ollama',
+        configured: Boolean(ollamaBaseUrl && ollamaModel && (isLocalOllama || ollamaApiKey)),
+      },
+      nim: {
+        id: 'nim',
+        label: 'NVIDIA NIM',
+        baseUrl: String(nimBaseUrl || '').replace(/\/+$/, ''),
+        apiKey: String(nimApiKey || ''),
+        model: String(nimModel || ''),
+        headers: {},
+        configured: Boolean(nimApiKey && nimBaseUrl && nimModel),
+      },
+    };
+    const providers = providerOrder
+      .map((providerId) => providersById[providerId])
+      .filter((provider) => provider?.configured);
+    const activeProvider = providers[0] || providersById.nim;
     const timeoutMs = Number(config.get('timeoutMs') || process.env.NEURA_NIM_TIMEOUT_MS || defaultNimTimeoutMs);
     const embeddingsEnabled = Boolean(config.get('embeddings.enabled') || process.env.NEURA_NIM_EMBEDDINGS === '1');
     const embeddingModel = String(config.get('embeddings.model') || process.env.NVIDIA_NIM_EMBEDDING_MODEL || '').trim();
-    const embeddingBaseUrl = String(config.get('embeddings.baseUrl') || process.env.NVIDIA_NIM_EMBEDDING_BASE_URL || baseUrl || '').replace(/\/+$/, '');
-    const embeddingApiKey = String(config.get('embeddings.apiKey') || process.env.NVIDIA_NIM_EMBEDDING_API_KEY || apiKey || '');
+    const embeddingBaseUrl = String(config.get('embeddings.baseUrl') || process.env.NVIDIA_NIM_EMBEDDING_BASE_URL || nimBaseUrl || '').replace(/\/+$/, '');
+    const embeddingApiKey = String(config.get('embeddings.apiKey') || process.env.NVIDIA_NIM_EMBEDDING_API_KEY || nimApiKey || '');
     return {
-      baseUrl: String(baseUrl || '').replace(/\/+$/, ''),
-      apiKey: String(apiKey || ''),
-      model: String(model || ''),
+      provider: activeProvider?.id || 'nim',
+      providerLabel: activeProvider?.label || 'NVIDIA NIM',
+      providerOrder,
+      providers,
+      providerStatus: Object.fromEntries(Object.entries(providersById).map(([key, provider]) => [key, {
+        configured: provider.configured,
+        baseUrl: provider.baseUrl,
+        model: provider.model,
+        label: provider.label,
+      }])),
+      baseUrl: activeProvider?.baseUrl || String(nimBaseUrl || '').replace(/\/+$/, ''),
+      apiKey: activeProvider?.apiKey || String(nimApiKey || ''),
+      model: activeProvider?.model || String(nimModel || ''),
       timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : defaultNimTimeoutMs,
       embeddings: {
         enabled: embeddingsEnabled,
@@ -567,8 +852,260 @@ class NeuraComposerProvider {
         model: embeddingModel,
         configured: Boolean(embeddingsEnabled && embeddingBaseUrl && embeddingApiKey && embeddingModel),
       },
-      configured: Boolean(apiKey && baseUrl && model),
+      configured: providers.length > 0,
     };
+  }
+
+  providerHeaders(provider) {
+    const headers = {
+      'content-type': 'application/json',
+      ...(provider.headers || {}),
+    };
+    if (provider.apiKey) {
+      headers.authorization = `Bearer ${provider.apiKey}`;
+    }
+    return headers;
+  }
+
+  normalizeOllamaMessages(messages = []) {
+    return (messages || []).map((message) => {
+      const content = Array.isArray(message.content)
+        ? message.content
+            .map((part) => {
+              if (typeof part === 'string') return part;
+              if (part?.type === 'text') return part.text || '';
+              return '';
+            })
+            .filter(Boolean)
+            .join('\n')
+        : String(message.content || '');
+      return {
+        role: ['system', 'user', 'assistant'].includes(message.role) ? message.role : 'user',
+        content,
+      };
+    });
+  }
+
+  requestBodyForProvider(provider, body, options = {}) {
+    if (provider.apiStyle === 'ollama') {
+      return {
+        model: provider.model,
+        messages: this.normalizeOllamaMessages(body.messages),
+        stream: Boolean(options.stream),
+        options: {
+          ...(Number.isFinite(body.temperature) ? { temperature: body.temperature } : {}),
+          ...(Number.isFinite(body.max_tokens) ? { num_predict: body.max_tokens } : {}),
+        },
+      };
+    }
+    return {
+      ...body,
+      model: provider.model,
+      ...(options.stream ? { stream: true } : {}),
+    };
+  }
+
+  normalizeProviderPayload(provider, payload) {
+    if (provider.apiStyle === 'ollama' && payload?.message) {
+      return {
+        choices: [{
+          index: 0,
+          finish_reason: payload.done_reason || (payload.done ? 'stop' : ''),
+          message: payload.message,
+        }],
+        model: payload.model || provider.model,
+        usage: {
+          prompt_tokens: payload.prompt_eval_count || 0,
+          completion_tokens: payload.eval_count || 0,
+          total_tokens: Number(payload.prompt_eval_count || 0) + Number(payload.eval_count || 0),
+        },
+      };
+    }
+    return payload;
+  }
+
+  async readProviderResponseText(response, provider, requestMeta = {}) {
+    const canStream = Boolean(requestMeta.stream && response.body);
+    if (!canStream) return response.text();
+    const decoder = new TextDecoder();
+    const reader = response.body.getReader();
+    let buffer = '';
+    let rawBody = '';
+    let content = '';
+    const emit = (delta) => {
+      if (!delta) return;
+      content += delta;
+      if (typeof requestMeta.onProgress === 'function') {
+        try {
+          requestMeta.onProgress(delta, content);
+        } catch {}
+      }
+    };
+    const handleLine = (line) => {
+      const trimmed = String(line || '').trim();
+      if (!trimmed) return;
+      if (provider.apiStyle === 'ollama') {
+        rawBody += `${trimmed}\n`;
+        try {
+          const payload = JSON.parse(trimmed);
+          emit(payload.message?.content || payload.response || '');
+        } catch {}
+        return;
+      }
+      if (!trimmed.startsWith('data:')) return;
+      const data = trimmed.slice(5).trim();
+      if (!data || data === '[DONE]') return;
+      rawBody += `${data}\n`;
+      try {
+        const payload = JSON.parse(data);
+        const choice = payload.choices?.[0] || {};
+        const delta = choice.delta || choice.message || {};
+        emit(delta.content || delta.reasoning_content || delta.reasoning || '');
+      } catch {}
+    };
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
+      for (const line of lines) handleLine(line);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      for (const line of buffer.split(/\r?\n/)) handleLine(line);
+    }
+    if (!content && rawBody.trim()) return rawBody;
+    return JSON.stringify({
+      choices: [{
+        index: 0,
+        finish_reason: 'stop',
+        message: { role: 'assistant', content },
+      }],
+      model: provider.model,
+      usage: {},
+    });
+  }
+
+  cacheGet(key, ttlMs = 5000) {
+    const entry = this.toolCache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.createdAt > ttlMs) {
+      this.toolCache.delete(key);
+      return null;
+    }
+    return entry.value;
+  }
+
+  cacheSet(key, value) {
+    this.toolCache.set(key, { value, createdAt: Date.now() });
+    if (this.toolCache.size > 80) {
+      for (const staleKey of [...this.toolCache.keys()].slice(0, this.toolCache.size - 80)) {
+        this.toolCache.delete(staleKey);
+      }
+    }
+    return value;
+  }
+
+  async cachedTool(key, ttlMs, factory) {
+    const cached = this.cacheGet(key, ttlMs);
+    if (cached) return { value: cached, cached: true };
+    const value = await factory();
+    this.cacheSet(key, value);
+    return { value, cached: false };
+  }
+
+  rememberProviderLatency(provider, ms, ok) {
+    const idValue = provider?.id || provider?.label || 'provider';
+    const previous = this.providerStats.get(idValue) || { count: 0, failures: 0, avgMs: 0 };
+    const count = previous.count + 1;
+    this.providerStats.set(idValue, {
+      count,
+      failures: previous.failures + (ok ? 0 : 1),
+      avgMs: Math.round(previous.avgMs ? (previous.avgMs * 0.7 + ms * 0.3) : ms),
+      lastMs: ms,
+      updatedAt: nowIso(),
+    });
+  }
+
+  async requestChatCompletion(body, requestMeta = {}) {
+    const providers = Array.isArray(this.config.providers) && this.config.providers.length
+      ? this.config.providers
+      : [{
+          id: this.config.provider || 'nim',
+          label: this.config.providerLabel || 'NVIDIA NIM',
+          baseUrl: this.config.baseUrl,
+          apiKey: this.config.apiKey,
+          model: this.config.model,
+          headers: {},
+        }];
+    const errors = [];
+    for (const provider of providers) {
+      const startedAt = Date.now();
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
+      const meta = {
+        ...requestMeta,
+        provider: provider.id,
+        providerLabel: provider.label,
+        model: provider.model,
+        baseUrl: provider.baseUrl,
+      };
+      try {
+        logNeura('Chat completion provider attempt started', meta);
+        this.recordArtifact('model-routing', `Model call: ${provider.label}`, `Started ${requestMeta.mode || 'chat'} request with ${provider.model}.`, {
+          runId: this.state.activeRunId,
+          provider: provider.id,
+          model: provider.model,
+          mode: requestMeta.mode || '',
+        });
+        const endpoint = provider.apiStyle === 'ollama'
+          ? `${provider.baseUrl}/api/chat`
+          : `${provider.baseUrl}/chat/completions`;
+        const stream = Boolean(requestMeta.stream);
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: this.providerHeaders(provider),
+          signal: controller.signal,
+          body: JSON.stringify(this.requestBodyForProvider(provider, body, { stream })),
+        });
+        const rawBody = await this.readProviderResponseText(response, provider, requestMeta);
+        let payload = {};
+        try {
+          payload = rawBody ? JSON.parse(rawBody) : {};
+        } catch {
+          payload = {};
+        }
+        if (!response.ok) {
+          const providerMessage = payload.error?.message || rawBody || 'No provider error body.';
+          errors.push(`${provider.label} HTTP ${response.status}: ${String(providerMessage).slice(0, 280)}`);
+          logNeura('Chat completion provider attempt failed', {
+            ...meta,
+            status: response.status,
+            providerMessage: String(providerMessage).slice(0, 500),
+          });
+          this.rememberProviderLatency(provider, Date.now() - startedAt, false);
+          continue;
+        }
+        const normalizedPayload = this.normalizeProviderPayload(provider, payload);
+        this.rememberProviderLatency(provider, Date.now() - startedAt, true);
+        logNeura('Chat completion provider attempt completed', meta);
+        return { response, payload: normalizedPayload, rawBody, provider };
+      } catch (error) {
+        const message = error?.name === 'AbortError'
+          ? `${provider.label} timed out after ${Math.round(this.config.timeoutMs / 1000)}s`
+          : `${provider.label}: ${errorMessageFor(error)}`;
+        errors.push(message);
+        logNeura('Chat completion provider attempt error', {
+          ...meta,
+          error: message,
+        });
+        this.rememberProviderLatency(provider, Date.now() - startedAt, false);
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    throw new Error(`All configured AI providers failed. Tried ${providers.map((provider) => provider.label).join(' -> ')}. ${errors.join(' | ')}`);
   }
 
   async readPersistedNeuraSettings() {
@@ -639,6 +1176,7 @@ class NeuraComposerProvider {
       if (command === 'plan') mode = 'plan';
       if (command === 'edit' || command === 'fix') mode = 'agent';
       if (command === 'build' || command === 'app') mode = 'builder';
+      if (command === 'ship' || command === 'deploy' || command === 'release' || command === 'production') mode = 'ship';
       if (command === 'reasoning' || command === 'think') {
         if (reasoningLabels[value]) reasoning = value;
         cleaned = cleaned.replace(/^\/[a-z]+(?:\s+[a-z]+)?/i, '').trim();
@@ -680,14 +1218,20 @@ class NeuraComposerProvider {
     if (parsed.command === 'build' || parsed.command === 'app') {
       return { allowed: true, intent: 'build', mode: 'builder' };
     }
+    if (parsed.command === 'ship' || parsed.command === 'deploy' || parsed.command === 'release' || parsed.command === 'production') {
+      return { allowed: true, intent: 'ship', mode: 'ship' };
+    }
     if (parsed.command === 'explain' || parsed.command === 'ask') {
       return { allowed: true, intent: 'explain', mode: 'ask' };
     }
 
-    if (/\b(run|serve|start|open|preview|launch)\b.*\b(site|website|app|application|project|preview)\b/i.test(text)) {
-      return { allowed: true, intent: 'run', mode: 'agent' };
+    if (/\b(ship|deploy|release|publish|production|prod|launch)\b/i.test(text) || /\b(production[-\s]?ready|go live|ready to ship|shipping checklist)\b/i.test(text)) {
+      if (/\b(build|create|generate|scaffold|make|start|implement)\b.*\b(app|application|site|website|page|dashboard|landing|ui|form|component|tool|project|todo|to-do|list)\b/i.test(text)) {
+        return { allowed: true, intent: 'build', mode: 'builder' };
+      }
+      return { allowed: true, intent: 'ship', mode: 'ship' };
     }
-    if (/\b(build|create|generate|scaffold|make|start)\b.*\b(app|application|site|website|page|dashboard|ui|form|component|tool|project|todo|to-do|list)\b/i.test(text)) {
+    if (/\b(build|create|generate|scaffold|make|start|implement)\b.*\b(app|application|site|website|page|dashboard|landing|ui|form|component|tool|project|todo|to-do|list)\b/i.test(text)) {
       return { allowed: true, intent: 'build', mode: 'builder' };
     }
     if (/\b(create|make|build|generate|implement)\b/i.test(text) && /\b(notes?|todo|to-do|calculator|timer|counter|weather|chat|kanban|blog|portfolio|landing|dashboard)\b/i.test(text)) {
@@ -695,6 +1239,9 @@ class NeuraComposerProvider {
     }
     if (/\b(todo\s+list|to-do\s+list)\b/i.test(text) && /\b(create|make|build|generate|implement)\b/i.test(text)) {
       return { allowed: true, intent: 'build', mode: 'builder' };
+    }
+    if (/\b(run|serve|start|open|preview|launch)\b.*\b(site|website|app|application|project|preview)\b/i.test(text)) {
+      return { allowed: true, intent: 'run', mode: 'agent' };
     }
     if (/\b(plan|approach|steps|architecture|design)\b/i.test(text)) {
       return { allowed: true, intent: 'plan', mode: 'plan' };
@@ -867,8 +1414,10 @@ class NeuraComposerProvider {
 
   agenticSystemPrompt(mode) {
     const editableInstruction =
-      mode === 'builder'
-        ? 'You are building or extending an app/site. A final answer without file edits is invalid unless you ask a blocking question.'
+      mode === 'ship'
+        ? 'You are preparing a production-ready release. A final answer must include production verification, preview, packaging, or deploy command proposals, and must include file edits when deployment/config/readiness files are missing.'
+        : mode === 'builder'
+        ? 'You are building or extending a production-ready app/site. A final answer without real file edits plus verification/preview command proposals is invalid unless you ask a blocking question.'
         : 'You are editing an existing codebase. A final answer should include file edits or command proposals unless the task is only diagnostic.';
     const toolLines = agentTools.map((tool) => `- ${tool.action}: args ${tool.args} - ${tool.description}`);
     return [
@@ -880,8 +1429,14 @@ class NeuraComposerProvider {
       ...toolLines,
       '- ask_user: args {"message":"why blocked","questions":["question"]}',
       '- finish: args {"message":"summary","todos":[{"title":"task","rationale":"why","status":"pending"}],"edits":[{"operation":"create|update|delete","filePath":"relative/path","content":"full file content","rationale":"why"}],"commands":[{"command":"shell command","purpose":"why"}],"preview":{"command":"shell command","url":"http://localhost:port"},"referencedFiles":["path"]}',
+      'You may also return {"actions":[...]} or action "tool_batch" to run independent observation tools in the same step.',
+      'Use inspect_package_scripts before proposing npm/pnpm/yarn commands. Use git_status before final edits when touching an existing repo.',
+      'Use production_profile before finishing Build or Ship mode. Build output must be production-ready by default, not a prototype.',
+      'Build and Ship modes should propose a clear preflight sequence: install if needed, lint/typecheck/test/build, preview/browser verification, and deploy/dry-run commands when a deploy target exists.',
+      'For production readiness, add or repair real files only when appropriate: package scripts, netlify.toml, vercel.json, Dockerfile, .env.example, GitHub Actions CI, README deploy notes, or accessibility/responsive UI files. Never invent secret values.',
+      'Use run_command only for verification in Full Auto mode. In all other permission modes, include terminal commands in finish.commands for approval.',
       'Use read_file/search before changing existing files when the workspace is not empty.',
-      'For simple static apps, produce complete index.html, styles.css, and app.js edits. Use full-file content for create/update.',
+      'For simple static apps, produce complete index.html, styles.css, and app.js edits with responsive layout, accessible controls, useful empty/error states, durable local state when relevant, and a preview command. Use full-file content for create/update.',
       'If components.json is present, use shadcn_info before proposing shadcn/ui changes. Prefer official shadcn CLI commands as proposed terminal commands instead of inventing registry internals.',
       'Commands are proposals only; the UI asks permission before running unless Full Auto is selected.',
       'Read Only permission forbids edits and command proposals. Ask Permission modes still allow proposals, but the user must approve before writes or commands run.',
@@ -898,48 +1453,43 @@ class NeuraComposerProvider {
     ].join('\n');
   }
 
-  async callNimAgentAction(messages, mode, stepIndex) {
+  async callNimAgentAction(messages, mode, stepIndex, thinkingMessage = null, currentSteps = [], taskGraph = null) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
+    let lastProgressAt = 0;
     const requestMeta = {
       mode: `${mode}-agent-step`,
       model: this.config.model,
+      provider: this.config.provider,
       baseUrl: this.config.baseUrl,
       timeoutMs: this.config.timeoutMs,
       stepIndex,
+      stream: true,
+      onProgress: (_delta, fullText) => {
+        if (!thinkingMessage || Date.now() - lastProgressAt < 700) return;
+        lastProgressAt = Date.now();
+        thinkingMessage.content = JSON.stringify({
+          kind: 'thinking',
+          status: 'running',
+          title: 'Thinking...',
+          text: String(fullText || '').slice(-1200) || `Step ${stepIndex}: receiving model response.`,
+          steps: currentSteps,
+          taskGraph,
+        });
+        this.renderIfVisible(true);
+      },
     };
     logNeura('Agent step request started', requestMeta);
     try {
-      const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.config.apiKey}`,
-          'content-type': 'application/json',
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: this.config.model,
-          temperature: 0.12,
-          max_tokens: 4500,
-          messages,
-        }),
-      });
-      const rawBody = await response.text();
-      let payload = {};
-      try {
-        payload = rawBody ? JSON.parse(rawBody) : {};
-      } catch {
-        payload = {};
-      }
-      if (!response.ok) {
-        const providerMessage = payload.error?.message || rawBody || 'No provider error body.';
-        logNeura('Agent step request failed', {
-          ...requestMeta,
-          status: response.status,
-          providerMessage: String(providerMessage).slice(0, 500),
-        });
-        throw new Error(`NVIDIA NIM returned HTTP ${response.status}: ${providerMessage}`);
-      }
+      const { payload, rawBody, provider } = await this.requestChatCompletion({
+        temperature: 0.12,
+        max_tokens: 4500,
+        messages,
+      }, requestMeta);
+      requestMeta.provider = provider.id;
+      requestMeta.providerLabel = provider.label;
+      requestMeta.model = provider.model;
+      void rawBody;
       const choice = payload.choices?.[0] || {};
       const message = choice.message || {};
       const content = typeof message.content === 'string' ? message.content : '';
@@ -952,8 +1502,8 @@ class NeuraComposerProvider {
       if (!content) {
         throw new Error(
           reasoningText
-            ? `NVIDIA NIM returned reasoning but no agent action for ${this.config.model}.`
-            : `NVIDIA NIM returned an empty agent action for ${this.config.model}.`,
+            ? `${provider.label} returned reasoning but no agent action for ${provider.model}.`
+            : `${provider.label} returned an empty agent action for ${provider.model}.`,
         );
       }
       const action = parseJsonObject(content);
@@ -970,7 +1520,7 @@ class NeuraComposerProvider {
       });
       if (error?.name === 'AbortError') {
         throw new Error(
-          `NVIDIA NIM did not return an agent step within ${Math.round(this.config.timeoutMs / 1000)}s for ${this.config.model}.`,
+          `No AI provider returned an agent step within the configured timeout. Tried ${this.config.providers?.map((provider) => provider.label).join(' -> ') || this.config.providerLabel || 'the active provider'}.`,
         );
       }
       throw error;
@@ -991,8 +1541,22 @@ class NeuraComposerProvider {
       question: 'ask_user',
       ask: 'ask_user',
       final: 'finish',
+      done: 'finish',
       propose_edits: 'finish',
       write_files: 'finish',
+      package_scripts: 'inspect_package_scripts',
+      scripts: 'inspect_package_scripts',
+      production: 'production_profile',
+      production_ready: 'production_profile',
+      readiness: 'production_profile',
+      deploy_profile: 'production_profile',
+      shipping: 'production_profile',
+      status: 'git_status',
+      shell: 'run_command',
+      terminal: 'run_command',
+      command: 'run_command',
+      batch: 'tool_batch',
+      tools: 'tool_batch',
     };
     return {
       thought: String(rawAction?.thought || rawAction?.message || '').slice(0, 500),
@@ -1001,15 +1565,102 @@ class NeuraComposerProvider {
     };
   }
 
+  normalizeAgentActions(rawAction) {
+    const candidates = Array.isArray(rawAction?.actions)
+      ? rawAction.actions
+      : Array.isArray(rawAction?.toolCalls)
+        ? rawAction.toolCalls
+        : Array.isArray(rawAction?.tool_calls)
+          ? rawAction.tool_calls
+          : null;
+    if (candidates?.length) {
+      return candidates.slice(0, 6).map((item) => this.normalizeAgentAction(item));
+    }
+    const normalized = this.normalizeAgentAction(rawAction);
+    if (normalized.action === 'tool_batch') {
+      const actions = Array.isArray(normalized.args?.actions) ? normalized.args.actions : [];
+      return actions.slice(0, 6).map((item) => this.normalizeAgentAction(item));
+    }
+    return [normalized];
+  }
+
+  isDangerousCommand(command) {
+    const value = String(command || '').trim().toLowerCase();
+    return /(^|\s)(rm\s+-rf|del\s+\/[fsq]|rmdir\s+\/s|format\b|diskpart\b|shutdown\b|reboot\b|mkfs\b|dd\s+if=|powershell\s+.*remove-item\s+.*-recurse|remove-item\s+.*-recurse|git\s+reset\s+--hard|git\s+clean\s+-fd|curl\s+.*\|\s*(sh|bash|powershell)|wget\s+.*\|\s*(sh|bash|powershell))/.test(value);
+  }
+
+  normalizeCommandForPlatform(command) {
+    let value = String(command || '').trim();
+    if (!value) return value;
+    if (process.platform !== 'win32') return value;
+    value = value.replace(/\bmkdir\s+-p\s+([^&|;\r\n]+)/gi, (_match, dirs) => {
+      const normalizedDirs = String(dirs || '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((dir) => dir.replace(/^['"]|['"]$/g, '').replace(/\//g, '\\'))
+        .map((dir) => /\s/.test(dir) ? `"${dir}"` : dir)
+        .join(' ');
+      return `mkdir ${normalizedDirs}`;
+    });
+    value = value.replace(/\btouch\s+([^&|;\r\n]+)/gi, (_match, files) => {
+      const commands = String(files || '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((file) => file.replace(/^['"]|['"]$/g, '').replace(/\//g, '\\'))
+        .map((file) => `if not exist ${/\s/.test(file) ? `"${file}"` : file} type nul > ${/\s/.test(file) ? `"${file}"` : file}`);
+      return commands.join(' && ');
+    });
+    value = value.replace(/\bcp\s+-r\s+([^\s&|;]+)\s+([^\s&|;]+)/gi, (_match, from, to) => {
+      const source = String(from || '').replace(/\//g, '\\');
+      const dest = String(to || '').replace(/\//g, '\\');
+      return `xcopy ${source} ${dest} /E /I /Y`;
+    });
+    value = value.replace(/\bnpm\s+run\s+dev\s+--\s+--host\s+0\.0\.0\.0\b/gi, 'npm run dev -- --host localhost');
+    return value;
+  }
+
+  async inspectPackageScripts(filePath = 'package.json') {
+    const safe = this.safeRelative(filePath || 'package.json');
+    const absolute = this.absoluteFor(safe);
+    if (!fsSync.existsSync(absolute)) {
+      return { exists: false, filePath: safe, scripts: {}, dependencies: {}, devDependencies: {} };
+    }
+    const pkg = await safeReadJson(absolute);
+    return {
+      exists: true,
+      filePath: safe,
+      packageManager: fsSync.existsSync(path.join(this.rootPath, 'pnpm-lock.yaml'))
+        ? 'pnpm'
+        : fsSync.existsSync(path.join(this.rootPath, 'yarn.lock'))
+          ? 'yarn'
+          : 'npm',
+      scripts: pkg.scripts || {},
+      dependencies: Object.keys(pkg.dependencies || {}).slice(0, 80),
+      devDependencies: Object.keys(pkg.devDependencies || {}).slice(0, 80),
+    };
+  }
+
+  async gitStatusSummary() {
+    const output = await execFileAsync('git', ['status', '--porcelain=v1', '-uall'], this.rootPath).catch((error) => `git status failed: ${errorMessageFor(error)}`);
+    const entries = String(output || '')
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd())
+      .filter(Boolean)
+      .slice(0, 120)
+      .map((line) => ({ status: line.slice(0, 2).trim() || 'modified', filePath: normalizeSlashes(line.slice(3).trim()) }));
+    return { clean: entries.length === 0, entries };
+  }
+
   async executeAgentTool(action) {
     const name = action.action;
     const args = action.args || {};
     if (name === 'list_files') {
       const limit = Math.max(20, Math.min(Number(args.limit || 120), 240));
-      const files = await this.projectTree(limit);
+      const cached = await this.cachedTool(`list_files:${limit}`, 6000, async () => this.projectTree(limit));
+      const files = cached.value;
       return {
         ok: true,
-        summary: `Listed ${files.length} workspace file(s).`,
+        summary: `Listed ${files.length} workspace file(s)${cached.cached ? ' from cache' : ''}.`,
         files,
       };
     }
@@ -1030,8 +1681,38 @@ class NeuraComposerProvider {
         matches,
       };
     }
+    if (name === 'inspect_package_scripts') {
+      const cached = await this.cachedTool(`package:${args.filePath || 'package.json'}`, 8000, async () => this.inspectPackageScripts(args.filePath || 'package.json'));
+      const packageInfo = cached.value;
+      return {
+        ok: true,
+        summary: packageInfo.exists
+          ? `Read ${packageInfo.filePath}: ${Object.keys(packageInfo.scripts || {}).length} script(s), package manager ${packageInfo.packageManager}.`
+          : `${packageInfo.filePath} was not found.`,
+        packageInfo,
+      };
+    }
+    if (name === 'production_profile') {
+      const cached = await this.cachedTool('production_profile', 8000, async () => this.detectProductionProfile());
+      const profile = cached.value;
+      return {
+        ok: true,
+        summary: `Detected ${profile.framework} production profile with ${profile.commands.length} command(s), ${profile.deployTargets.length} deploy target(s), and ${profile.missing.length} readiness gap(s).`,
+        profile,
+      };
+    }
+    if (name === 'git_status') {
+      const cached = await this.cachedTool('git_status', 3000, async () => this.gitStatusSummary());
+      const status = cached.value;
+      return {
+        ok: true,
+        summary: status.clean ? 'Git working tree is clean.' : `Git has ${status.entries.length} changed/untracked file(s).`,
+        status,
+      };
+    }
     if (name === 'get_diagnostics') {
-      const diagnostics = await this.workspaceDiagnostics(args.filePath || '');
+      const cached = await this.cachedTool(`diagnostics:${args.filePath || 'workspace'}`, 2500, async () => this.workspaceDiagnostics(args.filePath || ''));
+      const diagnostics = cached.value;
       return {
         ok: true,
         summary: `Read ${diagnostics.length} diagnostic(s).`,
@@ -1054,7 +1735,8 @@ class NeuraComposerProvider {
       };
     }
     if (name === 'semantic_search') {
-      const hits = await this.semanticSearch(args.query, Number(args.limit || 20));
+      const cached = await this.cachedTool(`semantic:${String(args.query || '').slice(0, 80)}:${Number(args.limit || 20)}`, 15000, async () => this.semanticSearch(args.query, Number(args.limit || 20)));
+      const hits = cached.value;
       return {
         ok: true,
         summary: `Found ${hits.length} semantic index hit(s).`,
@@ -1067,6 +1749,55 @@ class NeuraComposerProvider {
         ok: result.ok,
         summary: result.summary,
         result,
+      };
+    }
+    if (name === 'browser_agent') {
+      const result = await this.browserAgentInteract({
+        url: args.url || this.state.preview?.url || '',
+        steps: Array.isArray(args.steps) ? args.steps : [],
+        label: args.label || 'agent-tool',
+      });
+      return {
+        ok: result.ok,
+        summary: result.summary,
+        result,
+      };
+    }
+    if (name === 'run_command') {
+      const command = this.normalizeCommandForPlatform(args.command || '');
+      if (!command) {
+        return { ok: false, summary: 'run_command requires args.command.' };
+      }
+      if (this.isDangerousCommand(command)) {
+        return {
+          ok: false,
+          summary: 'Command blocked by Neura guardrails. Propose a safer command or ask the user.',
+          command,
+        };
+      }
+      if (!this.canAutoRunCommands()) {
+        return {
+          ok: true,
+          summary: `Permission mode is ${permissionLabels[this.state.permissionMode] || this.state.permissionMode}; command was not auto-run. Include it in finish.commands for user approval.`,
+          command,
+          requiresApproval: true,
+        };
+      }
+      const terminal = await this.runCommand(undefined, undefined, command, {
+        skipConfirmation: true,
+        waitForExit: true,
+      });
+      return {
+        ok: terminal?.status === 'passed',
+        summary: `Command ${terminal?.status || 'unknown'}${Number.isFinite(terminal?.exitCode) ? ` with exit ${terminal.exitCode}` : ''}.`,
+        command,
+        terminal: terminal ? {
+          id: terminal.id,
+          status: terminal.status,
+          exitCode: terminal.exitCode,
+          stdoutTail: String(terminal.stdout || '').slice(-4000),
+          stderrTail: String(terminal.stderr || '').slice(-4000),
+        } : null,
       };
     }
     return {
@@ -1103,6 +1834,7 @@ class NeuraComposerProvider {
         ? source.todos
         : previousItems;
     const allowedStatuses = new Set(['pending', 'running', 'blocked', 'done', 'failed', 'skipped']);
+    const listOfStrings = (value, limit = 8) => (Array.isArray(value) ? value.map(String).filter(Boolean).slice(0, limit) : []);
     const items = rawItems
       .slice(0, 18)
       .map((item, index) => {
@@ -1112,8 +1844,13 @@ class NeuraComposerProvider {
           title: String(item.title || item.task || previousItems[index]?.title || `Task ${index + 1}`).slice(0, 160),
           status: allowedStatuses.has(status) ? status : 'pending',
           rationale: String(item.rationale || item.reason || item.description || '').slice(0, 320),
-          files: Array.isArray(item.files) ? item.files.map(String).slice(0, 8) : [],
-          dependsOn: Array.isArray(item.dependsOn) ? item.dependsOn.map(String).slice(0, 8) : [],
+          files: listOfStrings(item.files, 8),
+          dependsOn: listOfStrings(item.dependsOn, 8),
+          ownerRole: String(item.ownerRole || item.role || previousItems[index]?.ownerRole || '').slice(0, 60),
+          executorStatus: String(item.executorStatus || item.execution || previousItems[index]?.executorStatus || status).slice(0, 60),
+          acceptance: String(item.acceptance || item.acceptanceCriteria || previousItems[index]?.acceptance || '').slice(0, 360),
+          handoff: String(item.handoff || item.handoffNote || previousItems[index]?.handoff || '').slice(0, 360),
+          priority: Number.isFinite(Number(item.priority)) ? Number(item.priority) : index + 1,
         };
       })
       .filter((item) => item.title);
@@ -1127,8 +1864,12 @@ class NeuraComposerProvider {
       id: previousGraph?.id || id('graph'),
       goal: String(source.goal || previousGraph?.goal || '').slice(0, 240),
       status: String(source.status || previousGraph?.status || 'running').slice(0, 40),
+      controllerStatus: String(source.controllerStatus || source.status || previousGraph?.controllerStatus || 'running').slice(0, 40),
       version: Number(previousGraph?.version || 0) + 1,
       items,
+      nextRoles: listOfStrings(source.nextRoles || source.nextExecutors || previousGraph?.nextRoles, 10),
+      blockedReasons: listOfStrings(source.blockedReasons || source.blockers || previousGraph?.blockedReasons, 10),
+      risks: listOfStrings(source.risks || previousGraph?.risks, 10),
       updates: [update, ...priorUpdates].slice(0, 30),
       updatedAt: nowIso(),
     };
@@ -1143,51 +1884,54 @@ class NeuraComposerProvider {
       .map((item) => `${item.filePath}:${item.line}:${item.column} ${item.severity} ${item.message}`)
       .join('\n') || 'none';
     const selectedFiles = (context.files || []).map((file) => file.filePath).join('\n') || 'none';
+    const agents = (context.agents || [])
+      .slice(0, 24)
+      .map((agent) => [
+        `${agent.roleId || agent.id}: ${agent.status || 'ready'}`,
+        agent.summary ? `summary=${agent.summary}` : '',
+        agent.error ? `error=${agent.error}` : '',
+        agent.dependencies?.length ? `depends=${agent.dependencies.join(',')}` : '',
+        agent.handoff ? `handoff=${agent.handoff}` : '',
+      ].filter(Boolean).join(' | '))
+      .join('\n') || 'none';
     try {
-      const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.config.apiKey}`,
-          'content-type': 'application/json',
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: this.config.model,
-          temperature: 0.08,
-          max_tokens: 1800,
-          messages: [
-            {
-              role: 'system',
-              content: [
-                'You are Neura Planner, a separate planning loop supervising an executor agent.',
-                'Return exactly one JSON object, no markdown.',
-                'Maintain a compact task graph that can change as new observations arrive.',
-                'Do not produce file contents. Do not execute commands. Do not reveal private chain-of-thought.',
-                'Statuses must be one of: pending, running, blocked, done, failed, skipped.',
-                'Schema: {"goal":"short goal","status":"running|blocked|done|failed","summary":"what changed in the plan","items":[{"id":"stable-id","title":"task","status":"pending|running|blocked|done|failed|skipped","rationale":"why this task exists or changed","files":["relative/path"],"dependsOn":["task-id"]}]}',
-              ].join('\n'),
-            },
-            {
-              role: 'user',
-              content: [
-                `Stage: ${stage}`,
-                `Mode: ${modeLabels[mode] || mode}`,
-                `User request:\n${prompt}`,
-                `Current task graph:\n${currentGraph ? JSON.stringify(currentGraph).slice(0, 6000) : '(none)'}`,
-                `Latest executor observation:\n${observation ? JSON.stringify(observation).slice(0, 5000) : '(initial planning pass)'}`,
-                `Selected files:\n${selectedFiles}`,
-                `Workspace tree:\n${tree}`,
-                `Diagnostics:\n${diagnostics}`,
-              ].join('\n\n'),
-            },
-          ],
-        }),
+      const { payload } = await this.requestChatCompletion({
+        temperature: 0.08,
+        max_tokens: 1800,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              'You are Neura Planner, a separate planning loop supervising an executor agent.',
+              'Return exactly one JSON object, no markdown.',
+              'Maintain a compact task graph that can change as new observations arrive.',
+              'When supervising a swarm, act as a controller: choose the next role IDs, identify blockers, update handoffs, and revise acceptance criteria while executors work.',
+              'Do not produce file contents. Do not execute commands. Do not reveal private chain-of-thought.',
+              'Statuses must be one of: pending, running, blocked, done, failed, skipped.',
+              'Use nextRoles only for role IDs that should run now or next. If blocked, include blockedReasons.',
+              'Schema: {"goal":"short goal","status":"running|blocked|done|failed","controllerStatus":"running|blocked|done|failed","summary":"what changed in the plan","nextRoles":["frontend"],"blockedReasons":["reason"],"risks":["risk"],"items":[{"id":"stable-id","title":"task","ownerRole":"frontend|backend|qa|...","status":"pending|running|blocked|done|failed|skipped","executorStatus":"ready|running|waiting|done|failed","priority":1,"rationale":"why this task exists or changed","acceptance":"done criteria","handoff":"specific instructions for owner role","files":["relative/path"],"dependsOn":["task-id"]}]}',
+            ].join('\n'),
+          },
+          {
+            role: 'user',
+            content: [
+              `Stage: ${stage}`,
+              `Mode: ${modeLabels[mode] || mode}`,
+              `User request:\n${prompt}`,
+              `Current task graph:\n${currentGraph ? JSON.stringify(currentGraph).slice(0, 6000) : '(none)'}`,
+              `Latest executor observation:\n${observation ? JSON.stringify(observation).slice(0, 5000) : '(initial planning pass)'}`,
+              `Swarm agents:\n${agents}`,
+              `Selected files:\n${selectedFiles}`,
+              `Workspace tree:\n${tree}`,
+              `Diagnostics:\n${diagnostics}`,
+            ].join('\n\n'),
+          },
+        ],
+      }, {
+        mode: 'planner-graph',
+        stage,
+        timeoutMs: this.config.timeoutMs,
       });
-      const rawBody = await response.text();
-      const payload = rawBody ? JSON.parse(rawBody) : {};
-      if (!response.ok) {
-        throw new Error(payload.error?.message || rawBody || `HTTP ${response.status}`);
-      }
       const content = payload.choices?.[0]?.message?.content || '';
       if (!content) throw new Error('Planner returned an empty response.');
       return this.normalizeTaskGraph(parseJsonObject(content), currentGraph, stage);
@@ -1205,6 +1949,145 @@ class NeuraComposerProvider {
       graph.updates[0].summary = `Planner update failed: ${errorMessageFor(error)}`;
       return graph;
     }
+  }
+
+  fallbackSwarmTaskGraph(mission, agents, stage, summary = '') {
+    const items = agents.map((agent, index) => {
+      const role = swarmRoleById[agent.roleId] || {};
+      const statusMap = {
+        ready: 'pending',
+        queued: 'running',
+        running: 'running',
+        completed: 'done',
+        failed: 'failed',
+        cancelled: 'failed',
+        interrupted: 'blocked',
+        blocked: 'blocked',
+      };
+      return {
+        id: `role-${agent.roleId || index + 1}`,
+        title: `${agent.roleLabel || role.label || agent.roleId || 'Agent'}: ${role.mission || agent.task || 'Complete role work'}`,
+        ownerRole: agent.roleId || role.id || '',
+        status: statusMap[agent.status] || 'pending',
+        executorStatus: agent.status || 'ready',
+        priority: index + 1,
+        rationale: role.focus?.length ? `Focus: ${role.focus.join(', ')}` : 'Role-owned swarm task.',
+        acceptance: role.deliverables?.length ? role.deliverables.join('; ') : 'Complete role handoff with evidence.',
+        handoff: agent.summary || agent.error || '',
+        files: [],
+        dependsOn: (agent.dependencies || []).map((dependency) => `role-${dependency}`),
+      };
+    });
+    const runnable = agents
+      .filter((agent) => ['ready', 'queued'].includes(agent.status || 'ready'))
+      .filter((agent) => (agent.dependencies || []).every((dependency) => agents.some((peer) => peer.roleId === dependency && peer.status === 'completed')))
+      .map((agent) => agent.roleId)
+      .filter(Boolean)
+      .slice(0, 6);
+    return this.normalizeTaskGraph({
+      goal: mission.task,
+      status: mission.status === 'blocked' ? 'blocked' : mission.status === 'completed' ? 'done' : 'running',
+      controllerStatus: mission.status || 'ready',
+      summary: summary || `Planner controller refreshed ${agents.length} role lane(s).`,
+      nextRoles: runnable,
+      blockedReasons: mission.error ? [mission.error] : [],
+      risks: (mission.conflicts || []).map((conflict) => `Conflict risk: ${conflict.filePath}`),
+      items,
+    }, mission.taskGraph || null, stage);
+  }
+
+  async buildSwarmPlannerContext(mission) {
+    const agents = (this.state.backgroundAgents || []).filter((agent) => mission.agentIds?.includes(agent.id));
+    const tree = await this.projectTree(160).catch(() => []);
+    const diagnostics = await this.workspaceDiagnostics().catch(() => []);
+    const semanticHits = await this.semanticSearch(mission.task || '', 16).catch(() => []);
+    return {
+      mentions: ['codebase'],
+      files: [],
+      tree,
+      diagnostics,
+      semanticHits,
+      agents: agents.map((agent) => ({
+        id: agent.id,
+        roleId: agent.roleId,
+        roleLabel: agent.roleLabel,
+        squad: agent.squad,
+        status: agent.status,
+        dependencies: agent.dependencies || [],
+        ownership: agent.ownership || [],
+        summary: agent.summary || '',
+        error: agent.error || '',
+        edits: (agent.edits || []).slice(-12),
+        commands: (agent.commands || []).slice(-6),
+        verification: (agent.verification || []).slice(-6),
+        attempts: (agent.attempts || []).slice(-3),
+        handoff: agent.summary || agent.error || '',
+      })),
+    };
+  }
+
+  async reviseSwarmPlan(mission, observation = {}, stage = 'updated') {
+    const agents = (this.state.backgroundAgents || []).filter((agent) => mission.agentIds?.includes(agent.id));
+    if (!agents.length) {
+      mission.taskGraph = this.fallbackSwarmTaskGraph(mission, [], stage, 'Planner waiting for role agents.');
+      return mission.taskGraph;
+    }
+    let graph;
+    if (this.config.configured) {
+      const context = await this.buildSwarmPlannerContext(mission);
+      graph = await this.reviseTaskGraph(
+        'agent',
+        mission.task,
+        context,
+        mission.taskGraph || null,
+        {
+          ...observation,
+          missionStatus: mission.status,
+          waves: (mission.waves || []).slice(-6),
+          conflicts: mission.conflicts || [],
+        },
+        stage,
+      );
+    } else {
+      graph = this.fallbackSwarmTaskGraph(mission, agents, stage, 'No AI provider is configured; using dependency-based fallback plan.');
+    }
+    if (!Array.isArray(graph.items) || !graph.items.length) {
+      const failedSummary = graph.updates?.[0]?.summary || 'Planner returned no executable role tasks.';
+      graph = this.fallbackSwarmTaskGraph(mission, agents, stage, failedSummary);
+    }
+    const validRoleIds = new Set(agents.map((agent) => agent.roleId).filter(Boolean));
+    graph.nextRoles = (graph.nextRoles || []).filter((roleId) => validRoleIds.has(roleId)).slice(0, 8);
+    mission.taskGraph = graph;
+    mission.planner = {
+      status: graph.controllerStatus || graph.status || 'running',
+      version: graph.version,
+      nextRoles: graph.nextRoles || [],
+      blockedReasons: graph.blockedReasons || [],
+      risks: graph.risks || [],
+      updatedAt: nowIso(),
+    };
+    await this.persistSwarmMission(mission, `planner-${stage}`, {
+      summary: graph.updates?.[0]?.summary || '',
+      nextRoles: graph.nextRoles || [],
+      blockedReasons: graph.blockedReasons || [],
+      risks: graph.risks || [],
+    });
+    this.recordArtifact('swarm-planner', `Planner controller: ${mission.task}`, graph.updates?.[0]?.summary || 'Planner controller updated.', {
+      missionId: mission.id,
+      stage,
+      version: graph.version,
+      nextRoles: graph.nextRoles || [],
+      blockedReasons: graph.blockedReasons || [],
+      risks: graph.risks || [],
+    });
+    return graph;
+  }
+
+  plannerSelectedRunnable(mission, dependencyReadyAgents) {
+    const nextRoles = (mission.taskGraph?.nextRoles || mission.planner?.nextRoles || []).filter(Boolean);
+    if (!nextRoles.length) return dependencyReadyAgents;
+    const selected = dependencyReadyAgents.filter((agent) => nextRoles.includes(agent.roleId));
+    return selected.length ? selected : dependencyReadyAgents;
   }
 
   async runAgenticWorkflow(mode, prompt, context, attachments, thinkingMessage, continuation = null) {
@@ -1243,11 +2126,12 @@ class NeuraComposerProvider {
         steps,
         taskGraph,
       });
-      const rawAction = await this.callNimAgentAction(messages, mode, stepIndex);
-      const action = this.normalizeAgentAction(rawAction);
+      const rawAction = await this.callNimAgentAction(messages, mode, stepIndex, thinkingMessage, steps, taskGraph);
+      const actions = this.normalizeAgentActions(rawAction);
+      const primaryAction = actions[0] || { action: 'unknown', thought: '' };
       const step = {
-        title: action.thought || `Agent action: ${action.action || 'unknown'}`,
-        action: action.action || 'unknown',
+        title: primaryAction.thought || `Agent action: ${actions.map((action) => action.action || 'unknown').join(', ')}`,
+        action: actions.map((action) => action.action || 'unknown').join(', '),
         status: 'running',
       };
       steps.push(step);
@@ -1259,41 +2143,64 @@ class NeuraComposerProvider {
         taskGraph,
       });
 
-      if (action.action === 'ask_user') {
+      if (actions.length === 1 && primaryAction.action === 'ask_user') {
         step.status = 'done';
         step.observation = 'Neura needs user input before changing files.';
         result = {
-          message: String(action.args.message || action.thought || 'I need a little more information before editing files.'),
-          questions: Array.isArray(action.args.questions) ? action.args.questions : [],
+          message: String(primaryAction.args.message || primaryAction.thought || 'I need a little more information before editing files.'),
+          questions: Array.isArray(primaryAction.args.questions) ? primaryAction.args.questions : [],
           referencedFiles: context.files.map((file) => file.filePath),
           _thinking: step.title,
         };
         break;
       }
 
-      if (action.action === 'finish') {
+      if (actions.length === 1 && primaryAction.action === 'finish') {
         step.status = 'done';
         step.observation = 'Prepared final file changes and command proposals.';
-        result = this.normalizeAgentFinish(mode, action, context);
+        result = this.normalizeAgentFinish(mode, primaryAction, context);
         break;
       }
 
-      let observation;
-      try {
-        observation = await this.executeAgentTool(action);
-      } catch (error) {
-        observation = {
-          ok: false,
-          summary: errorMessageFor(error),
-        };
+      const observations = [];
+      for (const action of actions) {
+        if (action.action === 'finish' || action.action === 'ask_user') {
+          observations.push({
+            action: action.action,
+            ok: false,
+            summary: `${action.action} cannot be mixed with other tool calls. Return it as the only action.`,
+          });
+          continue;
+        }
+        try {
+          const observation = await this.executeAgentTool(action);
+          observations.push({ action: action.action, ...observation });
+        } catch (error) {
+          observations.push({
+            action: action.action,
+            ok: false,
+            summary: errorMessageFor(error),
+          });
+        }
       }
-      step.status = observation.ok ? 'done' : 'failed';
-      step.observation = observation.summary;
-      taskGraph = await this.reviseTaskGraph(mode, prompt, context, taskGraph, {
-        action: action.action,
+      const failedObservation = observations.find((observation) => !observation.ok);
+      step.status = failedObservation ? 'failed' : 'done';
+      step.observation = observations.map((observation) => `${observation.action}: ${observation.summary}`).join(' | ');
+      this.recordArtifact('agent-tool-step', `Tool step ${stepIndex}: ${step.action}`, step.observation, {
+        runId: this.state.activeRunId,
         step: stepIndex,
-        observation,
-      }, `after-${action.action || 'step'}`);
+        actions: actions.map((action) => ({ action: action.action, args: action.args })),
+        observations: observations.map((observation) => ({
+          action: observation.action,
+          ok: observation.ok,
+          summary: observation.summary,
+        })),
+      });
+      taskGraph = await this.reviseTaskGraph(mode, prompt, context, taskGraph, {
+        action: step.action,
+        step: stepIndex,
+        observations,
+      }, `after-${primaryAction.action || 'step'}`);
       await this.flushThinking(thinkingMessage, {
         status: 'running',
         title: 'Planning...',
@@ -1304,7 +2211,7 @@ class NeuraComposerProvider {
       messages.push({ role: 'assistant', content: JSON.stringify(rawAction) });
       messages.push({
         role: 'user',
-        content: `Observation for ${action.action}:\n${JSON.stringify(observation).slice(0, agentObservationBytes)}\n\nContinue with the next JSON action. Finish with edits/commands when ready.`,
+        content: `Observation for ${step.action}:\n${JSON.stringify(observations).slice(0, agentObservationBytes)}\n\nContinue with the next JSON action. Finish with edits/commands when ready. If a command required approval, include it in finish.commands instead of trying to run it.`,
       });
     }
 
@@ -1335,7 +2242,8 @@ class NeuraComposerProvider {
       editableModes.has(mode) &&
       !result._needsContinuation &&
       !(Array.isArray(result.questions) && result.questions.length) &&
-      !(Array.isArray(result.edits) && result.edits.length)
+      !(Array.isArray(result.edits) && result.edits.length) &&
+      !(Array.isArray(result.commands) && result.commands.length)
     ) {
       if (mode === 'builder') {
         steps.push({
@@ -1425,6 +2333,12 @@ class NeuraComposerProvider {
     }
   }
 
+  interpolateMcpValue(value) {
+    return String(value || '')
+      .replace(/\$\{workspaceFolder\}/g, this.rootPath || '')
+      .replace(/\$\{env:([^}]+)\}/g, (_match, name) => process.env[String(name)] || '');
+  }
+
   async refreshMcpServers() {
     const servers = vscode.workspace.getConfiguration('neura.mcp').get('servers', []);
     this.mcpServers = [];
@@ -1433,10 +2347,14 @@ class NeuraComposerProvider {
       const normalized = {
         name: String(server?.name || 'Unnamed MCP'),
         transport: String(server?.transport || 'stdio'),
-        command: String(server?.command || ''),
-        url: String(server?.url || ''),
-        args: Array.isArray(server?.args) ? server.args.map(String) : [],
-        env: server?.env && typeof server.env === 'object' ? server.env : {},
+        command: this.interpolateMcpValue(server?.command || ''),
+        url: this.interpolateMcpValue(server?.url || ''),
+        args: Array.isArray(server?.args) ? server.args.map((value) => this.interpolateMcpValue(value)) : [],
+        env: server?.env && typeof server.env === 'object'
+          ? Object.fromEntries(Object.entries(server.env).map(([key, value]) => [key, this.interpolateMcpValue(value)]))
+          : {},
+        disabledTools: Array.isArray(server?.disabledTools) ? server.disabledTools.map(String) : [],
+        capabilities: server?.capabilities && typeof server.capabilities === 'object' ? server.capabilities : {},
         status: 'configured',
         tools: [],
         error: '',
@@ -1448,7 +2366,11 @@ class NeuraComposerProvider {
         try {
           const client = await this.getMcpClient(normalized);
           const result = await client.request('tools/list', {});
-          normalized.tools = Array.isArray(result?.tools) ? result.tools : [];
+          normalized.tools = (Array.isArray(result?.tools) ? result.tools : [])
+            .map((tool) => ({
+              ...tool,
+              enabled: !normalized.disabledTools.includes(tool.name),
+            }));
           normalized.status = 'connected';
         } catch (error) {
           normalized.status = 'failed';
@@ -1473,12 +2395,20 @@ class NeuraComposerProvider {
   async createMcpApprovalCard(serverName, toolName, args = {}) {
     const server = this.mcpServers.find((item) => item.name === serverName);
     if (!server) throw new Error(`MCP server not found: ${serverName}`);
+    if ((server.disabledTools || []).includes(toolName)) {
+      throw new Error(`MCP tool is disabled by configuration: ${serverName}/${toolName}`);
+    }
+    const policy = this.evaluatePolicy('mcp', `${serverName}/${toolName}`, { args });
+    if (policy.decision === 'deny') throw new Error(`Neura policy denied MCP tool: ${policy.reason}`);
     const card = {
       id: id('mcp'),
       serverName,
       toolName,
       args,
       status: 'pending',
+      policyDecision: policy.decision,
+      policyReason: policy.reason,
+      audit: [{ at: nowIso(), event: 'created', policyDecision: policy.decision, policyReason: policy.reason }],
       result: null,
       error: '',
       createdAt: nowIso(),
@@ -1499,9 +2429,12 @@ class NeuraComposerProvider {
     if (!card) throw new Error('MCP card was not found.');
     const server = this.mcpServers.find((item) => item.name === card.serverName);
     if (!server) throw new Error(`MCP server not found: ${card.serverName}`);
+    const policy = this.evaluatePolicy('mcp', `${card.serverName}/${card.toolName}`, { cardId });
+    if (policy.decision === 'deny') throw new Error(`Neura policy denied MCP tool: ${policy.reason}`);
     const allowed = await this.confirmMcpExecution(card);
     if (!allowed) return;
     card.status = 'running';
+    card.audit = [...(card.audit || []), { at: nowIso(), event: 'approved', policyDecision: policy.decision, policyReason: policy.reason }].slice(-20);
     await this.saveState();
     this.renderIfVisible();
     try {
@@ -1512,6 +2445,7 @@ class NeuraComposerProvider {
       });
       card.status = 'completed';
       card.result = result;
+      card.audit = [...(card.audit || []), { at: nowIso(), event: 'completed' }].slice(-20);
       this.recordArtifact('mcp-result', `MCP ${card.toolName}`, 'MCP tool completed.', {
         serverName: card.serverName,
         toolName: card.toolName,
@@ -1520,6 +2454,7 @@ class NeuraComposerProvider {
     } catch (error) {
       card.status = 'failed';
       card.error = errorMessageFor(error);
+      card.audit = [...(card.audit || []), { at: nowIso(), event: 'failed', error: card.error }].slice(-20);
       this.recordArtifact('mcp-result', `MCP ${card.toolName} failed`, card.error, {
         serverName: card.serverName,
         toolName: card.toolName,
@@ -1533,6 +2468,7 @@ class NeuraComposerProvider {
     const card = (this.state.mcpCards || []).find((item) => item.id === cardId);
     if (!card) return;
     card.status = 'rejected';
+    card.audit = [...(card.audit || []), { at: nowIso(), event: 'rejected' }].slice(-20);
     await this.saveState();
     this.renderIfVisible();
   }
@@ -1599,6 +2535,26 @@ class NeuraComposerProvider {
     await this.createMcpApprovalCard(picked.serverName, picked.toolName, args);
   }
 
+  async setMcpToolEnabled(serverName, toolName, enabled) {
+    const config = vscode.workspace.getConfiguration('neura.mcp');
+    const servers = config.get('servers', []);
+    if (!Array.isArray(servers)) return;
+    const updated = servers.map((server) => {
+      if (String(server?.name || '') !== serverName) return server;
+      const disabled = new Set(Array.isArray(server.disabledTools) ? server.disabledTools.map(String) : []);
+      if (enabled) disabled.delete(toolName);
+      else disabled.add(toolName);
+      return { ...server, disabledTools: [...disabled] };
+    });
+    await config.update('servers', updated, this.rootPath ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global);
+    this.recordArtifact('mcp-policy', `${enabled ? 'Enabled' : 'Disabled'} MCP ${serverName}/${toolName}`, 'Updated MCP per-tool policy.', {
+      serverName,
+      toolName,
+      enabled,
+    });
+    await this.refresh();
+  }
+
   async refreshPlugins() {
     const pluginRoot = path.join(os.homedir(), '.neura', 'plugins');
     const trust = await safeReadJson(this.pluginTrustPath);
@@ -1615,6 +2571,8 @@ class NeuraComposerProvider {
           version: manifest.version || '0.0.0',
           description: manifest.description || 'Neura plugin package.',
           permissions: Array.isArray(manifest.permissions) ? manifest.permissions.map(String) : [],
+          capabilities: manifest.capabilities && typeof manifest.capabilities === 'object' ? manifest.capabilities : {},
+          sandbox: manifest.sandbox || 'restricted-api',
           trusted: trusted.includes(manifest.name || entry.name),
           path: path.join(pluginRoot, entry.name),
           main: manifest.main || 'index.js',
@@ -1638,6 +2596,10 @@ class NeuraComposerProvider {
         const pluginModule = require(mainPath);
         if (typeof pluginModule.activate === 'function') {
           const permissions = new Set(plugin.permissions || []);
+          this.evaluatePolicy('plugin', plugin.name, {
+            permissions: plugin.permissions,
+            capabilities: plugin.capabilities,
+          });
           await pluginModule.activate({
             workspaceRoot: this.rootPath,
             registerCommand: (name, callback) => {
@@ -1660,6 +2622,9 @@ class NeuraComposerProvider {
         this.loadedPlugins.set(plugin.name, pluginModule);
         this.recordArtifact('plugin', `Plugin loaded: ${plugin.name}`, `Trusted plugin ${plugin.name} activated.`, {
           plugin: plugin.name,
+          permissions: plugin.permissions,
+          capabilities: plugin.capabilities,
+          sandbox: plugin.sandbox,
         });
       } catch (error) {
         plugin.error = errorMessageFor(error);
@@ -1669,6 +2634,14 @@ class NeuraComposerProvider {
   }
 
   async trustPlugin(pluginName, trusted) {
+    const plugin = this.plugins.find((item) => item.name === pluginName);
+    if (trusted && plugin) {
+      const decision = this.evaluatePolicy('plugin', plugin.name, {
+        permissions: plugin.permissions,
+        capabilities: plugin.capabilities,
+      });
+      if (decision.decision === 'deny') throw new Error(`Neura policy denied plugin: ${decision.reason}`);
+    }
     const current = await safeReadJson(this.pluginTrustPath);
     const list = new Set(Array.isArray(current.trusted) ? current.trusted : []);
     if (trusted) list.add(pluginName);
@@ -1692,6 +2665,8 @@ class NeuraComposerProvider {
   }
 
   async readWorkspaceFile(relativePath, byteLimit = maxContextBytes) {
+    const readPolicy = this.evaluatePolicy('file_read', relativePath, { skipPrompt: true });
+    if (readPolicy.decision === 'deny') throw new Error(`Neura policy denied file read for ${relativePath}: ${readPolicy.reason}`);
     const absolute = this.absoluteFor(relativePath);
     const bytes = await fs.readFile(absolute);
     const clipped = bytes.length > byteLimit ? bytes.subarray(0, byteLimit) : bytes;
@@ -1717,7 +2692,7 @@ class NeuraComposerProvider {
   async projectTree(limit = 80) {
     if (!this.rootPath) return [];
     const files = await vscode.workspace.findFiles('**/*', ignoredGlob, limit);
-    return files.map((uri) => normalizeSlashes(path.relative(this.rootPath, uri.fsPath)));
+    return files.map((uri) => this.indexedPathForUri(uri).filePath);
   }
 
   async searchWorkspace(query, limit = agentSearchMatchLimit) {
@@ -1831,8 +2806,16 @@ class NeuraComposerProvider {
   extractSymbols(relative, content) {
     const symbols = [];
     const lines = content.split(/\r?\n/);
+    const exportedNames = new Set();
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
+      const namedExport = line.match(/\bexport\s*\{([^}]+)\}/);
+      if (namedExport) {
+        for (const name of namedExport[1].split(',')) {
+          const cleaned = name.split(/\s+as\s+/i).pop().trim();
+          if (cleaned) exportedNames.add(cleaned);
+        }
+      }
       const match =
         line.match(/\bexport\s+default\s+(?:function|class)\s+([A-Za-z_][A-Za-z0-9_]*)/) ||
         line.match(/\bexport\s+(?:async\s+)?(?:function|class|const|let|var|interface|type|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/) ||
@@ -1849,6 +2832,17 @@ class NeuraComposerProvider {
       }
       if (symbols.length > 200) break;
     }
+    for (const name of exportedNames) {
+      if (!symbols.some((symbol) => symbol.name === name)) {
+        symbols.push({
+          name,
+          filePath: relative,
+          line: 1,
+          exported: true,
+          preview: `export { ${name} }`,
+        });
+      }
+    }
     return symbols;
   }
 
@@ -1856,7 +2850,8 @@ class NeuraComposerProvider {
     const stat = await fs.stat(uri.fsPath);
     if (stat.size > 500_000) return null;
     const content = await fs.readFile(uri.fsPath, 'utf8');
-    const relative = normalizeSlashes(path.relative(this.rootPath, uri.fsPath));
+    const indexedPath = this.indexedPathForUri(uri);
+    const relative = indexedPath.filePath;
     const tokens = this.tokenizeForIndex(`${relative}\n${content}`);
     const termCounts = new Map();
     for (const token of tokens) termCounts.set(token, (termCounts.get(token) || 0) + 1);
@@ -1869,6 +2864,9 @@ class NeuraComposerProvider {
     return {
       file: {
         filePath: relative,
+        workspacePath: indexedPath.workspacePath,
+        rootName: indexedPath.root?.name || this.projectName,
+        rootId: indexedPath.root?.id || hashKey(this.rootPath).slice(0, 12),
         language: languageFor(relative),
         size: stat.size,
         mtimeMs: stat.mtimeMs,
@@ -1976,9 +2974,119 @@ class NeuraComposerProvider {
     };
   }
 
+  async collectGitHistoryIndex(roots = this.workspaceRoots()) {
+    const commits = [];
+    const pullRequests = [];
+    const issues = [];
+    for (const root of roots) {
+      const gitDir = path.join(root.path, '.git');
+      if (!fsSync.existsSync(gitDir)) continue;
+      try {
+        const output = await execFileAsync('git', [
+          'log',
+          '--date=short',
+          '--pretty=format:@@commit@@%H%x09%ad%x09%an%x09%s',
+          '--name-only',
+          '-n',
+          '100',
+        ], root.path);
+        let current = null;
+        for (const line of output.split(/\r?\n/)) {
+          if (line.startsWith('@@commit@@')) {
+            if (current) commits.push(current);
+            const [sha, date, author, subject] = line.slice('@@commit@@'.length).split('\t');
+            current = {
+              kind: 'commit',
+              rootName: root.name,
+              rootId: root.id,
+              sha,
+              date,
+              author,
+              subject,
+              files: [],
+              refs: [...String(subject || '').matchAll(/#(\d+)/g)].map((match) => Number(match[1])).slice(0, 8),
+              terms: this.tokenizeForIndex(`${subject} ${author}`),
+            };
+          } else if (current && line.trim()) {
+            const filePath = normalizeSlashes(line.trim());
+            current.files.push(this.workspaceRoots().length > 1 ? `${root.name}/${filePath}` : filePath);
+          }
+        }
+        if (current) commits.push(current);
+      } catch (error) {
+        logNeura('Git history indexing skipped', { root: root.path, error: errorMessageFor(error) });
+      }
+      try {
+        const prOutput = await execFileAsync('gh', [
+          'pr',
+          'list',
+          '--state',
+          'all',
+          '--limit',
+          '50',
+          '--json',
+          'number,title,state,updatedAt,headRefName,baseRefName,author',
+        ], root.path);
+        const prs = JSON.parse(prOutput || '[]');
+        for (const pr of prs) {
+          pullRequests.push({
+            kind: 'pr',
+            rootName: root.name,
+            rootId: root.id,
+            number: pr.number,
+            title: pr.title || '',
+            state: pr.state || '',
+            updatedAt: pr.updatedAt || '',
+            headRefName: pr.headRefName || '',
+            baseRefName: pr.baseRefName || '',
+            author: pr.author?.login || '',
+            terms: this.tokenizeForIndex(`${pr.title} ${pr.state} ${pr.headRefName} ${pr.baseRefName} ${pr.author?.login || ''}`),
+          });
+        }
+      } catch {
+        // GitHub CLI is optional; local Git history remains available.
+      }
+      try {
+        const issueOutput = await execFileAsync('gh', [
+          'issue',
+          'list',
+          '--state',
+          'all',
+          '--limit',
+          '50',
+          '--json',
+          'number,title,state,updatedAt,labels,author',
+        ], root.path);
+        const ghIssues = JSON.parse(issueOutput || '[]');
+        for (const issue of ghIssues) {
+          issues.push({
+            kind: 'issue',
+            rootName: root.name,
+            rootId: root.id,
+            number: issue.number,
+            title: issue.title || '',
+            state: issue.state || '',
+            updatedAt: issue.updatedAt || '',
+            labels: (issue.labels || []).map((label) => label.name || '').filter(Boolean),
+            author: issue.author?.login || '',
+            terms: this.tokenizeForIndex(`${issue.title} ${issue.state} ${(issue.labels || []).map((label) => label.name).join(' ')} ${issue.author?.login || ''}`),
+          });
+        }
+      } catch {
+        // GitHub CLI is optional.
+      }
+    }
+    return {
+      commits: commits.slice(0, 160),
+      pullRequests: pullRequests.slice(0, 80),
+      issues: issues.slice(0, 80),
+    };
+  }
+
   async rebuildSemanticIndex(options = {}) {
     this.ensureWorkspace();
     const force = Boolean(options.force);
+    const roots = this.workspaceRoots();
     const previous = await this.loadSemanticIndex();
     const previousFiles = new Map((previous?.files || []).map((file) => [file.filePath, file]));
     const previousSymbols = new Map();
@@ -1991,13 +3099,13 @@ class NeuraComposerProvider {
       ignoredGlob,
       1200,
     );
-    const knownFiles = new Set(uris.map((uri) => normalizeSlashes(path.relative(this.rootPath, uri.fsPath))));
+    const knownFiles = new Set(uris.map((uri) => this.indexedPathForUri(uri).filePath));
     const indexedFiles = [];
     const symbols = [];
     let changed = 0;
     let reused = 0;
     for (const uri of uris) {
-      const relative = normalizeSlashes(path.relative(this.rootPath, uri.fsPath));
+      const relative = this.indexedPathForUri(uri).filePath;
       try {
         const stat = await fs.stat(uri.fsPath);
         const previousFile = previousFiles.get(relative);
@@ -2029,6 +3137,8 @@ class NeuraComposerProvider {
         }));
       return {
         filePath: file.filePath,
+        rootName: file.rootName || this.projectName,
+        rootId: file.rootId || hashKey(this.rootPath).slice(0, 12),
         imports: file.imports || [],
         edges,
         importedBy: [],
@@ -2043,17 +3153,32 @@ class NeuraComposerProvider {
         }
       }
     }
+    for (const node of graph) {
+      node.centrality = Math.min(1, ((node.importedBy || []).length + (node.edges || []).filter((edge) => edge.target).length) / 18);
+      node.dependents = (node.importedBy || []).length;
+      node.dependencies = (node.edges || []).filter((edge) => edge.target).length;
+    }
+    const history = await this.collectGitHistoryIndex(roots);
     const semanticIndex = {
-      version: 2,
+      version: 3,
       embedding: { kind: 'local-sparse-tf', dimensions: 256 },
+      workspace: {
+        roots: roots.map((root) => ({ name: root.name, id: root.id, path: root.path })),
+        multiRoot: roots.length > 1,
+      },
       files: indexedFiles,
       symbols,
       graph,
+      history,
       stats: {
         totalFiles: indexedFiles.length,
         changedFiles: changed,
         reusedFiles: reused,
         symbolCount: symbols.length,
+        graphEdges: graph.reduce((sum, node) => sum + (node.edges || []).filter((edge) => edge.target).length, 0),
+        commits: history.commits.length,
+        pullRequests: history.pullRequests.length,
+        issues: history.issues.length,
       },
       updatedAt: nowIso(),
     };
@@ -2097,12 +3222,25 @@ class NeuraComposerProvider {
       await fs.mkdir(path.dirname(this.semanticIndexPath), { recursive: true });
       await fs.writeFile(this.semanticIndexPath, `${JSON.stringify(semanticIndex, null, 2)}\n`, 'utf8');
     }
-    this.recordArtifact('index', 'Semantic index updated', `${indexedFiles.length} file(s), ${symbols.length} symbol(s), ${changed} changed, ${reused} reused${denseStats.enabled ? `, ${denseStats.changed} dense vectors` : ''}.`, {
+    const publishShared = Boolean(vscode.workspace.getConfiguration('neura.index').get('publishShared'));
+    if (publishShared && this.sharedSemanticIndexPath) {
+      await fs.mkdir(path.dirname(this.sharedSemanticIndexPath), { recursive: true });
+      await fs.writeFile(this.sharedSemanticIndexPath, `${JSON.stringify(semanticIndex, null, 2)}\n`, 'utf8');
+    }
+    this.recordArtifact('index', 'Semantic index updated', `${indexedFiles.length} file(s), ${symbols.length} symbol(s), ${changed} changed, ${reused} reused, ${semanticIndex.stats.graphEdges} import edge(s), ${history.commits.length} commit(s)${denseStats.enabled ? `, ${denseStats.changed} dense vectors` : ''}.`, {
       fileCount: indexedFiles.length,
       symbolCount: symbols.length,
       changed,
       reused,
       dense: denseStats,
+      roots: semanticIndex.workspace.roots.length,
+      graphEdges: semanticIndex.stats.graphEdges,
+      history: {
+        commits: history.commits.length,
+        pullRequests: history.pullRequests.length,
+        issues: history.issues.length,
+      },
+      sharedPath: publishShared ? this.sharedSemanticIndexPath : '',
     });
     await this.saveState();
     return semanticIndex;
@@ -2128,6 +3266,20 @@ class NeuraComposerProvider {
   }
 
   async loadSemanticIndex() {
+    const useShared = Boolean(vscode.workspace.getConfiguration('neura.index').get('useShared'));
+    if (useShared && this.sharedSemanticIndexPath && fsSync.existsSync(this.sharedSemanticIndexPath)) {
+      const shared = await safeReadJson(this.sharedSemanticIndexPath);
+      if (Array.isArray(shared.files) && Array.isArray(shared.symbols)) {
+        this.state.semanticIndex = {
+          ...shared,
+          shared: {
+            path: this.sharedSemanticIndexPath,
+            loadedAt: nowIso(),
+          },
+        };
+        return this.state.semanticIndex;
+      }
+    }
     if (!this.semanticIndexPath || !fsSync.existsSync(this.semanticIndexPath)) return this.state.semanticIndex;
     const index = await safeReadJson(this.semanticIndexPath);
     if (Array.isArray(index.files) && Array.isArray(index.symbols)) {
@@ -2143,6 +3295,64 @@ class NeuraComposerProvider {
       ...(node.edges || []).map((edge) => edge.target).filter(Boolean),
       ...(node.importedBy || []),
     ];
+  }
+
+  graphCentrality(index, filePath) {
+    const node = (index.graph || []).find((item) => item.filePath === filePath);
+    if (!node) return 0;
+    if (Number.isFinite(Number(node.centrality))) return Number(node.centrality);
+    return Math.min(1, this.graphNeighbors(index, filePath).length / 18);
+  }
+
+  historyScoreForFile(index, filePath, queryTerms) {
+    const commits = index.history?.commits || [];
+    let score = 0;
+    for (const commit of commits.slice(0, 120)) {
+      const touches = (commit.files || []).includes(filePath);
+      if (!touches) continue;
+      const haystack = `${commit.subject || ''} ${(commit.terms || []).join(' ')}`.toLowerCase();
+      const lexical = queryTerms.reduce((sum, term) => sum + (haystack.includes(term) ? 1 : 0), 0);
+      score += 0.08 + Math.min(0.6, lexical * 0.12);
+    }
+    return Math.min(1.2, score);
+  }
+
+  historySearchHits(index, queryTerms, needle, limit) {
+    const records = [
+      ...(index.history?.commits || []),
+      ...(index.history?.pullRequests || []),
+      ...(index.history?.issues || []),
+    ];
+    return records
+      .map((record) => {
+        const haystack = [
+          record.subject,
+          record.title,
+          record.author,
+          record.state,
+          record.headRefName,
+          record.baseRefName,
+          ...(record.labels || []),
+          ...(record.files || []),
+          ...(record.terms || []),
+        ].filter(Boolean).join(' ').toLowerCase();
+        const score = queryTerms.reduce((sum, term) => sum + (haystack.includes(term) ? 1 : 0), 0);
+        return { record, score };
+      })
+      .filter((hit) => hit.score > 0 || (needle.length > 3 && JSON.stringify(hit.record).toLowerCase().includes(needle)))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, Math.max(2, Math.floor(limit / 5)))
+      .map((hit) => ({
+        kind: hit.record.kind || 'history',
+        rootName: hit.record.rootName || '',
+        number: hit.record.number || undefined,
+        sha: hit.record.sha ? String(hit.record.sha).slice(0, 12) : undefined,
+        title: hit.record.title || hit.record.subject || '',
+        state: hit.record.state || '',
+        date: hit.record.date || hit.record.updatedAt || '',
+        files: (hit.record.files || []).slice(0, 12),
+        score: Number((hit.score * 0.8).toFixed(4)),
+      }));
   }
 
   async semanticSearch(query, limit = 20) {
@@ -2176,9 +3386,11 @@ class NeuraComposerProvider {
       });
     const seedFiles = new Set(symbolHits.map((hit) => hit.filePath));
     const neighborFiles = new Set([...seedFiles].flatMap((filePath) => this.graphNeighbors(index, filePath)));
+    const historyHits = this.historySearchHits(index, queryTerms, needle, limit);
     const fileHits = (index.files || [])
       .map((file) => {
-        const haystack = `${file.filePath} ${(file.terms || []).join(' ')} ${(file.imports || []).join(' ')} ${(file.exportedSymbols || []).join(' ')}`.toLowerCase();
+        const graphNode = (index.graph || []).find((node) => node.filePath === file.filePath);
+        const haystack = `${file.filePath} ${file.rootName || ''} ${(file.terms || []).join(' ')} ${(file.imports || []).join(' ')} ${(file.exportedSymbols || []).join(' ')} ${(graphNode?.symbols || []).join(' ')}`.toLowerCase();
         const lexical = queryTerms.reduce((sum, term) => sum + (haystack.includes(term) ? 1 : 0), 0);
         const sparseVector = Array.isArray(file.embedding) ? this.cosineSparse(queryEmbedding, file.embedding) : 0;
         const denseVector = denseQuery && index.denseVectors?.[file.filePath]?.vector
@@ -2186,10 +3398,12 @@ class NeuraComposerProvider {
           : 0;
         const vector = denseVector ? (denseVector * 0.7) + (sparseVector * 0.3) : sparseVector;
         const dependency = seedFiles.has(file.filePath) ? 1 : neighborFiles.has(file.filePath) ? 0.35 : 0;
-        const centrality = Math.min(1, this.graphNeighbors(index, file.filePath).length / 12);
+        const centrality = this.graphCentrality(index, file.filePath);
         const symbolScore = symbolScoreByFile.get(file.filePath) || 0;
-        const score = vector * 6 + lexical * 1.4 + symbolScore * 1.2 + dependency + centrality * 0.25;
-        return { file, score, vector, lexical, dependency };
+        const history = this.historyScoreForFile(index, file.filePath, queryTerms);
+        const rootBoost = queryTerms.some((term) => String(file.rootName || '').toLowerCase().includes(term)) ? 0.35 : 0;
+        const score = vector * 6 + lexical * 1.4 + symbolScore * 1.2 + dependency + centrality * 0.45 + history * 0.8 + rootBoost;
+        return { file, score, vector, lexical, dependency, centrality, history };
       })
       .filter((hit) => hit.score > 0.05 || `${hit.file.filePath} ${(hit.file.terms || []).join(' ')}`.toLowerCase().includes(needle))
       .sort((a, b) => b.score - a.score)
@@ -2204,8 +3418,12 @@ class NeuraComposerProvider {
         score: Number(hit.score.toFixed(4)),
         vectorScore: Number(hit.vector.toFixed(4)),
         dependencyScore: Number(hit.dependency.toFixed(4)),
+        centralityScore: Number(hit.centrality.toFixed(4)),
+        historyScore: Number(hit.history.toFixed(4)),
+        rootName: hit.file.rootName || '',
+        workspacePath: hit.file.workspacePath || hit.file.filePath,
       }));
-    return [...symbolHits, ...fileHits]
+    return [...symbolHits, ...fileHits, ...historyHits]
       .sort((a, b) => (b.score || 0) - (a.score || 0))
       .slice(0, limit);
   }
@@ -2238,6 +3456,12 @@ class NeuraComposerProvider {
     this.ensureWorkspace();
     const pkg = await safeReadJson(path.join(this.rootPath, 'package.json'));
     const scripts = pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {};
+    const packageManager = fsSync.existsSync(path.join(this.rootPath, 'pnpm-lock.yaml'))
+      ? 'pnpm'
+      : fsSync.existsSync(path.join(this.rootPath, 'yarn.lock'))
+        ? 'yarn'
+        : 'npm';
+    const runScript = (name) => `${packageManager} run ${name}`;
     const commandSet = new Map();
     const addCommand = (command, reason, kind = 'verify') => {
       const value = String(command || '').trim();
@@ -2246,10 +3470,11 @@ class NeuraComposerProvider {
     };
     for (const [name, script] of Object.entries(scripts)) {
       const lower = `${name} ${script}`.toLowerCase();
-      if (/\b(typecheck|tsc|check-types)\b/.test(lower)) addCommand(`npm run ${name}`, `package.json script "${name}" runs TypeScript/type checks.`, 'typecheck');
-      if (/\b(lint|eslint|biome|stylelint)\b/.test(lower)) addCommand(`npm run ${name}`, `package.json script "${name}" runs lint diagnostics.`, 'lint');
-      if (/\b(test|vitest|jest|playwright|cypress|mocha|ava)\b/.test(lower)) addCommand(`npm run ${name}`, `package.json script "${name}" runs tests.`, 'test');
-      if (/\b(build|compile)\b/.test(lower)) addCommand(`npm run ${name}`, `package.json script "${name}" verifies production build.`, 'build');
+      if (/\b(typecheck|tsc|check-types)\b/.test(lower)) addCommand(runScript(name), `package.json script "${name}" runs TypeScript/type checks.`, 'typecheck');
+      if (/\b(lint|eslint|biome|stylelint)\b/.test(lower)) addCommand(runScript(name), `package.json script "${name}" runs lint diagnostics.`, 'lint');
+      if (/\b(lint:fix|fix:lint|eslint.*--fix|biome.*--write|format|prettier)\b/.test(lower) || /(^|:)fix$/.test(name)) addCommand(runScript(name), `package.json script "${name}" can repair lint/format issues.`, 'lint-fix');
+      if (/\b(test|vitest|jest|playwright|cypress|mocha|ava)\b/.test(lower)) addCommand(runScript(name), `package.json script "${name}" runs tests.`, 'test');
+      if (/\b(build|compile)\b/.test(lower)) addCommand(runScript(name), `package.json script "${name}" verifies production build.`, 'build');
     }
     const configFiles = [
       ['eslint.config.js', 'npx eslint .', 'ESLint config detected.', 'lint'],
@@ -2270,17 +3495,134 @@ class NeuraComposerProvider {
     const diagnostics = await this.workspaceDiagnostics().catch(() => []);
     const diagnosticFiles = [...new Set(diagnostics.map((item) => item.filePath))].slice(0, 12);
     const failedFiles = this.extractFileMentions(`${failedCommand}\n${diagnostics.map((item) => item.filePath).join('\n')}`);
+    const gitStatus = await this.gitStatusSummary().catch(() => ({ entries: [] }));
+    const changedFiles = [...new Set((gitStatus.entries || []).map((entry) => entry.filePath).filter(Boolean))].slice(0, 30);
+    const likelyFiles = [...new Set([...failedFiles, ...diagnosticFiles, ...changedFiles])].slice(0, 16);
+    const testFiles = likelyFiles.filter((filePath) => /\.(test|spec)\.(js|jsx|ts|tsx|mjs|cjs)$/.test(filePath));
+    const sourceFiles = likelyFiles.filter((filePath) => /\.(js|jsx|ts|tsx|mjs|cjs)$/.test(filePath));
+    const hasVitest = fsSync.existsSync(path.join(this.rootPath, 'vitest.config.ts')) || fsSync.existsSync(path.join(this.rootPath, 'vitest.config.js'));
+    const hasJest = fsSync.existsSync(path.join(this.rootPath, 'jest.config.js')) || fsSync.existsSync(path.join(this.rootPath, 'jest.config.ts'));
+    const hasPlaywright = fsSync.existsSync(path.join(this.rootPath, 'playwright.config.ts')) || fsSync.existsSync(path.join(this.rootPath, 'playwright.config.js'));
+    if (testFiles.length && hasVitest) addCommand(`npx vitest run ${testFiles.slice(0, 4).join(' ')}`, 'Targeted Vitest run for failed/changed test files.', 'targeted-test');
+    if (testFiles.length && hasJest) addCommand(`npx jest ${testFiles.slice(0, 4).join(' ')}`, 'Targeted Jest run for failed/changed test files.', 'targeted-test');
+    if (hasPlaywright) addCommand('npx playwright test --last-failed', 'Targeted Playwright retry of last failed tests.', 'targeted-test');
+    if (sourceFiles.length && hasVitest) addCommand(`npx vitest related ${sourceFiles.slice(0, 4).join(' ')}`, 'Vitest related tests for changed source files.', 'targeted-test');
+    if (sourceFiles.length && hasJest) addCommand(`npx jest --findRelatedTests ${sourceFiles.slice(0, 4).join(' ')}`, 'Jest related tests for changed source files.', 'targeted-test');
     return {
       commands: [...commandSet.values()].slice(0, 12),
       diagnostics,
       diagnosticFiles,
       failedFiles,
-      packageManager: fsSync.existsSync(path.join(this.rootPath, 'pnpm-lock.yaml'))
-        ? 'pnpm'
-        : fsSync.existsSync(path.join(this.rootPath, 'yarn.lock'))
-          ? 'yarn'
-          : 'npm',
+      changedFiles,
+      packageManager,
       scripts,
+    };
+  }
+
+  async detectProductionProfile() {
+    this.ensureWorkspace();
+    const root = this.rootPath;
+    const exists = (filePath) => fsSync.existsSync(path.join(root, filePath));
+    const pkg = await safeReadJson(path.join(root, 'package.json'));
+    const scripts = pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {};
+    const dependencies = {
+      ...(pkg.dependencies || {}),
+      ...(pkg.devDependencies || {}),
+    };
+    const packageManager = exists('pnpm-lock.yaml')
+      ? 'pnpm'
+      : exists('yarn.lock')
+        ? 'yarn'
+        : 'npm';
+    const runScript = (name) => `${packageManager} run ${name}`;
+    const hasDep = (name) => Boolean(dependencies[name]);
+    const hasScript = (pattern) => Object.entries(scripts).find(([name, script]) => pattern.test(`${name} ${script}`));
+    const frameworkSignals = [];
+    const addSignal = (name, reason, outputDir = '') => frameworkSignals.push({ name, reason, outputDir });
+    if (hasDep('next') || exists('next.config.js') || exists('next.config.mjs') || exists('next.config.ts')) addSignal('next', 'Next.js dependency or config detected.', '.next');
+    if (hasDep('@sveltejs/kit') || exists('svelte.config.js')) addSignal('sveltekit', 'SvelteKit dependency or config detected.', 'build');
+    if (hasDep('astro') || exists('astro.config.mjs') || exists('astro.config.ts')) addSignal('astro', 'Astro dependency or config detected.', 'dist');
+    if (hasDep('nuxt') || exists('nuxt.config.ts') || exists('nuxt.config.js')) addSignal('nuxt', 'Nuxt dependency or config detected.', '.output');
+    if (hasDep('@remix-run/dev') || exists('remix.config.js')) addSignal('remix', 'Remix dependency or config detected.', 'build');
+    if (hasDep('vite') || exists('vite.config.ts') || exists('vite.config.js') || exists('vite.config.mjs')) addSignal('vite', 'Vite dependency or config detected.', 'dist');
+    if (hasDep('react')) addSignal('react', 'React dependency detected.', 'dist');
+    if (hasDep('vue')) addSignal('vue', 'Vue dependency detected.', 'dist');
+    if (hasDep('@angular/core') || exists('angular.json')) addSignal('angular', 'Angular dependency or config detected.', 'dist');
+    if (hasDep('electron') || exists('electron.vite.config.ts')) addSignal('electron', 'Electron dependency or config detected.', 'out');
+    if (!frameworkSignals.length && (exists('index.html') || exists('src/index.html'))) addSignal('static', 'Static HTML entry detected.', '.');
+
+    const primaryFramework = frameworkSignals[0] || { name: 'unknown', reason: 'No recognized app framework detected.', outputDir: '' };
+    const commands = [];
+    const addCommand = (command, purpose, kind = 'ship') => {
+      const value = String(command || '').trim();
+      if (!value || commands.some((item) => item.command === value)) return;
+      commands.push({ command: value, purpose, kind });
+    };
+    const addScript = (pattern, purpose, kind) => {
+      const match = hasScript(pattern);
+      if (match) addCommand(runScript(match[0]), purpose.replace('{script}', match[0]), kind);
+    };
+    if (pkg.name && !exists('node_modules')) {
+      addCommand(packageManager === 'npm' ? 'npm install' : `${packageManager} install`, 'Install dependencies before production verification.', 'install');
+    }
+    addScript(/\b(lint|eslint|biome|stylelint)\b/i, 'Run lint script "{script}" before shipping.', 'lint');
+    addScript(/\b(typecheck|tsc|check-types)\b/i, 'Run typecheck script "{script}" before shipping.', 'typecheck');
+    addScript(/\b(test|vitest|jest|playwright|cypress)\b/i, 'Run test script "{script}" before shipping.', 'test');
+    addScript(/\b(build|compile)\b/i, 'Run production build script "{script}".', 'build');
+    addScript(/\b(preview|serve)\b/i, 'Run local production preview script "{script}".', 'preview');
+
+    const deployTargets = [];
+    if (exists('netlify.toml')) deployTargets.push({ id: 'netlify', config: 'netlify.toml' });
+    if (exists('vercel.json')) deployTargets.push({ id: 'vercel', config: 'vercel.json' });
+    if (exists('Dockerfile')) deployTargets.push({ id: 'docker', config: 'Dockerfile' });
+    if (exists('render.yaml')) deployTargets.push({ id: 'render', config: 'render.yaml' });
+    if (exists('fly.toml')) deployTargets.push({ id: 'fly', config: 'fly.toml' });
+    const githubWorkflows = exists('.github/workflows');
+    const outputDir = primaryFramework.outputDir || (exists('dist') ? 'dist' : exists('build') ? 'build' : '');
+    if (deployTargets.some((target) => target.id === 'netlify')) {
+      addCommand('npx netlify deploy --build', 'Create a Netlify draft deploy after local verification.', 'deploy-preview');
+      addCommand('npx netlify deploy --prod --build', 'Deploy to Netlify production after approval.', 'deploy-production');
+    } else if (['vite', 'react', 'vue', 'astro', 'static'].includes(primaryFramework.name)) {
+      const publish = outputDir && outputDir !== '.' ? outputDir : '.';
+      addCommand(`npx netlify deploy --dir=${publish}`, 'Create a Netlify draft deploy for static output after build.', 'deploy-preview');
+    }
+    if (deployTargets.some((target) => target.id === 'vercel')) {
+      addCommand('npx vercel build', 'Run Vercel production build locally.', 'deploy-build');
+      addCommand('npx vercel deploy --prebuilt', 'Create a Vercel preview deploy from the local build.', 'deploy-preview');
+    }
+    if (deployTargets.some((target) => target.id === 'docker')) {
+      addCommand(`docker build -t ${this.slugForText(pkg.name || this.projectName, 'neura-app')} .`, 'Build the production Docker image.', 'package');
+    }
+
+    const missing = [];
+    if (pkg.name && !Object.keys(scripts).some((name) => /\bbuild\b/i.test(name))) missing.push('package.json build script');
+    if (!Object.keys(scripts).some((name) => /\b(lint|check|typecheck|test)\b/i.test(name))) missing.push('lint/typecheck/test scripts');
+    if (!exists('.env.example') && (exists('.env') || /api|auth|database|stripe|supabase|firebase/i.test(JSON.stringify(dependencies)))) missing.push('.env.example without secrets');
+    if (!deployTargets.length && ['vite', 'react', 'vue', 'astro', 'static', 'next', 'sveltekit'].includes(primaryFramework.name)) missing.push('deployment config such as netlify.toml or vercel.json');
+    if (!githubWorkflows) missing.push('CI workflow for build/test checks');
+
+    const checklist = [
+      { title: 'Dependency install is reproducible', status: exists('package-lock.json') || exists('pnpm-lock.yaml') || exists('yarn.lock') ? 'ready' : 'missing', detail: 'A lockfile should exist before shipping.' },
+      { title: 'Lint/typecheck/test/build commands are available', status: commands.some((item) => item.kind === 'build') ? 'ready' : 'missing', detail: 'Production release needs repeatable verification commands.' },
+      { title: 'Deploy target is configured', status: deployTargets.length ? 'ready' : 'missing', detail: deployTargets.length ? deployTargets.map((target) => target.config).join(', ') : 'No deploy config detected.' },
+      { title: 'Secrets are documented safely', status: exists('.env.example') ? 'ready' : 'missing', detail: 'Use .env.example for names only, never real secret values.' },
+      { title: 'CI can guard production', status: githubWorkflows ? 'ready' : 'missing', detail: 'A CI workflow should run checks on push/PR.' },
+    ];
+
+    return {
+      packageName: pkg.name || '',
+      packageManager,
+      framework: primaryFramework.name,
+      frameworkSignals,
+      outputDir,
+      scripts,
+      dependencies: Object.keys(dependencies).slice(0, 80),
+      deployTargets,
+      githubWorkflows,
+      missing,
+      checklist,
+      commands: commands.slice(0, 14),
+      detectedAt: nowIso(),
     };
   }
 
@@ -2296,11 +3638,15 @@ class NeuraComposerProvider {
       .map((entry) => {
         let score = 0;
         if (entry.command === card?.command) score += 30;
+        if (entry.kind === 'targeted-test') score += 18;
+        if (entry.kind === 'lint-fix' && /fix|autofix|lint|eslint|biome|prettier/.test(outputText)) score += 28;
         if (entry.kind === 'lint' && /lint|eslint|biome|stylelint|prettier/.test(outputText)) score += 25;
         if (entry.kind === 'test' && /test|spec|jest|vitest|playwright|cypress|expect|assert/.test(outputText)) score += 25;
         if (entry.kind === 'typecheck' && /tsc|typescript|type error|typecheck/.test(outputText)) score += 25;
         if (entry.kind === 'build' && /build|compile|bundle|vite|next/.test(outputText)) score += 15;
         if (changedFiles.size && entry.kind === 'test') score += 8;
+        if (changedFiles.size && entry.kind === 'targeted-test') score += 18;
+        if ((profile.diagnosticFiles || []).length && (entry.kind === 'lint' || entry.kind === 'typecheck')) score += 10;
         if (entry.kind === 'rerun') score += 20;
         return { ...entry, score };
       })
@@ -2346,9 +3692,11 @@ class NeuraComposerProvider {
   latestPreviewStatus() {
     const preview = this.state.preview || null;
     const latestVerification = (this.state.artifacts || []).find((artifact) => artifact.kind === 'preview');
+    const latestBrowserAgent = (this.state.artifacts || []).find((artifact) => artifact.kind === 'browser-agent');
     return {
       preview,
       latestVerification: latestVerification || null,
+      latestBrowserAgent: latestBrowserAgent || null,
     };
   }
 
@@ -2364,28 +3712,49 @@ class NeuraComposerProvider {
       }
     }
 
-    const files = [];
-    for (const filePath of [...contextFiles].slice(0, 12)) {
+    const selectedPaths = [...contextFiles].slice(0, 12);
+    const files = await Promise.all(selectedPaths.map(async (filePath) => {
       try {
-        files.push(await this.readWorkspaceFile(filePath));
+        return await this.readWorkspaceFile(filePath);
       } catch (error) {
-        files.push({
+        return {
           filePath,
           content: `Unable to read file: ${error instanceof Error ? error.message : 'Unknown error'}`,
           truncated: false,
-        });
+        };
       }
-    }
-
+    }));
     const includeTree = mentions.includes('codebase') || mentions.includes('workspace') || !files.length;
     const semanticIndex = await this.loadSemanticIndex();
+    const [
+      treeResult,
+      shadcn,
+      diagnostics,
+      semanticHits,
+      production,
+      gitStatus,
+      packageInfo,
+    ] = await Promise.all([
+      this.cachedTool(`tree:${includeTree ? 120 : 40}`, 6000, async () => this.projectTree(includeTree ? 120 : 40)).then((result) => result.value),
+      this.cachedTool('shadcn', 12000, async () => this.readShadcnContext()).then((result) => result.value),
+      this.cachedTool('diagnostics:workspace', 2500, async () => this.workspaceDiagnostics().catch(() => [])).then((result) => result.value),
+      semanticIndex?.updatedAt
+        ? this.cachedTool(`semantic-context:${String(prompt || '').slice(0, 120)}`, 15000, async () => this.semanticSearch(prompt, 12)).then((result) => result.value)
+        : Promise.resolve([]),
+      this.cachedTool('production_profile', 8000, async () => this.detectProductionProfile().catch((error) => ({ error: errorMessageFor(error) }))).then((result) => result.value),
+      this.cachedTool('git_status', 3000, async () => this.gitStatusSummary()).then((result) => result.value),
+      this.cachedTool('package:package.json', 8000, async () => this.inspectPackageScripts('package.json')).then((result) => result.value),
+    ]);
     return {
       mentions,
       files,
-      tree: includeTree ? await this.projectTree(120) : await this.projectTree(40),
-      shadcn: await this.readShadcnContext(),
-      diagnostics: await this.workspaceDiagnostics().catch(() => []),
-      semanticHits: semanticIndex?.updatedAt ? await this.semanticSearch(prompt, 12) : [],
+      tree: treeResult,
+      shadcn,
+      diagnostics,
+      semanticHits,
+      production,
+      gitStatus,
+      packageInfo,
     };
   }
 
@@ -2577,6 +3946,12 @@ class NeuraComposerProvider {
     const intent = this.classifyIntent(prompt, context, parsed);
     mode = intent.mode;
     this.state.mode = mode;
+    if (mode === 'ship' && context.production) {
+      this.recordArtifact('production-profile', `Production profile: ${this.projectName}`, `Detected ${context.production.framework || 'unknown'} shipping profile.`, {
+        runId: this.state.activeRunId,
+        profile: context.production,
+      });
+    }
     this.state.reasoning = parsed.reasoning;
     this.state.messages.push({
       id: id('msg'),
@@ -2651,18 +4026,31 @@ class NeuraComposerProvider {
         kind: 'thinking',
         status: 'failed',
         title: 'Thinking stopped',
-        text: 'NVIDIA NIM is not configured, so Neura cannot start a coding request.',
+        text: 'No AI provider is configured, so Neura cannot start a coding request.',
       });
       this.state.messages.push({
         id: id('msg'),
         role: 'assistant',
         mode,
         content:
-          'NVIDIA NIM is not configured for Neura IDE. Set neura.nim.apiKey, neura.nim.baseUrl, and neura.nim.model in Settings, or provide NVIDIA_NIM_API_KEY.',
+          'No AI provider is configured for Neura IDE. Configure OpenRouter first, or Ollama, or NVIDIA NIM in Settings. Env fallbacks: OPENROUTER_API_KEY/OPENROUTER_MODEL, OLLAMA_API_KEY/OLLAMA_MODEL, or NVIDIA_NIM_API_KEY/NVIDIA_NIM_MODEL.',
         createdAt: nowIso(),
       });
       await this.saveState();
       this.renderIfVisible();
+      return;
+    }
+
+    if (editableModes.has(mode)) {
+      await this.runAutoSwarmForPrompt(prompt, mode, context, thinkingMessage);
+      this.recordArtifact('run-complete', `Run delegated to swarm: ${prompt.slice(0, 80) || mode}`, `Started an automatic ${modeLabels[mode] || mode} swarm workflow.`, {
+        runId: this.state.activeRunId || previousRunId,
+        mode,
+        prompt,
+        status: 'swarm-running',
+      });
+      await this.saveState();
+      this.renderIfVisible(true);
       return;
     }
 
@@ -2671,9 +4059,20 @@ class NeuraComposerProvider {
       let result = editableModes.has(mode)
         ? await this.runAgenticWorkflow(mode, prompt, context, attachments, thinkingMessage)
         : await this.callNim(mode, prompt, context, attachments);
+      result = this.ensureProductionReadyResult(mode, result, context);
       if (mode === 'builder' && !this.hasResultEditLike(result)) {
         throw new Error(
           `Builder did not return file changes for "${prompt}". I rejected that response because Build mode must create or update files. Retry the same request, or add more detail if you want a specific framework.`,
+        );
+      }
+      if (
+        mode === 'ship' &&
+        !(Array.isArray(result.questions) && result.questions.length) &&
+        !this.hasResultEditLike(result) &&
+        !this.normalizeResultCommands(result).length
+      ) {
+        throw new Error(
+          `Ship mode did not return production edits or approval-gated commands for "${prompt}". I rejected that response because shipping must produce a concrete preflight/deploy path.`,
         );
       }
       thinkingMessage.content = JSON.stringify({
@@ -2749,9 +4148,16 @@ class NeuraComposerProvider {
     const target = this.rootPath
       ? vscode.ConfigurationTarget.Workspace
       : vscode.ConfigurationTarget.Global;
-    await vscode.workspace.getConfiguration('neura.nim').update('model', selected, target);
+    const provider = this.config.provider || 'nim';
+    const section = provider === 'openrouter'
+      ? 'neura.openrouter'
+      : provider === 'ollama'
+        ? 'neura.ollama'
+        : 'neura.nim';
+    await vscode.workspace.getConfiguration(section).update('model', selected, target);
     this.config = await this.readNimConfig();
     logNeura('Model switched', {
+      provider: this.config.provider,
       model: this.config.model,
       baseUrl: this.config.baseUrl,
       configured: this.config.configured,
@@ -2830,49 +4236,26 @@ class NeuraComposerProvider {
     const requestMeta = {
       mode,
       model: this.config.model,
+      provider: this.config.provider,
       baseUrl: this.config.baseUrl,
       timeoutMs: this.config.timeoutMs,
       contextFiles: context.files.length,
       treeFiles: context.tree.length,
       attachments: attachments.length,
     };
-    logNeura('NIM request started', requestMeta);
+    logNeura('AI request started', requestMeta);
     try {
-      const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.config.apiKey}`,
-          'content-type': 'application/json',
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: this.config.model,
-          temperature: mode === 'ask' ? 0.15 : 0.2,
-          max_tokens: editableModes.has(mode) ? 6000 : 3500,
-          messages: [
-            { role: 'system', content: this.systemPrompt(mode) },
-            { role: 'user', content: userContent },
-          ],
-        }),
-      });
-      const rawBody = await response.text();
-      let payload = {};
-      try {
-        payload = rawBody ? JSON.parse(rawBody) : {};
-      } catch {
-        payload = {};
-      }
-      if (!response.ok) {
-        const providerMessage = payload.error?.message || rawBody || 'No provider error body.';
-        logNeura('NIM request failed', {
-          ...requestMeta,
-          status: response.status,
-          providerMessage: String(providerMessage).slice(0, 500),
-        });
-        throw new Error(
-          `NVIDIA NIM returned HTTP ${response.status} for ${this.config.model}: ${providerMessage}`,
-        );
-      }
+      const { payload, provider } = await this.requestChatCompletion({
+        temperature: mode === 'ask' ? 0.15 : 0.2,
+        max_tokens: editableModes.has(mode) ? 6000 : 3500,
+        messages: [
+          { role: 'system', content: this.systemPrompt(mode) },
+          { role: 'user', content: userContent },
+        ],
+      }, requestMeta);
+      requestMeta.provider = provider.id;
+      requestMeta.providerLabel = provider.label;
+      requestMeta.model = provider.model;
       const choice = payload.choices?.[0] || {};
       const message = choice.message || {};
       const content = typeof message.content === 'string' ? message.content : '';
@@ -2883,7 +4266,7 @@ class NeuraComposerProvider {
             ? message.reasoning
             : '';
       if (!content) {
-        logNeura('NIM request returned no final content', {
+        logNeura('AI request returned no final content', {
           ...requestMeta,
           finishReason: choice.finish_reason,
           reasoningChars: reasoningText.length,
@@ -2891,14 +4274,14 @@ class NeuraComposerProvider {
         });
         if (reasoningText) {
           throw new Error(
-            `NVIDIA NIM returned reasoning output but no final Composer response for ${this.config.model}. Finish reason: ${choice.finish_reason || 'unknown'}. Switch to Nemotron 3 Nano or another non-stalling coding model, then retry. Details are in Output: Neura Composer.`,
+            `${provider.label} returned reasoning output but no final Composer response for ${provider.model}. Finish reason: ${choice.finish_reason || 'unknown'}. The fallback chain was already attempted. Details are in Output: Neura Composer.`,
           );
         }
         throw new Error(
-          `NVIDIA NIM returned an empty response for ${this.config.model}. Details are in Output: Neura Composer.`,
+          `${provider.label} returned an empty response for ${provider.model}. The fallback chain was already attempted. Details are in Output: Neura Composer.`,
         );
       }
-      logNeura('NIM request completed', {
+      logNeura('AI request completed', {
         ...requestMeta,
         replyChars: String(content).length,
       });
@@ -2910,24 +4293,24 @@ class NeuraComposerProvider {
         parsed._finishReason = choice.finish_reason || '';
         return parsed;
       } catch (error) {
-        logNeura('NIM response JSON parse failed', {
+        logNeura('AI response JSON parse failed', {
           ...requestMeta,
           replyPreview: String(content).slice(0, 700),
           error: errorMessageFor(error),
         });
         throw new Error(
-          `NVIDIA NIM returned text that Neura could not parse as a coding response. Try Nemotron 3 Nano or ask again. Details are in Output: Neura Composer.`,
+          `${provider.label} returned text that Neura could not parse as a coding response. Try a stricter coding model or ask again. Details are in Output: Neura Composer.`,
         );
       }
     } catch (error) {
       const message = errorMessageFor(error);
-      logNeura('NIM request error', {
+      logNeura('AI request error', {
         ...requestMeta,
         error: message,
       });
       if (error?.name === 'AbortError') {
         throw new Error(
-          `NVIDIA NIM did not reply within ${Math.round(this.config.timeoutMs / 1000)}s for ${this.config.model}. Switch to Nemotron 3 Nano or another faster model, then retry.`,
+          `No AI provider replied within ${Math.round(this.config.timeoutMs / 1000)}s for the active fallback chain.`,
         );
       }
       throw error;
@@ -2942,6 +4325,7 @@ class NeuraComposerProvider {
     const requestMeta = {
       mode: 'builder-strict',
       model: this.config.model,
+      provider: this.config.provider,
       baseUrl: this.config.baseUrl,
       timeoutMs: this.config.timeoutMs,
       treeFiles: context.tree.length,
@@ -2951,48 +4335,29 @@ class NeuraComposerProvider {
       'You are Neura Builder, a code generator inside Neura IDE.',
       'Return exactly one JSON object. No markdown. No explanation outside JSON.',
       'Create real working project files for the user request.',
+      'The result must be production-ready by default, not a prototype.',
       'The edits array is mandatory unless you ask a blocking clarification question.',
-      'For simple static websites/apps, create complete index.html, styles.css, and app.js files.',
+      'Include verification and preview commands so the user can approve and run them.',
+      'For simple static websites/apps, create complete index.html, styles.css, and app.js files with responsive layout, accessible controls, durable local state when useful, and real empty/error states.',
       'If components.json is present, respect the existing shadcn/ui and Tailwind setup. Propose package/CLI commands instead of silently assuming dependencies.',
+      'Add package scripts, deploy config, .env.example without secrets, CI, or README deploy notes only when they are genuinely useful for production readiness.',
       'Use full-file contents for every create/update edit. Use relative workspace paths.',
       'Do not claim files were created. Only propose edits.',
       'Schema: {"message":"summary","questions":["only if blocked"],"todos":[{"title":"task","rationale":"why","status":"pending"}],"edits":[{"operation":"create|update|delete","filePath":"path","content":"full file content","rationale":"why"}],"commands":[{"command":"shell command","purpose":"why"}],"preview":{"command":"shell command","url":"http://localhost:port"},"referencedFiles":["path"]}',
     ].join('\n');
     logNeura('Strict builder request started', requestMeta);
     try {
-      const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.config.apiKey}`,
-          'content-type': 'application/json',
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: this.config.model,
-          temperature: 0.1,
-          max_tokens: 7000,
-          messages: [
-            { role: 'system', content: systemContent },
-            { role: 'user', content: userContent },
-          ],
-        }),
-      });
-      const rawBody = await response.text();
-      let payload = {};
-      try {
-        payload = rawBody ? JSON.parse(rawBody) : {};
-      } catch {
-        payload = {};
-      }
-      if (!response.ok) {
-        const providerMessage = payload.error?.message || rawBody || 'No provider error body.';
-        logNeura('Strict builder request failed', {
-          ...requestMeta,
-          status: response.status,
-          providerMessage: String(providerMessage).slice(0, 500),
-        });
-        throw new Error(`NVIDIA NIM returned HTTP ${response.status}: ${providerMessage}`);
-      }
+      const { payload, provider } = await this.requestChatCompletion({
+        temperature: 0.1,
+        max_tokens: 7000,
+        messages: [
+          { role: 'system', content: systemContent },
+          { role: 'user', content: userContent },
+        ],
+      }, requestMeta);
+      requestMeta.provider = provider.id;
+      requestMeta.providerLabel = provider.label;
+      requestMeta.model = provider.model;
       const choice = payload.choices?.[0] || {};
       const message = choice.message || {};
       const content = typeof message.content === 'string' ? message.content : '';
@@ -3060,10 +4425,19 @@ class NeuraComposerProvider {
       );
     } else if (mode === 'builder') {
       base.push(
-        'Mode: Build. Create or extend websites/apps from natural language. Propose files, package changes, preview/build commands, and verification steps.',
-        'For a simple website/app request, create individual files such as index.html, styles.css, script.js, package.json, or framework files as appropriate. Include complete file contents.',
-        'Builder must include at least one edit unless it asks a blocking clarification question. A plan without edits is invalid in Build mode.',
+        'Mode: Build. Create or extend production-ready websites/apps from natural language. Propose files, package changes, preview/build commands, verification steps, and deploy-ready configuration when appropriate.',
+        'For a simple website/app request, create individual files such as index.html, styles.css, script.js, package.json, or framework files as appropriate. Include complete file contents and make the result responsive, accessible, durable, and ready to verify.',
+        'Builder must include at least one edit and approval-gated verification/preview commands unless it asks a blocking clarification question. A plan without edits is invalid in Build mode.',
+        'Use the production shipping profile in context. If deploy, CI, .env.example, package scripts, or README ship notes are missing and relevant, propose real edits. Never use fake secrets.',
         'Schema: {"message":"summary","questions":["only if blocked"],"todos":[{"title":"task","rationale":"why","status":"pending"}],"edits":[{"operation":"create|update|delete","filePath":"path","content":"full content for create/update","rationale":"why"}],"commands":[{"command":"shell command","purpose":"why"}],"preview":{"command":"dev server command","url":"http://localhost:port"},"referencedFiles":["path"]}',
+      );
+    } else if (mode === 'ship') {
+      base.push(
+        'Mode: Ship. Prepare the workspace for production release. Inspect the production shipping profile, fix real readiness gaps, and propose an approval-gated preflight/deploy sequence.',
+        'Ship mode should cover dependency install, lint/typecheck/test/build, local preview or browser verification, deploy preview, production deploy, and proof/report artifacts where applicable.',
+        'When deployment, CI, or environment documentation is missing, propose real file edits such as netlify.toml, vercel.json, Dockerfile, .env.example without secrets, GitHub Actions CI, README deploy notes, or package scripts. Do not add fake secret values.',
+        'Ship mode must include command proposals unless it asks a blocking clarification question. Prefer deploy preview or dry-run commands before production deploy commands.',
+        'Schema: {"message":"production readiness summary","questions":["only if blocked"],"todos":[{"title":"task","rationale":"why","status":"pending"}],"edits":[{"operation":"create|update|delete","filePath":"path","content":"full content for create/update","rationale":"why"}],"commands":[{"command":"shell command","purpose":"why"}],"preview":{"command":"production preview command","url":"http://localhost:port"},"referencedFiles":["path"]}',
       );
     } else {
       base.push(
@@ -3109,6 +4483,25 @@ class NeuraComposerProvider {
         ? `${hit.filePath}:${hit.line} symbol ${hit.name} - ${hit.preview}`
         : `${hit.filePath} terms ${(hit.terms || []).join(', ')}`)
       .join('\n');
+    const production = context.production || null;
+    const productionText = production
+      ? [
+          production.error ? `error: ${production.error}` : '',
+          production.framework ? `framework: ${production.framework}` : '',
+          production.packageManager ? `packageManager: ${production.packageManager}` : '',
+          production.outputDir ? `outputDir: ${production.outputDir}` : '',
+          production.deployTargets?.length
+            ? `deployTargets: ${production.deployTargets.map((target) => target.id || target.config).join(', ')}`
+            : 'deployTargets: none detected',
+          production.missing?.length ? `readinessGaps:\n${production.missing.map((item) => `- ${item}`).join('\n')}` : 'readinessGaps: none detected',
+          production.commands?.length
+            ? `recommendedCommands:\n${production.commands.map((item) => `- ${item.command} (${item.kind}): ${item.purpose}`).join('\n')}`
+            : 'recommendedCommands: none detected',
+          production.checklist?.length
+            ? `checklist:\n${production.checklist.map((item) => `- [${item.status}] ${item.title}: ${item.detail}`).join('\n')}`
+            : '',
+        ].filter(Boolean).join('\n')
+      : '';
     const memory = this.state.memory || {};
     const memoryText = [
       ...(memory.facts || [])
@@ -3130,6 +4523,7 @@ class NeuraComposerProvider {
       shadcnText ? `shadcn/ui project context:\n${shadcnText}` : 'shadcn/ui project context: not configured',
       diagnosticText ? `Current editor diagnostics:\n${diagnosticText}` : 'Current editor diagnostics: none',
       semanticText ? `Semantic index hits:\n${semanticText}` : 'Semantic index hits: none',
+      productionText ? `Production shipping profile:\n${productionText}` : 'Production shipping profile: unavailable',
       files ? `Selected context files:\n${files}` : 'Selected context files: none',
       textAttachments ? `Attached text files:\n${textAttachments}` : 'Attached text files: none',
       mediaAttachments ? `Attached media:\n${mediaAttachments}` : 'Attached media: none',
@@ -3223,6 +4617,81 @@ class NeuraComposerProvider {
 
   hasResultEditLike(result) {
     return this.normalizeResultEdits(result).length > 0;
+  }
+
+  ensureProductionReadyResult(mode, result, context) {
+    if (!result || !['builder', 'ship'].includes(mode)) return result;
+    if (Array.isArray(result.questions) && result.questions.length) return result;
+    const profile = context.production && !context.production.error ? context.production : null;
+    const normalizedEdits = this.normalizeResultEdits(result);
+    const existingCommands = this.normalizeResultCommands(result);
+    const commands = Array.isArray(result.commands) ? [...result.commands] : [];
+    const addCommand = (command, purpose) => {
+      const value = String(command || '').trim();
+      if (!value || existingCommands.some((item) => item.command === value) || commands.some((item) => String(item.command || item) === value)) return;
+      commands.push({ command: value, purpose });
+    };
+
+    const proposedPackage = normalizedEdits.find((edit) => normalizeSlashes(edit.filePath).toLowerCase() === 'package.json');
+    let proposedScripts = {};
+    if (proposedPackage?.content) {
+      try {
+        const parsedPackage = JSON.parse(proposedPackage.content);
+        proposedScripts = parsedPackage.scripts && typeof parsedPackage.scripts === 'object' ? parsedPackage.scripts : {};
+      } catch {
+        proposedScripts = {};
+      }
+    }
+    const packageManager = profile?.packageManager || 'npm';
+    const runScript = (name) => `${packageManager} run ${name}`;
+    const addScriptCommand = (scripts, pattern, purpose) => {
+      const match = Object.entries(scripts || {}).find(([name, script]) => pattern.test(`${name} ${script}`));
+      if (match) addCommand(runScript(match[0]), purpose.replace('{script}', match[0]));
+    };
+
+    if (!existingCommands.length && profile?.commands?.length) {
+      for (const entry of profile.commands) {
+        if (mode === 'builder' && /^deploy-production$/.test(entry.kind || '')) continue;
+        addCommand(entry.command, entry.purpose);
+      }
+    }
+    if (proposedPackage) {
+      addCommand(packageManager === 'npm' ? 'npm install' : `${packageManager} install`, 'Install the proposed app dependencies before verification.');
+      addScriptCommand(proposedScripts, /\b(lint|eslint|biome|stylelint)\b/i, 'Run lint script "{script}" before accepting the build.');
+      addScriptCommand(proposedScripts, /\b(typecheck|tsc|check-types)\b/i, 'Run typecheck script "{script}" before accepting the build.');
+      addScriptCommand(proposedScripts, /\b(test|vitest|jest|playwright|cypress)\b/i, 'Run test script "{script}" before accepting the build.');
+      addScriptCommand(proposedScripts, /\b(build|compile)\b/i, 'Run production build script "{script}".');
+      addScriptCommand(proposedScripts, /\b(preview|serve)\b/i, 'Run local production preview script "{script}".');
+    }
+    const createsStaticEntry = normalizedEdits.some((edit) => /(^|\/)index\.html$/i.test(normalizeSlashes(edit.filePath)));
+    if (!commands.length && createsStaticEntry) {
+      addCommand('npx serve . -l 4173', 'Serve the static app locally for production smoke testing.');
+    }
+
+    if (commands.length) {
+      result.commands = commands;
+    }
+    if (!result.preview && commands.some((item) => /\b(preview|serve|http-server|vite --host|next start)\b/i.test(String(item.command || item)))) {
+      const previewCommand = commands.find((item) => /\b(preview|serve|http-server|vite --host|next start)\b/i.test(String(item.command || item)));
+      result.preview = {
+        command: String(previewCommand.command || previewCommand),
+        url: 'http://localhost:4173',
+      };
+    }
+
+    const readinessTodos = (profile?.checklist || [])
+      .filter((item) => item.status !== 'ready')
+      .slice(0, 5)
+      .map((item) => ({
+        title: item.title,
+        rationale: item.detail,
+        status: 'pending',
+      }));
+    if (readinessTodos.length) {
+      const existingTodos = Array.isArray(result.todos) ? result.todos : [];
+      result.todos = [...existingTodos, ...readinessTodos].slice(0, 12);
+    }
+    return result;
   }
 
   async acceptModelResult(mode, result, context) {
@@ -3365,6 +4834,18 @@ class NeuraComposerProvider {
     );
     if (!edits.length) return;
 
+    for (const edit of edits) {
+      const policy = this.evaluatePolicy('file_write', edit.filePath, {
+        proposalId,
+        operation: edit.operation,
+        auto: Boolean(options.skipConfirmation),
+      });
+      if (policy.decision === 'deny') throw new Error(`Neura policy denied file write for ${edit.filePath}: ${policy.reason}`);
+      if (policy.decision === 'ask' && options.skipConfirmation) {
+        throw new Error(`Neura policy requires approval before writing ${edit.filePath}.`);
+      }
+    }
+
     if (!options.skipConfirmation) {
       const approval = await vscode.window.showWarningMessage(
         `${filePath ? `Apply ${filePath}` : `Apply ${edits.length} file change(s)`}? Neura will create a local checkpoint first.`,
@@ -3376,6 +4857,8 @@ class NeuraComposerProvider {
 
     const checkpoint = await this.createCheckpoint(`Before ${proposal.summary.slice(0, 80)}`, edits);
     proposal.lastCheckpointId = checkpoint.id;
+    const beforeFiles = new Map((checkpoint.files || []).map((file) => [file.filePath, file]));
+    const beforeAfter = [];
     for (const edit of edits) {
       const absolute = this.absoluteFor(edit.filePath);
       if (edit.operation === 'delete') {
@@ -3384,11 +4867,23 @@ class NeuraComposerProvider {
         await fs.mkdir(path.dirname(absolute), { recursive: true });
         await fs.writeFile(absolute, edit.content, 'utf8');
       }
+      const afterExists = fsSync.existsSync(absolute);
+      const afterContent = afterExists && edit.operation !== 'delete' ? await fs.readFile(absolute, 'utf8') : '';
+      const before = beforeFiles.get(edit.filePath);
+      beforeAfter.push({
+        filePath: edit.filePath,
+        operation: edit.operation,
+        existedBefore: Boolean(before?.existed),
+        existsAfter: afterExists && edit.operation !== 'delete',
+        beforeHash: hashKey(before?.content || ''),
+        afterHash: hashKey(afterContent || ''),
+      });
       edit.status = 'applied';
     }
     this.recordArtifact('apply', proposal.summary, `${edits.length} file change(s) applied.`, {
       proposalId: proposal.id,
       files: edits.map((edit) => ({ filePath: edit.filePath, operation: edit.operation })),
+      beforeAfter,
       checkpointId: checkpoint.id,
     });
     proposal.status = proposal.edits.every((edit) => edit.status === 'applied')
@@ -3578,18 +5073,64 @@ class NeuraComposerProvider {
   }
 
   async reviewCurrentFileProposal() {
-    const filePath = await this.activeEditorFile();
-    if (!filePath) {
-      await vscode.window.showInformationMessage('Open a workspace file with a pending Neura edit first.');
-      return;
-    }
-    const proposal = this.pendingProposalForFile(filePath);
-    if (!proposal) {
+    let selection;
+    try {
+      selection = await this.currentFilePendingEdit();
+    } catch {
       await vscode.window.showInformationMessage('No pending Neura edit was found for the active file.');
       return;
     }
+    const { proposal, filePath } = selection;
     await this.openDiff(proposal.id, filePath);
-    await this.reveal();
+  }
+
+  async acceptCurrentFileProposal() {
+    const { proposal, filePath } = await this.currentFilePendingEdit();
+    await this.applyProposal(proposal.id, filePath);
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(this.absoluteFor(filePath)));
+    await vscode.window.showTextDocument(document, { preview: false });
+  }
+
+  async rejectCurrentFileProposal() {
+    const { proposal, filePath } = await this.currentFilePendingEdit();
+    await this.rejectProposal(proposal.id, filePath);
+    await vscode.window.showInformationMessage(`Rejected Neura edit for ${filePath}.`);
+  }
+
+  async reapplyCurrentFileProposal() {
+    const { proposal, edit, filePath } = await this.currentFilePendingEdit();
+    const checkpoint = await this.createCheckpoint(`Before reapply ${filePath}`, [edit]);
+    proposal.lastCheckpointId = checkpoint.id;
+    const absolute = this.absoluteFor(filePath);
+    if (edit.operation === 'delete') {
+      if (fsSync.existsSync(absolute)) await fs.unlink(absolute);
+    } else {
+      await fs.mkdir(path.dirname(absolute), { recursive: true });
+      await fs.writeFile(absolute, edit.content, 'utf8');
+    }
+    edit.status = 'applied';
+    proposal.status = proposal.edits.every((item) => item.status === 'applied') ? 'applied' : 'partially_applied';
+    this.recordArtifact('editor-native-edit', `Reapplied file: ${filePath}`, `Reapplied Neura proposal from the editor for ${filePath}.`, {
+      proposalId: proposal.id,
+      filePath,
+      checkpointId: checkpoint.id,
+    });
+    await this.saveState();
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(absolute));
+    await vscode.window.showTextDocument(document, { preview: false });
+    await this.refresh();
+  }
+
+  async openNextPendingEdit() {
+    const proposal = (this.state.proposals || []).find((item) => (item.edits || []).some((edit) => edit.status === 'proposed'));
+    const edit = proposal?.edits?.find((item) => item.status === 'proposed');
+    if (!proposal || !edit) {
+      await vscode.window.showInformationMessage('No pending Neura edits are waiting.');
+      return;
+    }
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(this.absoluteFor(edit.filePath)));
+    await vscode.window.showTextDocument(document, { preview: false });
+    await this.openDiff(proposal.id, edit.filePath);
   }
 
   async applyAndRunProposal(proposalId) {
@@ -3614,11 +5155,23 @@ class NeuraComposerProvider {
 
   async runCommand(proposalId, commandId, commandText, options = {}) {
     this.ensureWorkspace();
-    const command = String(commandText || '').trim();
+    const originalCommand = String(commandText || '').trim();
+    const command = this.normalizeCommandForPlatform(originalCommand);
     if (!command) return;
+    const policy = this.evaluatePolicy('command', command, {
+      proposalId,
+      commandId,
+      auto: Boolean(options.skipConfirmation && this.canAutoRunCommands()),
+    });
+    if (policy.decision === 'deny') {
+      throw new Error(`Neura policy denied command: ${policy.reason}`);
+    }
+    if (policy.decision === 'ask' && options.skipConfirmation) {
+      throw new Error(`Neura policy requires approval before running: ${command}`);
+    }
     if (!options.skipConfirmation) {
       const approval = await vscode.window.showWarningMessage(
-        `Run this command in ${this.rootPath}?\n\n${command}`,
+        `Run this command in ${this.rootPath}?\n\n${command}\n\nPolicy: ${policy.reason}`,
         { modal: true },
         'Run',
       );
@@ -3630,6 +5183,7 @@ class NeuraComposerProvider {
       proposalId,
       commandId,
       command,
+      originalCommand: originalCommand !== command ? originalCommand : '',
       status: 'running',
       stdout: '',
       stderr: '',
@@ -3676,6 +5230,7 @@ class NeuraComposerProvider {
         terminalId: card.id,
         proposalId,
         commandId,
+        originalCommand: card.originalCommand || '',
         exitCode: code,
         stdout: card.stdout.slice(-3000),
         stderr: card.stderr.slice(-3000),
@@ -3700,9 +5255,34 @@ class NeuraComposerProvider {
         `Exit code: ${card.exitCode ?? 'unknown'}`,
         `Discovered verification commands:\n${(profile.commands || []).map((item) => `- [${item.kind}] ${item.command} — ${item.reason}`).join('\n') || '(none)'}`,
         `Likely affected files:\n${[...(profile.failedFiles || []), ...(profile.diagnosticFiles || [])].slice(0, 20).join('\n') || '(none)'}`,
+        `Changed files:\n${(profile.changedFiles || []).slice(0, 30).join('\n') || '(none)'}`,
         `Diagnostics:\n${diagnostics.slice(0, 40).map((item) => `${item.filePath}:${item.line}:${item.column} ${item.severity} ${item.message}`).join('\n') || '(none)'}`,
         `Semantic hits:\n${semanticHits.map((hit) => `${hit.kind} ${hit.filePath}${hit.line ? `:${hit.line}` : ''} score=${hit.score ?? ''}`).join('\n') || '(none)'}`,
         `Output:\n${output || '(no output)'}`,
+      ].join('\n\n'),
+      'agent',
+    );
+  }
+
+  async fixWorkspaceProblems() {
+    const diagnostics = await this.workspaceDiagnostics().catch(() => []);
+    if (!diagnostics.length) {
+      await vscode.window.showInformationMessage('No workspace Problems diagnostics are currently reported.');
+      return;
+    }
+    const profile = await this.discoverVerificationProfile('').catch(() => ({ commands: [], diagnostics, changedFiles: [] }));
+    const diagnosticText = diagnostics
+      .slice(0, 60)
+      .map((item) => `${item.filePath}:${item.line}:${item.column} ${item.severity} ${item.source ? `[${item.source}] ` : ''}${item.message}`)
+      .join('\n');
+    const semanticHits = await this.semanticSearch(diagnosticText, 12).catch(() => []);
+    await this.sendPrompt(
+      [
+        'Fix the current VS Code Problems diagnostics. Use targeted file inspection, propose minimal code edits, and include the most relevant lint/typecheck/test command to verify.',
+        `Diagnostics:\n${diagnosticText}`,
+        `Changed files:\n${(profile.changedFiles || []).slice(0, 30).join('\n') || '(none)'}`,
+        `Discovered verification commands:\n${(profile.commands || []).map((item) => `- [${item.kind}] ${item.command} — ${item.reason}`).join('\n') || '(none)'}`,
+        `Semantic hits:\n${semanticHits.map((hit) => `${hit.kind} ${hit.filePath}${hit.line ? `:${hit.line}` : ''} score=${hit.score ?? ''}`).join('\n') || '(none)'}`,
       ].join('\n\n'),
       'agent',
     );
@@ -3753,6 +5333,7 @@ class NeuraComposerProvider {
         commands: (verificationProfile.commands || []).slice(0, 8),
         diagnosticFiles: verificationProfile.diagnosticFiles || [],
         failedFiles: verificationProfile.failedFiles || [],
+        changedFiles: verificationProfile.changedFiles || [],
       },
       beforeDiagnosticErrors,
       afterDiagnosticErrors: null,
@@ -3871,6 +5452,7 @@ class NeuraComposerProvider {
       await vscode.window.showInformationMessage('No preview URL is available yet. Run the proposed dev server command first.');
       return;
     }
+    await this.enforcePolicy('browser_url', url);
     try {
       await vscode.commands.executeCommand('simpleBrowser.show', url);
     } catch {
@@ -3882,6 +5464,7 @@ class NeuraComposerProvider {
     if (!url) {
       return { ok: false, summary: 'No preview URL is available.' };
     }
+    await this.enforcePolicy('browser_url', url, { skipPrompt: false });
     const browser = findBrowserExecutable();
     if (!browser) {
       return {
@@ -3943,6 +5526,426 @@ class NeuraComposerProvider {
     };
   }
 
+  async waitForJsonEndpoint(url, timeoutMs = 8000) {
+    const started = Date.now();
+    let lastError = null;
+    while (Date.now() - started < timeoutMs) {
+      try {
+        const response = await fetch(url);
+        if (response.ok) return await response.json();
+        lastError = new Error(`HTTP ${response.status}`);
+      } catch (error) {
+        lastError = error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw lastError || new Error(`Timed out waiting for ${url}`);
+  }
+
+  async connectCdp(webSocketDebuggerUrl) {
+    if (typeof WebSocket !== 'function') {
+      throw new Error('This Neura IDE runtime does not expose WebSocket, so DevTools browser automation is unavailable.');
+    }
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(webSocketDebuggerUrl);
+      const pending = new Map();
+      const listeners = new Set();
+      let nextId = 1;
+      const timeout = setTimeout(() => reject(new Error('Timed out connecting to Chrome DevTools.')), 8000);
+      socket.addEventListener('open', () => {
+        clearTimeout(timeout);
+        resolve({
+          send(method, params = {}) {
+            return new Promise((sendResolve, sendReject) => {
+              const messageId = nextId++;
+              pending.set(messageId, { resolve: sendResolve, reject: sendReject, method });
+              socket.send(JSON.stringify({ id: messageId, method, params }));
+              setTimeout(() => {
+                if (pending.has(messageId)) {
+                  pending.delete(messageId);
+                  sendReject(new Error(`CDP timeout: ${method}`));
+                }
+              }, 12000);
+            });
+          },
+          onEvent(listener) {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+          },
+          close() {
+            try {
+              socket.close();
+            } catch {
+              // ignore close races
+            }
+          },
+        });
+      });
+      socket.addEventListener('message', (event) => {
+        let payload;
+        try {
+          payload = JSON.parse(String(event.data || ''));
+        } catch {
+          return;
+        }
+        if (payload.id && pending.has(payload.id)) {
+          const entry = pending.get(payload.id);
+          pending.delete(payload.id);
+          if (payload.error) entry.reject(new Error(payload.error.message || entry.method));
+          else entry.resolve(payload.result);
+          return;
+        }
+        if (payload.method) {
+          for (const listener of listeners) listener(payload);
+        }
+      });
+      socket.addEventListener('error', () => reject(new Error('Chrome DevTools WebSocket failed.')));
+    });
+  }
+
+  normalizeBrowserAgentSteps(steps = []) {
+    const normalized = Array.isArray(steps) ? steps : [];
+    const safeSteps = normalized
+      .slice(0, 12)
+      .map((step) => ({
+        action: String(step.action || step.type || 'capture').toLowerCase(),
+        selector: String(step.selector || '').slice(0, 240),
+        text: String(step.text || step.value || '').slice(0, 1000),
+        x: Number(step.x || 0),
+        y: Number(step.y || 0),
+        ms: Math.min(Math.max(Number(step.ms || step.waitMs || 800), 0), 8000),
+        label: String(step.label || '').slice(0, 80),
+      }))
+      .filter((step) => ['capture', 'click', 'type', 'scroll', 'wait'].includes(step.action));
+    return safeSteps.length ? safeSteps : [
+      { action: 'capture', label: 'initial', selector: '', text: '', x: 0, y: 0, ms: 0 },
+      { action: 'scroll', label: 'scroll-smoke', selector: '', text: '', x: 0, y: 700, ms: 600 },
+      { action: 'capture', label: 'after-scroll', selector: '', text: '', x: 0, y: 0, ms: 0 },
+    ];
+  }
+
+  async cdpCaptureSnapshot(cdp, outputDir, label) {
+    const safeLabel = String(label || 'capture').replace(/[^a-zA-Z0-9_.-]+/g, '-').slice(0, 60);
+    const evaluated = await cdp.send('Runtime.evaluate', {
+      returnByValue: true,
+      awaitPromise: true,
+      expression: `(() => {
+        const visibleText = document.body ? document.body.innerText.replace(/\\s+/g, ' ').trim().slice(0, 4000) : '';
+        const pick = (selector) => Array.from(document.querySelectorAll(selector)).slice(0, 30).map((el) => ({
+          selector,
+          text: (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').replace(/\\s+/g, ' ').trim().slice(0, 160),
+          id: el.id || '',
+          className: String(el.className || '').slice(0, 120),
+          disabled: Boolean(el.disabled),
+        }));
+        return {
+          url: location.href,
+          title: document.title,
+          html: document.documentElement ? document.documentElement.outerHTML.slice(0, 120000) : '',
+          text: visibleText,
+          viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY, scrollHeight: document.documentElement.scrollHeight },
+          controls: {
+            buttons: pick('button,[role="button"],a'),
+            inputs: pick('input,textarea,select,[contenteditable="true"]'),
+            forms: pick('form'),
+          },
+        };
+      })()`,
+    });
+    const snapshot = evaluated.result?.value || {};
+    const screenshot = await cdp.send('Page.captureScreenshot', {
+      format: 'png',
+      fromSurface: true,
+      captureBeyondViewport: false,
+    });
+    const screenshotPath = path.join(outputDir, `${safeLabel}.png`);
+    const domPath = path.join(outputDir, `${safeLabel}.html`);
+    await fs.writeFile(screenshotPath, screenshot.data || '', 'base64');
+    await fs.writeFile(domPath, snapshot.html || '', 'utf8');
+    return {
+      label: safeLabel,
+      url: snapshot.url || '',
+      title: snapshot.title || '',
+      text: snapshot.text || '',
+      viewport: snapshot.viewport || {},
+      controls: snapshot.controls || {},
+      screenshotPath,
+      domPath,
+    };
+  }
+
+  async runBrowserAgentStep(cdp, step) {
+    if (step.action === 'wait') {
+      await new Promise((resolve) => setTimeout(resolve, step.ms || 800));
+      return { ok: true, summary: `Waited ${step.ms || 800}ms.` };
+    }
+    if (step.action === 'scroll') {
+      await cdp.send('Runtime.evaluate', {
+        awaitPromise: true,
+        expression: `window.scrollBy(${Number(step.x || 0)}, ${Number(step.y || 0)}); new Promise((resolve) => setTimeout(resolve, ${step.ms || 300}))`,
+      });
+      return { ok: true, summary: `Scrolled by ${step.x || 0}, ${step.y || 0}.` };
+    }
+    if (step.action === 'click') {
+      const result = await cdp.send('Runtime.evaluate', {
+        returnByValue: true,
+        awaitPromise: true,
+        expression: `(() => {
+          const selector = ${JSON.stringify(step.selector)};
+          const el = document.querySelector(selector);
+          if (!el) return { ok: false, summary: 'Selector not found: ' + selector };
+          el.scrollIntoView({ block: 'center', inline: 'center' });
+          el.click();
+          return { ok: true, summary: 'Clicked ' + selector };
+        })()`,
+      });
+      await new Promise((resolve) => setTimeout(resolve, step.ms || 700));
+      return result.result?.value || { ok: false, summary: `Click failed for ${step.selector}.` };
+    }
+    if (step.action === 'type') {
+      const result = await cdp.send('Runtime.evaluate', {
+        returnByValue: true,
+        awaitPromise: true,
+        expression: `(() => {
+          const selector = ${JSON.stringify(step.selector)};
+          const el = document.querySelector(selector);
+          if (!el) return { ok: false, summary: 'Selector not found: ' + selector };
+          el.scrollIntoView({ block: 'center', inline: 'center' });
+          el.focus();
+          if ('value' in el) el.value = ${JSON.stringify(step.text)};
+          else el.textContent = ${JSON.stringify(step.text)};
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${JSON.stringify(step.text)} }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return { ok: true, summary: 'Typed into ' + selector };
+        })()`,
+      });
+      await new Promise((resolve) => setTimeout(resolve, step.ms || 500));
+      return result.result?.value || { ok: false, summary: `Type failed for ${step.selector}.` };
+    }
+    return { ok: true, summary: 'Captured browser state.' };
+  }
+
+  async browserAgentInteract({ url, steps = [], label = 'browser-agent', missionId = '', agentId = '' } = {}) {
+    if (!url) return { ok: false, summary: 'No preview URL is available for the browser agent.' };
+    await this.enforcePolicy('browser_url', url, { missionId, agentId });
+    const browser = findBrowserExecutable();
+    if (!browser) {
+      return { ok: false, summary: 'No Chrome or Edge executable was found for browser agent automation.', url };
+    }
+    const stamp = `${Date.now()}-${id('browser').replace(/[^a-zA-Z0-9_.-]+/g, '-')}`;
+    const outputDir = path.join(this.neuraDir || this.rootPath, 'browser-agent-runs', stamp);
+    const profileDir = path.join(outputDir, 'profile');
+    await fs.mkdir(profileDir, { recursive: true });
+    const port = 45000 + Math.floor(Math.random() * 10000);
+    const consoleEvents = [];
+    const stepRecords = [];
+    let child = null;
+    let cdp = null;
+    try {
+      child = spawn(browser, [
+        '--headless=new',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--window-size=1366,900',
+        `--remote-debugging-port=${port}`,
+        `--user-data-dir=${profileDir}`,
+        'about:blank',
+      ], { cwd: this.rootPath, windowsHide: true, stdio: 'ignore' });
+      const pages = await this.waitForJsonEndpoint(`http://127.0.0.1:${port}/json/list`, 10000);
+      const page = Array.isArray(pages) ? pages.find((item) => item.type === 'page') || pages[0] : null;
+      if (!page?.webSocketDebuggerUrl) throw new Error('Chrome DevTools page target was not available.');
+      cdp = await this.connectCdp(page.webSocketDebuggerUrl);
+      cdp.onEvent((event) => {
+        if (event.method === 'Runtime.consoleAPICalled') {
+          consoleEvents.push({
+            type: event.params?.type || 'log',
+            text: (event.params?.args || []).map((arg) => arg.value ?? arg.description ?? '').join(' ').slice(0, 1000),
+            timestamp: nowIso(),
+          });
+        }
+        if (event.method === 'Runtime.exceptionThrown') {
+          consoleEvents.push({
+            type: 'exception',
+            text: event.params?.exceptionDetails?.text || event.params?.exceptionDetails?.exception?.description || 'Runtime exception',
+            timestamp: nowIso(),
+          });
+        }
+        if (event.method === 'Log.entryAdded') {
+          consoleEvents.push({
+            type: event.params?.entry?.level || 'log',
+            text: event.params?.entry?.text || '',
+            timestamp: nowIso(),
+          });
+        }
+      });
+      await cdp.send('Page.enable');
+      await cdp.send('Runtime.enable');
+      await cdp.send('Log.enable').catch(() => {});
+      await cdp.send('Page.navigate', { url });
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      const normalizedSteps = this.normalizeBrowserAgentSteps(steps);
+      for (const [index, step] of normalizedSteps.entries()) {
+        const actionResult = await this.runBrowserAgentStep(cdp, step);
+        const capture = await this.cdpCaptureSnapshot(cdp, outputDir, `${String(index + 1).padStart(2, '0')}-${step.label || step.action}`);
+        stepRecords.push({
+          index: index + 1,
+          action: step.action,
+          selector: step.selector || '',
+          result: actionResult,
+          capture,
+          at: nowIso(),
+        });
+      }
+      const consoleErrors = consoleEvents.filter((event) => /error|exception|assert|severe/i.test(event.type) || /\b(error|exception|failed)\b/i.test(event.text));
+      const latest = stepRecords[stepRecords.length - 1]?.capture || {};
+      const recording = {
+        id: stamp,
+        label,
+        url,
+        missionId,
+        agentId,
+        browser,
+        ok: stepRecords.length > 0 && consoleErrors.length === 0,
+        summary: '',
+        consoleEvents,
+        consoleErrors,
+        steps: stepRecords,
+        createdAt: nowIso(),
+      };
+      recording.summary = `${stepRecords.length} browser step(s), ${consoleErrors.length} console/runtime issue(s), title "${latest.title || ''}".`;
+      const recordingPath = path.join(outputDir, 'recording.json');
+      await fs.writeFile(recordingPath, `${JSON.stringify(recording, null, 2)}\n`, 'utf8');
+      const result = {
+        ok: recording.ok,
+        summary: recording.summary,
+        url,
+        browser,
+        recordingPath,
+        outputDir,
+        screenshotPath: latest.screenshotPath || '',
+        domPath: latest.domPath || '',
+        title: latest.title || '',
+        bodyText: latest.text || '',
+        consoleEvents: consoleEvents.slice(-40),
+        consoleErrors,
+        steps: stepRecords.map((step) => ({
+          action: step.action,
+          selector: step.selector,
+          ok: step.result?.ok !== false,
+          summary: step.result?.summary || '',
+          screenshotPath: step.capture?.screenshotPath || '',
+          domPath: step.capture?.domPath || '',
+        })),
+      };
+      this.recordArtifact('browser-agent', `Browser agent: ${label}`, result.summary, {
+        runId: this.state.activeRunId,
+        missionId,
+        agentId,
+        ...result,
+      });
+      return result;
+    } catch (error) {
+      const result = {
+        ok: false,
+        summary: `Browser agent failed: ${errorMessageFor(error)}`,
+        url,
+        browser,
+        outputDir,
+        consoleEvents,
+      };
+      this.recordArtifact('browser-agent', `Browser agent failed: ${label}`, result.summary, {
+        runId: this.state.activeRunId,
+        missionId,
+        agentId,
+        ...result,
+      });
+      return result;
+    } finally {
+      if (cdp) cdp.close();
+      if (child) {
+        try {
+          child.kill();
+        } catch {
+          // ignore process shutdown races
+        }
+      }
+    }
+  }
+
+  resolveBrowserAgentUrl(agent = {}) {
+    const candidates = [
+      agent.previewUrl,
+      this.state.preview?.url,
+      ...(this.state.proposals || []).map((proposal) => proposal.preview?.url),
+      ...(this.state.artifacts || []).filter((artifact) => artifact.kind === 'preview').map((artifact) => artifact.data?.url),
+      String(agent.task || '').match(/https?:\/\/[^\s)'"]+/i)?.[0],
+      String(agent.missionTask || '').match(/https?:\/\/[^\s)'"]+/i)?.[0],
+    ].filter(Boolean);
+    return candidates[0] || '';
+  }
+
+  async executeBrowserBackgroundAgent(agent, controller) {
+    const url = this.resolveBrowserAgentUrl(agent);
+    if (!url) {
+      const summary = 'Browser Agent is waiting for a preview URL. It will run after the app starts a local preview.';
+      agent.browserEvidence = { ok: true, skipped: true, summary };
+      agent.commands = [];
+      agent.verification = [{
+        command: 'browser_agent',
+        status: 'skipped',
+        output: summary,
+        completedAt: nowIso(),
+      }];
+      agent.summary = summary;
+      agent.status = 'completed';
+      agent.updatedAt = nowIso();
+      await this.persistBackgroundAgent(agent, 'browser-agent-waiting-for-preview', { summary });
+      this.recordArtifact('browser-agent', `Browser agent waiting: ${agent.roleLabel || 'Browser Agent'}`, summary, {
+        runId: this.state.activeRunId,
+        missionId: agent.missionId || '',
+        agentId: agent.id,
+        skipped: true,
+      });
+      return;
+    }
+    await this.persistBackgroundAgent(agent, 'browser-agent-started', { url });
+    const result = await this.browserAgentInteract({
+      url,
+      label: agent.roleLabel || 'Browser Agent',
+      missionId: agent.missionId || '',
+      agentId: agent.id,
+    });
+    if (controller.signal.aborted || agent.cancelRequested) throw new Error('Browser agent was cancelled.');
+    agent.browserEvidence = result;
+    agent.commands = [{ command: `browser_agent ${url}`, purpose: 'Interact with the local preview and capture proof.' }];
+    agent.verification = [{
+      command: `browser_agent ${url}`,
+      status: result.ok ? 'passed' : 'failed',
+      output: result.summary,
+      screenshotPath: result.screenshotPath || '',
+      recordingPath: result.recordingPath || '',
+      completedAt: nowIso(),
+    }];
+    agent.summary = result.ok
+      ? `Browser Agent passed: ${result.summary}`
+      : `Browser Agent found issues: ${result.summary}`;
+    agent.status = result.ok ? 'completed' : 'failed';
+    agent.updatedAt = nowIso();
+    await this.persistBackgroundAgent(agent, result.ok ? 'browser-agent-passed' : 'browser-agent-failed', {
+      url,
+      summary: result.summary,
+      screenshotPath: result.screenshotPath || '',
+      domPath: result.domPath || '',
+      recordingPath: result.recordingPath || '',
+      consoleErrors: result.consoleErrors || [],
+    });
+    if (!result.ok) {
+      throw new Error(agent.summary);
+    }
+  }
+
   async verifyPreview(proposalId) {
     const proposal = this.state.proposals.find((item) => item.id === proposalId);
     const url = proposal?.preview?.url || this.state.preview?.url;
@@ -3991,7 +5994,52 @@ class NeuraComposerProvider {
   }
 
   async openSettings() {
-    await vscode.commands.executeCommand('workbench.action.openSettings', 'neura.nim');
+    await vscode.commands.executeCommand('workbench.action.openSettings', 'neura provider');
+  }
+
+  async configureProviders() {
+    this.activeTab = 'settings';
+    this.renderIfVisible();
+  }
+
+  async saveProviderSettings(settings = {}) {
+    const workspaceTarget = this.rootPath
+      ? vscode.ConfigurationTarget.Workspace
+      : vscode.ConfigurationTarget.Global;
+    const providerOrder = Array.isArray(settings.providerOrder)
+      ? settings.providerOrder
+      : String(settings.providerOrder || '')
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean);
+    const normalizedOrder = providerOrder
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter((item, index, all) => ['openrouter', 'ollama', 'nim'].includes(item) && all.indexOf(item) === index);
+    if (normalizedOrder.length) {
+      await this.updateConfigOrLocal('neura.provider', 'order', normalizedOrder, workspaceTarget);
+    }
+
+    const updateProvider = async (section, values = {}) => {
+      if (String(values.baseUrl || '').trim()) {
+        await this.updateConfigOrLocal(section, 'baseUrl', String(values.baseUrl).trim(), workspaceTarget);
+      }
+      if (String(values.model || '').trim()) {
+        await this.updateConfigOrLocal(section, 'model', String(values.model).trim(), workspaceTarget);
+      }
+      if (String(values.apiKey || '').trim()) {
+        await this.context.secrets.store(secretConfigKey(section, 'apiKey'), String(values.apiKey).trim());
+      }
+    };
+
+    await updateProvider('neura.openrouter', settings.openrouter || {});
+    await updateProvider('neura.ollama', settings.ollama || {});
+    await updateProvider('neura.nim', settings.nim || {});
+
+    this.config = await this.readNimConfig();
+    await this.saveState();
+    this.activeTab = 'settings';
+    await vscode.window.showInformationMessage('Neura AI provider settings saved.');
+    this.renderIfVisible();
   }
 
   async toggleInlineCompletions() {
@@ -4071,6 +6119,23 @@ class NeuraComposerProvider {
       .slice(0, limit) || fallback;
   }
 
+  async environmentSnapshot(cwd = this.rootPath) {
+    const run = async (command, args = []) => execFileAsync(command, args, cwd).catch(() => '');
+    return {
+      cwd,
+      gitHead: await run('git', ['rev-parse', '--short', 'HEAD']),
+      gitBranch: await run('git', ['branch', '--show-current']),
+      node: await run('node', ['--version']),
+      npm: await run('npm', ['--version']),
+      packageManager: fsSync.existsSync(path.join(cwd, 'pnpm-lock.yaml'))
+        ? 'pnpm'
+        : fsSync.existsSync(path.join(cwd, 'yarn.lock'))
+          ? 'yarn'
+          : 'npm',
+      capturedAt: nowIso(),
+    };
+  }
+
   async createBackgroundAgentRecord(task, options = {}) {
     this.ensureWorkspace();
     await execFileAsync('git', ['rev-parse', '--show-toplevel'], this.rootPath);
@@ -4094,6 +6159,10 @@ class NeuraComposerProvider {
       ownership: Array.isArray(role?.ownership) ? role.ownership : [],
       branch,
       path: destination,
+      baseBranch: await execFileAsync('git', ['branch', '--show-current'], this.rootPath).catch(() => ''),
+      baseHead: await execFileAsync('git', ['rev-parse', '--short', 'HEAD'], this.rootPath).catch(() => ''),
+      lifecycle: 'worktree-created',
+      environment: await this.environmentSnapshot(destination),
       status: 'ready',
       priority: options.priority || 0,
       followUps: [],
@@ -4108,7 +6177,153 @@ class NeuraComposerProvider {
       missionId: agent.missionId,
     });
     this.recordArtifact('background-agent', agent.task, `Created isolated ${agent.roleLabel} worktree ${branch}.`, agent);
+    this.recordArtifact('environment-snapshot', `Environment snapshot: ${agent.roleLabel}`, `Captured isolated worktree environment for ${branch}.`, {
+      agentId: agent.id,
+      missionId: agent.missionId,
+      branch,
+      path: destination,
+      environment: agent.environment,
+    });
     return agent;
+  }
+
+  autoSwarmRoleIdsFor(mode, prompt = '', context = {}) {
+    const text = String(prompt || '').toLowerCase();
+    const roles = new Set(['orchestrator', 'planner', 'context']);
+    const isBuild = mode === 'builder' || mode === 'ship' || /\b(build|create|generate|scaffold|make|site|website|app|landing|dashboard)\b/i.test(text);
+    const isFrontend = isBuild || /\b(ui|ux|frontend|react|vite|next|page|component|style|css|html|landing|form|pricing|faq|responsive)\b/i.test(text);
+    const isBackend = /\b(api|backend|server|auth|login|database|db|postgres|supabase|stripe|webhook|endpoint|ipc)\b/i.test(text);
+    const isData = /\b(schema|migration|database|db|localstorage|state|store|cache|persistence|persist)\b/i.test(text);
+    if (isFrontend) roles.add('frontend');
+    if (isBackend) roles.add('backend');
+    if (isData) roles.add('data-state');
+    if (isBuild || isBackend || isData || mode === 'agent') roles.add('integration');
+    roles.add('qa');
+    if (isFrontend || /\b(preview|browser|screenshot|dom|visual)\b/i.test(text)) roles.add('browser');
+    roles.add('reviewer');
+    roles.add('ship');
+    if ((context.files || []).some((file) => /\.(test|spec)\./i.test(file.filePath))) roles.add('qa');
+    return [...roles].filter((roleId) => swarmRoleById[roleId]);
+  }
+
+  async createSwarmMissionFromPrompt(task, mode = 'agent', context = {}, options = {}) {
+    this.ensureWorkspace();
+    const selectedRoles = this.autoSwarmRoleIdsFor(mode, task, context)
+      .map((roleId) => swarmRoleById[roleId])
+      .filter(Boolean);
+    const selectedIds = new Set(selectedRoles.map((role) => role.id));
+    const mission = {
+      id: id('swarm'),
+      task: String(task || '').trim(),
+      source: options.source || 'composer-auto',
+      sourceMode: mode,
+      status: 'ready',
+      roles: selectedRoles.map((role) => role.id),
+      agentIds: [],
+      events: [],
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 12);
+    for (const [index, role] of selectedRoles.entries()) {
+      const dependencies = (role.dependencies || []).filter((dependency) => selectedIds.has(dependency));
+      const agentTask = [
+        `Mission: ${mission.task}`,
+        `Role: ${role.label} (${role.squad} squad).`,
+        `Responsibility: ${role.mission}`,
+        `This is part of Neura's default Windsurf-style swarm workflow. Coordinate through artifacts and stay inside your ownership lane.`,
+        role.ownership?.length ? `Ownership lane: ${role.ownership.join(', ')}` : 'Read/review role; do not write files unless this role explicitly allows writes.',
+        dependencies.length ? `Wait for roles: ${dependencies.join(', ')}.` : '',
+      ].filter(Boolean).join('\n');
+      const agent = await this.createBackgroundAgentRecord(agentTask, {
+        roleId: role.id,
+        missionId: mission.id,
+        missionTask: mission.task,
+        dependencies,
+        priority: index,
+        stamp,
+      });
+      mission.agentIds.push(agent.id);
+    }
+    this.state.swarmMissions = [mission, ...(this.state.swarmMissions || [])].slice(0, 30);
+    await this.persistSwarmMission(mission, 'auto-created', {
+      roles: mission.roles,
+      agentIds: mission.agentIds,
+      mode,
+    });
+    await this.reviseSwarmPlan(mission, {
+      event: 'auto-created',
+      roles: mission.roles,
+      agentIds: mission.agentIds,
+      mode,
+    }, 'auto-created');
+    this.recordArtifact('swarm', `Auto swarm mission: ${mission.task}`, `Created ${mission.agentIds.length} role agent(s) for the Composer request.`, {
+      missionId: mission.id,
+      roles: mission.roles,
+      agentIds: mission.agentIds,
+      mode,
+    });
+    await this.saveState();
+    return mission;
+  }
+
+  async runAutoSwarmForPrompt(prompt, mode, context, thinkingMessage) {
+    const mission = await this.createSwarmMissionFromPrompt(prompt, mode, context);
+    this.activeTab = 'agents';
+    thinkingMessage.content = JSON.stringify({
+      kind: 'thinking',
+      status: 'running',
+      title: 'Swarm running',
+      text: `Created a ${mission.roles.length}-agent swarm: ${mission.roles.join(', ')}. Agents are working in isolated git worktrees and will produce merge-review proposals after completion.`,
+    });
+    this.state.messages.push({
+      id: id('msg'),
+      role: 'assistant',
+      mode,
+      content: `I created a Neura agent swarm for this task and started it. Open the Agents tab or Mission Control to watch role status, artifacts, logs, and merge reviews.`,
+      referencedFiles: [],
+      createdAt: nowIso(),
+    });
+    await this.saveState();
+    this.renderIfVisible(true);
+    const run = (async () => {
+      try {
+        await this.runSwarmMission(mission.id, { skipApproval: true });
+        await this.reviewSwarmMission(mission.id).catch((error) => {
+          logNeura('Auto swarm merge review skipped', {
+            missionId: mission.id,
+            error: errorMessageFor(error),
+          });
+        });
+        thinkingMessage.content = JSON.stringify({
+          kind: 'thinking',
+          status: mission.status === 'completed' ? 'done' : 'stopped',
+          title: mission.status === 'completed' ? 'Swarm complete' : 'Swarm stopped',
+          text: mission.status === 'completed'
+            ? 'The swarm completed. Review the generated merge proposals before applying changes.'
+            : `The swarm finished with status ${mission.status}. ${mission.error || ''}`.trim(),
+        });
+        await this.saveState();
+        this.renderIfVisible();
+      } catch (error) {
+        thinkingMessage.content = JSON.stringify({
+          kind: 'thinking',
+          status: 'failed',
+          title: 'Swarm failed',
+          text: errorMessageFor(error),
+        });
+        this.state.messages.push({
+          id: id('msg'),
+          role: 'assistant',
+          mode,
+          content: `The swarm stopped: ${errorMessageFor(error)}`,
+          createdAt: nowIso(),
+        });
+        await this.saveState();
+        this.renderIfVisible();
+      }
+    })();
+    return { mission, run };
   }
 
   async createBackgroundAgent() {
@@ -4361,6 +6576,11 @@ class NeuraComposerProvider {
       roles: mission.roles,
       agentIds: mission.agentIds,
     });
+    await this.reviseSwarmPlan(mission, {
+      event: 'created',
+      roles: mission.roles,
+      agentIds: mission.agentIds,
+    }, 'created');
     this.recordArtifact('swarm', `Swarm mission: ${task.trim()}`, `Created ${mission.agentIds.length} role agent(s).`, {
       missionId: mission.id,
       roles: mission.roles,
@@ -4383,7 +6603,7 @@ class NeuraComposerProvider {
   async runSwarmMission(missionId, options = {}) {
     const mission = (this.state.swarmMissions || []).find((item) => item.id === missionId);
     if (!mission) throw new Error('Swarm mission was not found.');
-    if (!this.config.configured) throw new Error('NVIDIA NIM is not configured.');
+    if (!this.config.configured) throw new Error('No AI provider is configured.');
     if (this.swarmRuns.has(mission.id)) {
       await vscode.window.showInformationMessage('This swarm mission is already running.');
       return this.swarmRuns.get(mission.id);
@@ -4402,6 +6622,10 @@ class NeuraComposerProvider {
       mission.conflicts = [];
       mission.waves = Array.isArray(mission.waves) ? mission.waves : [];
       await this.persistSwarmMission(mission, 'run-started');
+      await this.reviseSwarmPlan(mission, {
+        event: 'run-started',
+        agentStatus: mission.agentStatus || {},
+      }, 'run-started');
       await this.saveState();
       this.renderIfVisible();
       const missionAgents = () => (this.state.backgroundAgents || []).filter((agent) => mission.agentIds.includes(agent.id));
@@ -4409,7 +6633,20 @@ class NeuraComposerProvider {
       const pending = new Set(missionAgents().filter((agent) => agent.status !== 'completed').map((agent) => agent.id));
       while (pending.size) {
         const agents = missionAgents().filter((agent) => pending.has(agent.id));
-        const runnable = agents.filter((agent) => (agent.dependencies || []).every((dependency) => completedRoles.has(dependency)));
+        await this.reviseSwarmPlan(mission, {
+          event: 'before-wave',
+          completedRoles: [...completedRoles],
+          pendingAgents: agents.map((agent) => ({
+            roleId: agent.roleId,
+            status: agent.status,
+            dependencies: agent.dependencies || [],
+          })),
+        }, 'before-wave');
+        if ((mission.taskGraph?.status === 'blocked' || mission.taskGraph?.controllerStatus === 'blocked') && !agents.some((agent) => ['ready', 'queued', 'running'].includes(agent.status))) {
+          throw new Error((mission.taskGraph.blockedReasons || [])[0] || 'Planner controller blocked the mission.');
+        }
+        const dependencyReady = agents.filter((agent) => (agent.dependencies || []).every((dependency) => completedRoles.has(dependency)));
+        const runnable = this.plannerSelectedRunnable(mission, dependencyReady);
         if (!runnable.length) {
           throw new Error('Swarm mission dependency graph is blocked. Check selected roles and failed agents.');
         }
@@ -4441,6 +6678,18 @@ class NeuraComposerProvider {
           throw new Error(mission.error);
         }
         this.refreshSwarmMissionStatus(mission);
+        await this.reviseSwarmPlan(mission, {
+          event: 'wave-completed',
+          waveId: wave.id,
+          completedRoles: [...completedRoles],
+          remaining: pending.size,
+          agents: missionAgents().map((agent) => ({
+            roleId: agent.roleId,
+            status: agent.status,
+            summary: agent.summary || '',
+            error: agent.error || '',
+          })),
+        }, 'after-wave');
         await this.persistSwarmMission(mission, 'wave-completed', {
           waveId: wave.id,
           completedRoles: [...completedRoles],
@@ -4451,6 +6700,11 @@ class NeuraComposerProvider {
         if (mission.status === 'failed' || mission.status === 'cancelled') break;
       }
       this.refreshSwarmMissionStatus(mission);
+      await this.reviseSwarmPlan(mission, {
+        event: 'run-finished',
+        status: mission.status,
+        completedRoles: [...completedRoles],
+      }, 'run-finished');
       await this.persistSwarmMission(mission, 'run-finished');
       this.recordArtifact('swarm', `Swarm mission ${mission.status}: ${mission.task}`, `${mission.agentIds.length} agent(s) finished with status ${mission.status}.`, {
         missionId: mission.id,
@@ -4511,20 +6765,102 @@ class NeuraComposerProvider {
     if (!completed.length) {
       throw new Error('No completed swarm agents are ready for merge review.');
     }
-    for (const agent of completed) {
-      if (!agent.mergeReviewId) {
-        await this.createBackgroundAgentReview(agent.id).catch((error) => {
-          logNeura('Swarm review skipped agent', { agentId: agent.id, error: errorMessageFor(error) });
-        });
-      }
-    }
-    this.recordArtifact('swarm-review', `Swarm review: ${mission.task}`, `Prepared merge review proposals for ${completed.length} agent(s).`, {
+    const proposal = await this.createSwarmMissionReviewProposal(mission, completed);
+    this.recordArtifact('swarm-review', `Swarm review: ${mission.task}`, `Prepared unified merge review for ${completed.length} agent(s).`, {
       missionId: mission.id,
       agentIds: completed.map((agent) => agent.id),
+      proposalId: proposal.id,
     });
     await this.persistSwarmMission(mission, 'review-created');
     await this.saveState();
     await this.refresh();
+  }
+
+  async createSwarmMissionReviewProposal(mission, completedAgents) {
+    if (mission.mergeReviewId && (this.state.proposals || []).some((proposal) => proposal.id === mission.mergeReviewId)) {
+      return this.state.proposals.find((proposal) => proposal.id === mission.mergeReviewId);
+    }
+    const edits = [];
+    const commandsByText = new Map();
+    const seenFiles = new Set();
+    for (const agent of completedAgents) {
+      if (!agent.path || !fsSync.existsSync(agent.path)) continue;
+      const statusOutput = await execFileAsync('git', ['status', '--porcelain', '-uall'], agent.path).catch(() => '');
+      const statusEntries = statusOutput
+        .split(/\r?\n/)
+        .map((line) => line.trimEnd())
+        .filter(Boolean)
+        .map((line) => this.parseGitStatusLine(line));
+      const fallbackEntries = !statusEntries.length && Array.isArray(agent.edits)
+        ? agent.edits.map((edit) => ({ status: edit.operation === 'delete' ? ' D' : ' M', filePath: edit.filePath }))
+        : [];
+      for (const entry of (statusEntries.length ? statusEntries : fallbackEntries)) {
+        const safeInAgent = this.safeRelativeForRoot(agent.path, entry.filePath);
+        const safeInWorkspace = this.safeRelative(safeInAgent);
+        if (seenFiles.has(safeInWorkspace)) continue;
+        seenFiles.add(safeInWorkspace);
+        const sourcePath = path.join(agent.path, safeInAgent);
+        const workspacePath = path.join(this.rootPath, safeInWorkspace);
+        const deleted = entry.status.includes('D') && !fsSync.existsSync(sourcePath);
+        const operation = deleted ? 'delete' : (fsSync.existsSync(workspacePath) ? 'update' : 'create');
+        edits.push({
+          id: id('edit'),
+          operation,
+          filePath: safeInWorkspace,
+          content: operation === 'delete' ? '' : await fs.readFile(sourcePath, 'utf8'),
+          rationale: `${agent.roleLabel || agent.roleId || 'Agent'}: ${agent.summary || 'swarm role output'}`,
+          status: 'proposed',
+          sourceAgentId: agent.id,
+        });
+      }
+      for (const command of agent.commands || []) {
+        const normalized = this.normalizeCommandForPlatform(command.command || command);
+        if (!normalized || commandsByText.has(normalized)) continue;
+        commandsByText.set(normalized, {
+          id: id('cmd'),
+          command: normalized,
+          purpose: command.purpose || `${agent.roleLabel || agent.roleId || 'Agent'} verification`,
+          status: 'proposed',
+          sourceAgentId: agent.id,
+        });
+      }
+    }
+    if (!edits.length && !commandsByText.size) {
+      throw new Error('No mergeable file changes or verification commands were found in completed swarm agents.');
+    }
+    const proposal = {
+      id: id('proposal'),
+      summary: `Merge swarm mission: ${mission.task}`,
+      mode: 'ship',
+      status: 'proposed',
+      edits,
+      commands: [...commandsByText.values()],
+      todos: (mission.taskGraph?.items || []).map((item) => ({
+        title: item.title,
+        rationale: item.acceptance || item.rationale || '',
+        status: item.status === 'done' ? 'done' : item.status || 'pending',
+      })),
+      sourceMissionId: mission.id,
+      createdAt: nowIso(),
+    };
+    this.state.proposals.unshift(proposal);
+    this.state.proposals = this.state.proposals.slice(0, 25);
+    mission.mergeReviewId = proposal.id;
+    mission.mergeReview = {
+      proposalId: proposal.id,
+      fileCount: edits.length,
+      commandCount: proposal.commands.length,
+      agentIds: completedAgents.map((agent) => agent.id),
+      createdAt: nowIso(),
+    };
+    for (const agent of completedAgents) {
+      agent.mergeReviewId = proposal.id;
+      agent.lifecycle = 'mission-merge-review-created';
+      agent.updatedAt = nowIso();
+      await this.persistBackgroundAgent(agent, 'mission-merge-review-created', { proposalId: proposal.id, missionId: mission.id });
+    }
+    this.activeTab = 'chat';
+    return proposal;
   }
 
   safeRelativeForRoot(rootPath, inputPath) {
@@ -4605,6 +6941,10 @@ class NeuraComposerProvider {
 
   async backgroundAgentContextPack(agent, tree) {
     const role = swarmRoleById[agent.roleId] || {};
+    const mission = (this.state.swarmMissions || []).find((item) => item.id && item.id === agent.missionId);
+    const roleTask = (mission?.taskGraph?.items || [])
+      .filter((item) => item.ownerRole && item.ownerRole === agent.roleId)
+      .sort((a, b) => Number(a.priority || 0) - Number(b.priority || 0));
     const hints = this.roleFileHints(agent.roleId);
     const treeMatches = tree
       .filter((filePath) => {
@@ -4638,6 +6978,11 @@ class NeuraComposerProvider {
       dependencySummaries,
       peerSummaries: peers,
       semanticHits: semanticHits.slice(0, 10),
+      missionTaskGraph: mission?.taskGraph || null,
+      plannerUpdate: mission?.taskGraph?.updates?.[0] || null,
+      plannerRoleTasks: roleTask.slice(0, 8),
+      plannerNextRoles: mission?.planner?.nextRoles || mission?.taskGraph?.nextRoles || [],
+      plannerRisks: mission?.planner?.risks || mission?.taskGraph?.risks || [],
     };
   }
 
@@ -4659,70 +7004,74 @@ class NeuraComposerProvider {
     const writePolicy = role.writes
       ? 'You may propose and apply complete file edits that are necessary for your role.'
       : 'This is a non-writing role. Prefer analysis, plans, review notes, and verification commands. Return an empty edits array unless a small coordination artifact is essential.';
+    let lastProgressAt = 0;
     try {
-      const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.config.apiKey}`,
-          'content-type': 'application/json',
+      const { payload } = await this.requestChatCompletion({
+        temperature: 0.12,
+        max_tokens: 7000,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              'You are a Neura background coding agent working in an isolated git worktree.',
+              `Role: ${role.label}. Squad: ${role.squad}.`,
+              `Role responsibility: ${role.mission}`,
+              role.focus?.length ? `Focus areas: ${role.focus.join(', ')}.` : '',
+              role.deliverables?.length ? `Required deliverables: ${role.deliverables.join('; ')}.` : '',
+              agent.ownership?.length ? `File ownership lane: ${agent.ownership.join(', ')}. Stay in this lane unless the dependency handoff proves a cross-lane edit is required.` : '',
+              writePolicy,
+              agent.dependencies?.length ? `This role depends on completed roles: ${agent.dependencies.join(', ')}.` : '',
+              contextPack.plannerRoleTasks?.length ? 'Treat the planner controller tasks and handoff notes as the current source of truth for this role.' : '',
+              attemptContext.attempt > 1 ? 'This is a repair attempt. Use the verification failure and previous result to fix the worktree, not to restart blindly.' : '',
+              'Return exactly one JSON object. No markdown.',
+              'Produce complete file edits for the task. Use relative paths inside the worktree.',
+              'Do not invent fake files, fake commands, fake test outputs, or fake screenshots.',
+              'Use the provided context files and dependency handoff notes. Make the smallest coherent production change for your role.',
+              'If the role is implementation-focused and context is insufficient, propose targeted read/search commands instead of guessing.',
+              'Schema: {"message":"summary","edits":[{"operation":"create|update|delete","filePath":"path","content":"full content","rationale":"why"}],"commands":[{"command":"verification command","purpose":"why"}]}',
+            ].filter(Boolean).join('\n'),
+          },
+          {
+            role: 'user',
+            content: [
+              `Task: ${agent.task}`,
+              agent.missionTask ? `Overall swarm mission: ${agent.missionTask}` : '',
+              agent.followUps?.length
+                ? `Follow-up instructions:\n${agent.followUps.map((item, index) => `${index + 1}. ${item.content}`).join('\n')}`
+                : '',
+              `Attempt: ${attemptContext.attempt || 1} of ${backgroundAgentMaxAttempts}`,
+              attemptContext.previousResults?.length
+                ? `Previous attempt summaries:\n${JSON.stringify(attemptContext.previousResults, null, 2).slice(0, 9000)}`
+                : '',
+              attemptContext.failure
+                ? `Verification failure to repair:\n${JSON.stringify(attemptContext.failure, null, 2).slice(0, 9000)}`
+                : '',
+              `Worktree path: ${agent.path}`,
+              `Dependency handoffs:\n${contextPack.dependencySummaries.length ? JSON.stringify(contextPack.dependencySummaries, null, 2).slice(0, 9000) : 'none'}`,
+              `Planner controller update:\n${contextPack.plannerUpdate ? JSON.stringify(contextPack.plannerUpdate, null, 2).slice(0, 2500) : 'none'}`,
+              `Planner tasks for your role:\n${contextPack.plannerRoleTasks?.length ? JSON.stringify(contextPack.plannerRoleTasks, null, 2).slice(0, 7000) : 'none'}`,
+              `Planner next roles:\n${contextPack.plannerNextRoles?.length ? contextPack.plannerNextRoles.join(', ') : 'none'}`,
+              `Planner risks:\n${contextPack.plannerRisks?.length ? contextPack.plannerRisks.join('\n') : 'none'}`,
+              `Other mission agents:\n${contextPack.peerSummaries.length ? JSON.stringify(contextPack.peerSummaries, null, 2).slice(0, 9000) : 'none'}`,
+              `Selected semantic hits:\n${contextPack.semanticHits.length ? JSON.stringify(contextPack.semanticHits, null, 2).slice(0, 6000) : 'none'}`,
+              `Context files:\n${contextPack.files.map((file) => `--- ${file.filePath}${file.truncated ? ' (truncated)' : ''} ---\n${file.content}`).join('\n\n') || 'none'}`,
+              `Files:\n${tree.join('\n') || '(empty)'}`,
+            ].filter(Boolean).join('\n\n'),
+          },
+        ],
+      }, {
+        mode: 'background-agent',
+        role: agent.roleId,
+        timeoutMs: this.config.timeoutMs,
+        stream: true,
+        onProgress: (_delta, fullText) => {
+          if (Date.now() - lastProgressAt < 900) return;
+          lastProgressAt = Date.now();
+          agent.liveOutput = String(fullText || '').slice(-1600);
+          agent.updatedAt = nowIso();
+          this.renderIfVisible(true);
         },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: this.config.model,
-          temperature: 0.12,
-          max_tokens: 7000,
-          messages: [
-            {
-              role: 'system',
-              content: [
-                'You are a Neura background coding agent working in an isolated git worktree.',
-                `Role: ${role.label}. Squad: ${role.squad}.`,
-                `Role responsibility: ${role.mission}`,
-                role.focus?.length ? `Focus areas: ${role.focus.join(', ')}.` : '',
-                role.deliverables?.length ? `Required deliverables: ${role.deliverables.join('; ')}.` : '',
-                agent.ownership?.length ? `File ownership lane: ${agent.ownership.join(', ')}. Stay in this lane unless the dependency handoff proves a cross-lane edit is required.` : '',
-                writePolicy,
-                agent.dependencies?.length ? `This role depends on completed roles: ${agent.dependencies.join(', ')}.` : '',
-                attemptContext.attempt > 1 ? 'This is a repair attempt. Use the verification failure and previous result to fix the worktree, not to restart blindly.' : '',
-                'Return exactly one JSON object. No markdown.',
-                'Produce complete file edits for the task. Use relative paths inside the worktree.',
-                'Do not invent fake files, fake commands, fake test outputs, or fake screenshots.',
-                'Use the provided context files and dependency handoff notes. Make the smallest coherent production change for your role.',
-                'If the role is implementation-focused and context is insufficient, propose targeted read/search commands instead of guessing.',
-                'Schema: {"message":"summary","edits":[{"operation":"create|update|delete","filePath":"path","content":"full content","rationale":"why"}],"commands":[{"command":"verification command","purpose":"why"}]}',
-              ].filter(Boolean).join('\n'),
-            },
-            {
-              role: 'user',
-              content: [
-                `Task: ${agent.task}`,
-                agent.missionTask ? `Overall swarm mission: ${agent.missionTask}` : '',
-                agent.followUps?.length
-                  ? `Follow-up instructions:\n${agent.followUps.map((item, index) => `${index + 1}. ${item.content}`).join('\n')}`
-                  : '',
-                `Attempt: ${attemptContext.attempt || 1} of ${backgroundAgentMaxAttempts}`,
-                attemptContext.previousResults?.length
-                  ? `Previous attempt summaries:\n${JSON.stringify(attemptContext.previousResults, null, 2).slice(0, 9000)}`
-                  : '',
-                attemptContext.failure
-                  ? `Verification failure to repair:\n${JSON.stringify(attemptContext.failure, null, 2).slice(0, 9000)}`
-                  : '',
-                `Worktree path: ${agent.path}`,
-                `Dependency handoffs:\n${contextPack.dependencySummaries.length ? JSON.stringify(contextPack.dependencySummaries, null, 2).slice(0, 9000) : 'none'}`,
-                `Other mission agents:\n${contextPack.peerSummaries.length ? JSON.stringify(contextPack.peerSummaries, null, 2).slice(0, 9000) : 'none'}`,
-                `Selected semantic hits:\n${contextPack.semanticHits.length ? JSON.stringify(contextPack.semanticHits, null, 2).slice(0, 6000) : 'none'}`,
-                `Context files:\n${contextPack.files.map((file) => `--- ${file.filePath}${file.truncated ? ' (truncated)' : ''} ---\n${file.content}`).join('\n\n') || 'none'}`,
-                `Files:\n${tree.join('\n') || '(empty)'}`,
-              ].filter(Boolean).join('\n\n'),
-            },
-          ],
-        }),
       });
-      const rawBody = await response.text();
-      const payload = rawBody ? JSON.parse(rawBody) : {};
-      if (!response.ok) {
-        throw new Error(payload.error?.message || rawBody || `HTTP ${response.status}`);
-      }
       const content = payload.choices?.[0]?.message?.content || '';
       return parseJsonObject(content);
     } finally {
@@ -4750,25 +7099,27 @@ class NeuraComposerProvider {
     for (const command of commands.slice(0, 4)) {
       if (controller.signal.aborted || agent.cancelRequested) throw new Error('Background agent was cancelled.');
       const startedAt = nowIso();
+      const normalizedCommand = this.normalizeCommandForPlatform(command.command);
       try {
         const output = await execFileAsync(
           process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : process.env.SHELL || 'sh',
-          process.platform === 'win32' ? ['/d', '/s', '/c', command.command] : ['-lc', command.command],
+          process.platform === 'win32' ? ['/d', '/s', '/c', normalizedCommand] : ['-lc', normalizedCommand],
           agent.path,
         );
-        const result = { command: command.command, status: 'passed', output: output.slice(-4000), startedAt, completedAt: nowIso() };
+        const result = { command: normalizedCommand, originalCommand: normalizedCommand !== command.command ? command.command : '', status: 'passed', output: output.slice(-4000), startedAt, completedAt: nowIso() };
         verification.push(result);
-        await this.persistBackgroundAgent(agent, 'verification-passed', { command: command.command });
+        await this.persistBackgroundAgent(agent, 'verification-passed', { command: normalizedCommand, originalCommand: result.originalCommand });
       } catch (error) {
         const result = {
-          command: command.command,
+          command: normalizedCommand,
+          originalCommand: normalizedCommand !== command.command ? command.command : '',
           status: 'failed',
           error: errorMessageFor(error),
           startedAt,
           completedAt: nowIso(),
         };
         verification.push(result);
-        await this.persistBackgroundAgent(agent, 'verification-failed', { command: command.command, error: result.error });
+        await this.persistBackgroundAgent(agent, 'verification-failed', { command: normalizedCommand, originalCommand: result.originalCommand, error: result.error });
         return { verification, failed: result };
       }
       await this.saveState();
@@ -4780,7 +7131,7 @@ class NeuraComposerProvider {
   async runBackgroundAgent(agentId, options = {}) {
     const agent = (this.state.backgroundAgents || []).find((item) => item.id === agentId);
     if (!agent) throw new Error('Background agent was not found.');
-    if (!this.config.configured) throw new Error('NVIDIA NIM is not configured.');
+    if (!this.config.configured) throw new Error('No AI provider is configured.');
     if (this.backgroundRuns.has(agent.id)) {
       await vscode.window.showInformationMessage('This background agent is already running.');
       return;
@@ -4821,10 +7172,17 @@ class NeuraComposerProvider {
     this.renderIfVisible();
     try {
       if (agent.cancelRequested) throw new Error('Background agent was cancelled before it started.');
+      if (agent.roleId === 'browser') {
+        await this.executeBrowserBackgroundAgent(agent, controller);
+        await this.saveState();
+        await this.refresh();
+        return;
+      }
       agent.verification = [];
       agent.attempts = [];
       let failure = null;
       let completed = false;
+      let lastAppliedEdits = [];
       for (let attempt = 1; attempt <= backgroundAgentMaxAttempts; attempt += 1) {
         const tree = await this.treeForRoot(agent.path, 260);
         await this.persistBackgroundAgent(agent, attempt === 1 ? 'context-read' : 'repair-context-read', { files: tree.length, attempt });
@@ -4882,6 +7240,7 @@ class NeuraComposerProvider {
           continue;
         }
         await this.applyBackgroundAgentEdits(agent, edits, controller);
+        lastAppliedEdits = edits;
         const verificationResult = await this.verifyBackgroundAgentCommands(agent, resultCommands, controller);
         agent.edits = [
           ...(agent.edits || []),
@@ -4923,7 +7282,7 @@ class NeuraComposerProvider {
         agentId: agent.id,
         branch: agent.branch,
         path: agent.path,
-        edits: edits.map((edit) => edit.filePath),
+        edits: lastAppliedEdits.map((edit) => edit.filePath),
       });
     } catch (error) {
       agent.status = controller.signal.aborted || agent.cancelRequested ? 'cancelled' : 'failed';
@@ -5056,6 +7415,16 @@ class NeuraComposerProvider {
     this.state.proposals.unshift(proposal);
     this.state.proposals = this.state.proposals.slice(0, 20);
     agent.mergeReviewId = proposal.id;
+    agent.lifecycle = 'merge-review-created';
+    agent.branchLifecycle = {
+      branch: agent.branch,
+      baseBranch: agent.baseBranch || '',
+      baseHead: agent.baseHead || '',
+      worktreePath: agent.path,
+      mergeReviewId: proposal.id,
+      status: 'review-ready',
+      updatedAt: nowIso(),
+    };
     agent.updatedAt = nowIso();
     await this.persistBackgroundAgent(agent, 'merge-review-created', { proposalId: proposal.id, files: edits.map((edit) => edit.filePath) });
     this.recordArtifact('background-agent-review', `Merge review: ${agent.task}`, `${edits.length} file change(s) staged for review.`, {
@@ -5157,6 +7526,7 @@ class NeuraComposerProvider {
         this.activeTab = message.tab || 'chat';
         this.renderIfVisible();
       }
+      if (message.command === 'openMissionControl') await this.openMissionControl();
       if (message.command === 'createSession') await this.createSession();
       if (message.command === 'switchSession') await this.switchSession(message.sessionId);
       if (message.command === 'addContext') await this.addContext(message.filePath);
@@ -5167,10 +7537,15 @@ class NeuraComposerProvider {
       if (message.command === 'undoProposal') await this.undoProposal(message.proposalId);
       if (message.command === 'restoreCheckpoint') await this.restoreCheckpoint(message.checkpointId);
       if (message.command === 'openDiff') await this.openDiff(message.proposalId, message.filePath);
+      if (message.command === 'acceptCurrentFileProposal') await this.acceptCurrentFileProposal();
+      if (message.command === 'rejectCurrentFileProposal') await this.rejectCurrentFileProposal();
+      if (message.command === 'reapplyCurrentFileProposal') await this.reapplyCurrentFileProposal();
+      if (message.command === 'openNextPendingEdit') await this.openNextPendingEdit();
       if (message.command === 'acceptCurrentFileHunk') await this.acceptCurrentFileHunk();
       if (message.command === 'rejectCurrentFileHunk') await this.rejectCurrentFileHunk();
       if (message.command === 'runCommand') await this.runCommand(message.proposalId, message.commandId, message.commandText);
       if (message.command === 'fixTerminalFailure') await this.fixTerminalFailure(message.terminalId);
+      if (message.command === 'fixWorkspaceProblems') await this.fixWorkspaceProblems();
       if (message.command === 'autoFixTerminalFailure') await this.autoFixTerminalFailure(message.terminalId);
       if (message.command === 'openPreview') await this.openPreview(message.proposalId);
       if (message.command === 'verifyPreview') await this.verifyPreview(message.proposalId);
@@ -5178,9 +7553,15 @@ class NeuraComposerProvider {
       if (message.command === 'executeMcpCard') await this.executeMcpCard(message.mcpCardId);
       if (message.command === 'rejectMcpCard') await this.rejectMcpCard(message.mcpCardId);
       if (message.command === 'promptMcpToolCall') await this.promptMcpToolCall();
+      if (message.command === 'enableMcpTool') await this.setMcpToolEnabled(message.serverName, message.toolName, true);
+      if (message.command === 'disableMcpTool') await this.setMcpToolEnabled(message.serverName, message.toolName, false);
       if (message.command === 'rebuildSemanticIndex') await this.rebuildSemanticIndex();
       if (message.command === 'exportProofBundle') await this.exportProofBundle();
+      if (message.command === 'addArtifactComment') await this.addArtifactComment(message.artifactId);
+      if (message.command === 'openArtifactFile') await this.openArtifactFile(message.artifactId);
       if (message.command === 'openSettings') await this.openSettings();
+      if (message.command === 'configureProviders') await this.configureProviders();
+      if (message.command === 'saveProviderSettings') await this.saveProviderSettings(message.settings || {});
       if (message.command === 'clearChat') await this.clearChat();
       if (message.command === 'toggleInlineCompletions') await this.toggleInlineCompletions();
       if (message.command === 'addWorktree') await this.addWorktree();
@@ -5214,6 +7595,9 @@ class NeuraComposerProvider {
     if (this.view) {
       this.view.webview.html = this.render(isBusy);
     }
+    if (this.missionPanel) {
+      this.missionPanel.webview.html = this.renderMissionControl();
+    }
     this.updateStatusBar();
   }
 
@@ -5221,8 +7605,8 @@ class NeuraComposerProvider {
     if (!this.statusBar) return;
     const model = this.config?.model ? this.config.model.split('/').pop() : 'not configured';
     const mode = modeLabels[this.state?.mode] || 'Edit';
-    this.statusBar.text = `$(sparkle) Neura ${mode} - ${model}`;
-    this.statusBar.tooltip = `Neura IDE Composer\nModel: ${this.config?.model || 'not configured'}\nReasoning: ${reasoningLabels[this.state?.reasoning] || 'Medium'}`;
+    this.statusBar.text = `$(sparkle) Neura ${mode} - ${this.config?.providerLabel || 'AI'}:${model}`;
+    this.statusBar.tooltip = `Neura IDE Composer\nProvider: ${this.config?.providerLabel || 'not configured'}\nModel: ${this.config?.model || 'not configured'}\nFallback: ${(this.config?.providers || []).map((provider) => provider.label).join(' -> ') || 'none'}\nReasoning: ${reasoningLabels[this.state?.reasoning] || 'Medium'}`;
     this.statusBar.backgroundColor = this.config?.configured
       ? undefined
       : new vscode.ThemeColor('statusBarItem.warningBackground');
@@ -5583,13 +7967,14 @@ class NeuraComposerProvider {
 
   renderModelOptions() {
     const known = nvidiaModels.some((model) => model.id === this.config.model);
+    const providerPrefix = this.config.providerLabel ? `${this.config.providerLabel} - ` : '';
     const models = known
       ? nvidiaModels
       : [
           {
             id: this.config.model,
-            label: this.config.model || 'Custom model',
-            description: 'Current configured model',
+            label: `${providerPrefix}${this.config.model || 'Custom model'}`,
+            description: 'Current configured provider model',
           },
           ...nvidiaModels,
         ];
@@ -5628,6 +8013,9 @@ class NeuraComposerProvider {
       ['plugins', `Plugins${this.plugins.length ? ` ${this.plugins.length}` : ''}`],
       ['worktrees', `Worktrees${this.worktrees.length ? ` ${this.worktrees.length}` : ''}`],
     ];
+    if (this.activeTab === 'settings') {
+      tabs.push(['settings', 'Settings']);
+    }
     return `<nav class="tabs">${tabs
       .map(
         ([idValue, label]) =>
@@ -5646,6 +8034,7 @@ class NeuraComposerProvider {
   }
 
   renderMainPanel() {
+    if (this.activeTab === 'settings') return this.renderSettingsPanel();
     if (this.activeTab === 'artifacts') return this.renderArtifactsPanel();
     if (this.activeTab === 'agents') return this.renderAgentsPanel();
     if (this.activeTab === 'mcp') return this.renderMcpPanel();
@@ -5658,17 +8047,82 @@ class NeuraComposerProvider {
       ${this.renderCheckpoints()}`;
   }
 
+  renderSettingsPanel() {
+    const status = this.config.providerStatus || {};
+    const order = (this.config.providerOrder || ['openrouter', 'ollama', 'nim']).join(',');
+    const orderOptions = [
+      ['openrouter,ollama,nim', 'OpenRouter -> Ollama -> NVIDIA NIM'],
+      ['ollama,openrouter,nim', 'Ollama -> OpenRouter -> NVIDIA NIM'],
+      ['nim,openrouter,ollama', 'NVIDIA NIM -> OpenRouter -> Ollama'],
+      ['openrouter,nim,ollama', 'OpenRouter -> NVIDIA NIM -> Ollama'],
+    ]
+      .map(([value, label]) => `<option value="${escapeHtml(value)}" ${value === order ? 'selected' : ''}>${escapeHtml(label)}</option>`)
+      .join('');
+    const providerCard = (idValue, title, description) => {
+      const info = status[idValue] || {};
+      const configured = Boolean(info.configured);
+      return `<section class="settings-card">
+        <div class="settings-card-head">
+          <div>
+            <strong>${escapeHtml(title)}</strong>
+            <p>${escapeHtml(description)}</p>
+          </div>
+          <span class="provider-state ${configured ? 'ready' : 'missing'}">${configured ? 'Ready' : 'Needs setup'}</span>
+        </div>
+        <label>
+          <span>API key</span>
+          <input id="${escapeHtml(idValue)}ApiKey" type="password" autocomplete="off" placeholder="${configured ? 'Saved - leave blank to keep' : 'Enter API key'}" />
+        </label>
+        <label>
+          <span>Base URL</span>
+          <input id="${escapeHtml(idValue)}BaseUrl" type="text" value="${escapeHtml(info.baseUrl || '')}" placeholder="${idValue === 'openrouter' ? 'https://openrouter.ai/api/v1' : idValue === 'ollama' ? 'https://ollama.com or http://localhost:11434' : 'https://integrate.api.nvidia.com/v1'}" />
+        </label>
+        <label>
+          <span>Model</span>
+          <input id="${escapeHtml(idValue)}Model" type="text" value="${escapeHtml(info.model || '')}" placeholder="${idValue === 'openrouter' ? 'openrouter model id' : idValue === 'ollama' ? 'ollama model id' : 'nvidia/nemotron-3-nano-30b-a3b'}" />
+        </label>
+      </section>`;
+    };
+
+    return `<section class="settings-panel">
+      <div class="settings-hero">
+        <div>
+          <h2>Neura Settings</h2>
+          <p>Configure AI providers inside Neura IDE. The active chain is used immediately by chat, builder, agents, inline edits, and verification loops.</p>
+        </div>
+        <span class="provider-state ${this.config.configured ? 'ready' : 'missing'}">${this.config.configured ? `Using ${escapeHtml(this.config.providerLabel)}` : 'No provider ready'}</span>
+      </div>
+      <form id="providerSettingsForm" class="settings-form">
+        <section class="settings-card wide">
+          <div class="settings-card-head">
+            <div>
+              <strong>Fallback Order</strong>
+              <p>Neura tries providers in this order until one responds.</p>
+            </div>
+          </div>
+          <label>
+            <span>Provider chain</span>
+            <select id="providerOrder">${orderOptions}</select>
+          </label>
+        </section>
+        ${providerCard('openrouter', 'OpenRouter', 'Primary cloud router for production coding models.')}
+        ${providerCard('ollama', 'Ollama', 'Fallback for Ollama Cloud or local Ollama. Local URLs do not require an API key.')}
+        ${providerCard('nim', 'NVIDIA NIM', 'Final fallback and current stable test backend for Neura.')}
+        <div class="settings-actions">
+          <button type="submit" class="primary-action">Save Settings</button>
+          <button type="button" data-command="refresh">Refresh Status</button>
+        </div>
+      </form>
+      <p class="settings-note">API keys are write-only here. Leave a key field blank to keep the saved value.</p>
+    </section>`;
+  }
+
   renderArtifactsPanel() {
     const artifacts = this.state.artifacts || [];
-    const runGroups = new Map();
-    for (const artifact of artifacts) {
-      const runId = artifact.runId || 'workspace';
-      if (!runGroups.has(runId)) runGroups.set(runId, []);
-      runGroups.get(runId).push(artifact);
-    }
-    const rows = runGroups.size
-      ? [...runGroups.entries()]
-          .map(([runId, items]) => {
+    const rows = artifacts.length
+      ? groupArtifactsByRun(artifacts)
+          .sort((a, b) => String((b.items[b.items.length - 1] || {}).createdAt || '').localeCompare(String((a.items[a.items.length - 1] || {}).createdAt || '')))
+          .map(({ runId, items }) => {
             const ordered = [...items].sort((a, b) => (b.sequence || 0) - (a.sequence || 0));
             const latest = ordered[0];
             return `<div class="card soft-card">
@@ -5677,16 +8131,32 @@ class NeuraComposerProvider {
                 <span>${escapeHtml(String(items.length))} artifacts</span>
               </div>
               <p class="muted">Latest: ${escapeHtml(latest?.title || 'Artifact')} - ${latest ? escapeHtml(new Date(latest.createdAt).toLocaleString()) : ''}</p>
-              ${ordered.map((artifact) => `<div class="list-row">
+              ${ordered.map((artifact) => {
+                const previewPath = artifactPreviewPath(artifact);
+                const previewUri = previewPath ? this.webviewFileUri(previewPath) : '';
+                const comments = (artifact.comments || [])
+                  .map((comment) => `<li><span>${escapeHtml(new Date(comment.createdAt).toLocaleString())}</span>${escapeHtml(comment.text)}</li>`)
+                  .join('');
+                return `<div class="list-row artifact-row">
                 <div>
                   <strong>${escapeHtml(artifact.sequence || '?')}. ${escapeHtml(artifact.title)}</strong>
                   <p>${escapeHtml(artifact.summary || '')}</p>
                   <code>${escapeHtml(artifact.kind)}</code>
+                  ${previewUri ? `<img class="artifact-preview" src="${previewUri}" alt="${escapeHtml(artifact.title)} preview" />` : ''}
+                  ${artifact.data?.domPath ? `<code>${escapeHtml(artifact.data.domPath)}</code>` : ''}
+                  ${artifact.data?.recordingPath ? `<code>${escapeHtml(artifact.data.recordingPath)}</code>` : ''}
                   ${artifact.data?.mdPath ? `<code>${escapeHtml(artifact.data.mdPath)}</code>` : ''}
                   ${artifact.data?.jsonPath ? `<code>${escapeHtml(artifact.data.jsonPath)}</code>` : ''}
+                  ${artifact.data?.htmlPath ? `<code>${escapeHtml(artifact.data.htmlPath)}</code>` : ''}
+                  ${comments ? `<details class="agent-details"><summary>Comments <span>${(artifact.comments || []).length}</span></summary><ol>${comments}</ol></details>` : ''}
                 </div>
-                <span>${new Date(artifact.createdAt).toLocaleString()}</span>
-              </div>`).join('')}
+                <div class="actions vertical-actions">
+                  <span>${new Date(artifact.createdAt).toLocaleString()}</span>
+                  <button data-command="addArtifactComment" data-artifact-id="${escapeHtml(artifact.id)}">Comment</button>
+                  <button data-command="openArtifactFile" data-artifact-id="${escapeHtml(artifact.id)}">Open file</button>
+                </div>
+              </div>`;
+              }).join('')}
             </div>`;
           })
           .join('')
@@ -5699,6 +8169,10 @@ class NeuraComposerProvider {
       `${(index.files || []).length || 0} files`,
       `${(index.symbols || []).length || 0} symbols`,
       `${graphEdges} resolved imports`,
+      `${index.workspace?.roots?.length || 1} root(s)`,
+      `${stats.commits || 0} commits`,
+      `${stats.pullRequests || 0} PRs`,
+      `${stats.issues || 0} issues`,
       `${stats.changedFiles || 0} changed`,
       `${stats.reusedFiles || 0} reused`,
       index.embedding?.kind || '',
@@ -5710,6 +8184,16 @@ class NeuraComposerProvider {
         ? `Dense embeddings enabled with ${this.config.embeddings.model}.`
         : 'Dense embeddings enabled but missing model/API configuration.')
       : 'Dense embeddings off. Sparse index is active.';
+    const sharedSummary = this.sharedSemanticIndexPath
+      ? `${index.shared ? 'Loaded shared index' : 'Shared index configured'}: ${this.sharedSemanticIndexPath}`
+      : 'No shared/team index configured.';
+    const auditRows = (this.state.policyAudit || [])
+      .slice(0, 30)
+      .map((entry) => `<div class="list-row">
+        <div><strong>${escapeHtml(entry.decision)} ${escapeHtml(entry.action)}</strong><p>${escapeHtml(entry.resource)}</p><small>${escapeHtml(entry.reason)}</small></div>
+        <span>${escapeHtml(new Date(entry.createdAt).toLocaleString())}</span>
+      </div>`)
+      .join('');
     return `<section class="card">
       <div class="card-title">Artifacts</div>
       <div class="actions">
@@ -5721,9 +8205,15 @@ class NeuraComposerProvider {
           <strong>Semantic Index</strong>
           <p>${escapeHtml(indexSummary || 'No semantic index yet.')}</p>
           <p>${escapeHtml(vectorSummary)}</p>
+          <p>${escapeHtml(sharedSummary)}</p>
           ${this.vectorIndexPath ? `<code>${escapeHtml(this.vectorIndexPath)}</code>` : ''}
+          ${this.sharedSemanticIndexPath ? `<code>${escapeHtml(this.sharedSemanticIndexPath)}</code>` : ''}
         </div>
         <span>${index.updatedAt ? escapeHtml(new Date(index.updatedAt).toLocaleString()) : ''}</span>
+      </div>
+      <div class="card soft-card">
+        <div class="card-title"><span>Policy Audit</span><span>${(this.state.policyAudit || []).length}</span></div>
+        ${auditRows || '<p class="muted">No policy decisions recorded yet.</p>'}
       </div>
       ${rows}
     </section>`;
@@ -5763,10 +8253,12 @@ class NeuraComposerProvider {
                   <p>${escapeHtml(agent.task)}</p>
                   <p>${escapeHtml(agent.path)}</p>
                   <code>${escapeHtml(agent.branch)}</code>
+                  ${agent.branchLifecycle ? `<p class="muted">Lifecycle: ${escapeHtml(agent.branchLifecycle.status || agent.lifecycle || '')} / base ${escapeHtml(agent.branchLifecycle.baseBranch || agent.baseBranch || '')}@${escapeHtml(agent.branchLifecycle.baseHead || agent.baseHead || '')}</p>` : ''}
                 </div>
                 <span class="agent-status ${escapeHtml(agent.status)}">${escapeHtml(agent.status)}</span>
               </div>
               ${agent.summary ? `<p class="agent-summary">${escapeHtml(agent.summary)}</p>` : ''}
+              ${agent.liveOutput && running ? `<details class="agent-details" open><summary>Streaming response <span>live</span></summary><pre>${escapeHtml(agent.liveOutput)}</pre></details>` : ''}
               ${agent.verification?.length ? `<div class="agent-verification">${escapeHtml(agent.verification.map((item) => `${item.status}: ${item.command}`).join(' | '))}</div>` : ''}
               ${agent.error ? `<p class="error-text">${escapeHtml(agent.error)}</p>` : ''}
               ${attempts ? `<details class="agent-details"><summary>Attempts <span>${(agent.attempts || []).length}</span></summary><ol>${attempts}</ol></details>` : ''}
@@ -5804,6 +8296,9 @@ class NeuraComposerProvider {
           .slice(-4)
           .map((wave) => `<li><strong>${escapeHtml((wave.roles || []).join(', '))}</strong><span>${escapeHtml(wave.finishedAt ? 'finished' : 'running')}</span></li>`)
           .join('');
+        const plannerSummary = mission.taskGraph?.updates?.[0]?.summary || '';
+        const plannerNext = mission.planner?.nextRoles || mission.taskGraph?.nextRoles || [];
+        const plannerBlockers = mission.planner?.blockedReasons || mission.taskGraph?.blockedReasons || [];
         return `<div class="agent-card swarm-card">
           <div class="agent-card-head">
             <div>
@@ -5815,6 +8310,9 @@ class NeuraComposerProvider {
           </div>
           <div class="mission-summary">${missionCounts || '<span class="muted">No role agents yet.</span>'}</div>
           <p class="agent-summary">${escapeHtml(roleLine)}</p>
+          ${plannerSummary ? `<p class="agent-summary"><strong>Planner:</strong> ${escapeHtml(plannerSummary)}</p>` : ''}
+          ${plannerNext.length ? `<p class="agent-summary"><strong>Next roles:</strong> ${escapeHtml(plannerNext.join(', '))}</p>` : ''}
+          ${plannerBlockers.length ? `<p class="error-text">${escapeHtml(plannerBlockers.join(' | '))}</p>` : ''}
           ${conflicts ? `<details class="agent-details conflict-details" open><summary>Conflicts <span>${(mission.conflicts || []).length}</span></summary><ol>${conflicts}</ol></details>` : ''}
           ${waves ? `<details class="agent-details"><summary>Parallel waves <span>${(mission.waves || []).length}</span></summary><ol>${waves}</ol></details>` : ''}
           ${mission.error ? `<p class="error-text">${escapeHtml(mission.error)}</p>` : ''}
@@ -5829,7 +8327,7 @@ class NeuraComposerProvider {
     return `<section class="card mission-control">
       <div class="card-title">Mission Control</div>
       <div class="mission-summary">${queueSummary}</div>
-      <div class="actions"><button class="primary-action" data-command="createSwarmMission">Create Agent Swarm</button><button data-command="createBackgroundAgent">Create Solo Agent</button><button data-command="refresh">Refresh</button></div>
+      <div class="actions"><button class="primary-action" data-command="openMissionControl">Open Mission Control</button><button class="primary-action" data-command="createSwarmMission">Create Agent Swarm</button><button data-command="createBackgroundAgent">Create Solo Agent</button><button data-command="refresh">Refresh</button></div>
       ${missionRows}
       ${rows}
     </section>`;
@@ -5840,7 +8338,12 @@ class NeuraComposerProvider {
       ? this.mcpServers
           .map(
             (server) => `<div class="list-row">
-              <div><strong>${escapeHtml(server.name)}</strong><p>${escapeHtml(server.transport)} ${escapeHtml(server.command || server.url || '')}</p><small>${escapeHtml(server.error || `${(server.tools || []).length} tool(s)`)}</small></div>
+              <div><strong>${escapeHtml(server.name)}</strong><p>${escapeHtml(server.transport)} ${escapeHtml(server.command || server.url || '')}</p><small>${escapeHtml(server.error || `${(server.tools || []).length} tool(s)`)}</small>
+                ${(server.tools || []).length ? `<div class="tool-list">${(server.tools || []).map((tool) => `<div class="tool-row">
+                  <span>${escapeHtml(tool.name)}${tool.description ? ` - ${escapeHtml(String(tool.description).slice(0, 140))}` : ''}</span>
+                  <button data-command="${tool.enabled ? 'disableMcpTool' : 'enableMcpTool'}" data-server-name="${escapeHtml(server.name)}" data-tool-name="${escapeHtml(tool.name)}">${tool.enabled ? 'Disable' : 'Enable'}</button>
+                </div>`).join('')}</div>` : ''}
+              </div>
               <span>${escapeHtml(server.status)}</span>
             </div>`,
           )
@@ -5850,9 +8353,11 @@ class NeuraComposerProvider {
       .slice(0, 12)
       .map((card) => `<div class="terminal-card">
         <div class="file-head"><strong>${escapeHtml(card.serverName)} / ${escapeHtml(card.toolName)}</strong><span>${escapeHtml(card.status)}</span></div>
-        <pre>${escapeHtml(JSON.stringify(card.args || {}, null, 2))}</pre>
+        <p class="muted">Policy: ${escapeHtml(card.policyDecision || 'ask')} ${card.policyReason ? `- ${escapeHtml(card.policyReason)}` : ''}</p>
+        <pre>${escapeHtml(JSON.stringify(redactSecrets(card.args || {}), null, 2))}</pre>
         ${card.error ? `<p class="error-text">${escapeHtml(card.error)}</p>` : ''}
-        ${card.result ? `<pre>${escapeHtml(JSON.stringify(card.result, null, 2).slice(0, 3000))}</pre>` : ''}
+        ${card.result ? `<pre>${escapeHtml(JSON.stringify(redactSecrets(card.result), null, 2).slice(0, 3000))}</pre>` : ''}
+        ${(card.audit || []).length ? `<details class="agent-details"><summary>Audit <span>${card.audit.length}</span></summary><ol>${card.audit.map((entry) => `<li><span>${escapeHtml(entry.event)}</span><small>${escapeHtml(new Date(entry.at).toLocaleString())}</small>${entry.error ? `<p class="error-text">${escapeHtml(entry.error)}</p>` : ''}${entry.policyReason ? `<p>${escapeHtml(entry.policyReason)}</p>` : ''}</li>`).join('')}</ol></details>` : ''}
         ${card.status === 'pending' ? `<div class="actions"><button data-command="executeMcpCard" data-mcp-card-id="${escapeHtml(card.id)}">Approve Tool</button><button data-command="rejectMcpCard" data-mcp-card-id="${escapeHtml(card.id)}">Reject</button></div>` : ''}
       </div>`)
       .join('');
@@ -5864,7 +8369,7 @@ class NeuraComposerProvider {
       ? this.plugins
           .map(
             (plugin) => `<div class="list-row">
-              <div><strong>${escapeHtml(plugin.name)}</strong><p>${escapeHtml(plugin.description)}</p>${plugin.error ? `<p class="error-text">${escapeHtml(plugin.error)}</p>` : ''}</div>
+              <div><strong>${escapeHtml(plugin.name)}</strong><p>${escapeHtml(plugin.description)}</p><small>${escapeHtml(plugin.sandbox || 'restricted-api')}</small>${plugin.capabilities && Object.keys(plugin.capabilities).length ? `<pre>${escapeHtml(JSON.stringify(plugin.capabilities, null, 2).slice(0, 1000))}</pre>` : ''}${plugin.error ? `<p class="error-text">${escapeHtml(plugin.error)}</p>` : ''}</div>
               <div class="actions">
                 <span>${escapeHtml(plugin.trusted ? 'trusted' : 'disabled')} - ${escapeHtml(plugin.version)}${plugin.permissions?.length ? ` - ${escapeHtml(plugin.permissions.join(', '))}` : ''}</span>
                 ${plugin.trusted ? `<button data-command="untrustPlugin" data-plugin-name="${escapeHtml(plugin.name)}">Disable</button>` : `<button data-command="trustPlugin" data-plugin-name="${escapeHtml(plugin.name)}">Trust</button>`}
@@ -5892,6 +8397,352 @@ class NeuraComposerProvider {
           .join('')
       : '<section class="empty"><strong>No Git worktrees found.</strong><p>Create a worktree from the command palette or this panel.</p></section>';
     return `<section class="card"><div class="card-title">Git Worktrees</div>${rows}<div class="actions"><button data-command="addWorktree">Add Worktree</button><button data-command="refresh">Refresh</button></div></section>`;
+  }
+
+  missionArtifacts(mission) {
+    const agentIds = new Set(mission.agentIds || []);
+    return (this.state.artifacts || [])
+      .filter((artifact) => artifact.data?.missionId === mission.id || agentIds.has(artifact.data?.agentId) || agentIds.has(artifact.data?.sourceAgentId))
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  }
+
+  missionApprovals(mission) {
+    const agentIds = new Set(mission.agentIds || []);
+    const proposals = (this.state.proposals || [])
+      .filter((proposal) => agentIds.has(proposal.sourceAgentId) || proposal.data?.missionId === mission.id)
+      .filter((proposal) => proposal.status === 'proposed' || proposal.status === 'partially_applied')
+      .map((proposal) => ({
+        kind: 'merge',
+        id: proposal.id,
+        title: proposal.summary,
+        detail: `${(proposal.edits || []).length} file(s), ${(proposal.commands || []).length} command(s)`,
+        command: 'applyProposal',
+        proposalId: proposal.id,
+      }));
+    const mcpCards = (this.state.mcpCards || [])
+      .filter((card) => card.status === 'pending')
+      .map((card) => ({
+        kind: 'mcp',
+        id: card.id,
+        title: `${card.serverName}/${card.toolName}`,
+        detail: 'MCP tool waiting for approval',
+        command: 'executeMcpCard',
+        mcpCardId: card.id,
+      }));
+    return [...proposals, ...mcpCards].slice(0, 12);
+  }
+
+  renderMissionControlTimeline(mission, agents, artifacts) {
+    const events = [
+      ...(mission.events || []).map((event) => ({
+        at: event.at,
+        label: event.event,
+        summary: event.details?.error || event.details?.summary || '',
+        type: 'mission',
+      })),
+      ...agents.flatMap((agent) => (agent.events || []).slice(0, 8).map((event) => ({
+        at: event.at,
+        label: `${agent.roleLabel || 'Agent'}: ${event.event}`,
+        summary: event.error || event.summary || '',
+        type: agent.status,
+      }))),
+      ...artifacts.slice(0, 16).map((artifact) => ({
+        at: artifact.createdAt,
+        label: artifact.title,
+        summary: artifact.summary,
+        type: artifact.kind,
+      })),
+    ]
+      .filter((event) => event.at)
+      .sort((a, b) => String(b.at).localeCompare(String(a.at)))
+      .slice(0, 28);
+    return events.length
+      ? events.map((event) => `<li><span>${escapeHtml(new Date(event.at).toLocaleString())}</span><strong>${escapeHtml(event.label)}</strong>${event.summary ? `<p>${escapeHtml(event.summary)}</p>` : ''}</li>`).join('')
+      : '<li><span>Waiting</span><strong>No activity yet</strong><p>Create or run a swarm mission to start the timeline.</p></li>';
+  }
+
+  renderMissionControlAgent(agent) {
+    const inbox = (agent.followUps || [])
+      .slice(-4)
+      .map((item) => `<li>${escapeHtml(item.content)}<span>${escapeHtml(new Date(item.createdAt || item.at || agent.updatedAt || nowIso()).toLocaleString())}</span></li>`)
+      .join('');
+    const events = (agent.events || [])
+      .slice(0, 5)
+      .map((event) => `<li><strong>${escapeHtml(event.event)}</strong>${event.summary ? `<p>${escapeHtml(event.summary)}</p>` : ''}${event.error ? `<p class="danger">${escapeHtml(event.error)}</p>` : ''}</li>`)
+      .join('');
+    const verification = (agent.verification || [])
+      .slice(-3)
+      .map((item) => `<li><strong>${escapeHtml(item.status)}</strong><code>${escapeHtml(item.command || '')}</code></li>`)
+      .join('');
+    const browserEvidence = agent.browserEvidence
+      ? `<div class="note">
+          <strong>Browser evidence</strong>
+          <p>${escapeHtml(agent.browserEvidence.summary || '')}</p>
+          ${agent.browserEvidence.screenshotPath ? `<code>${escapeHtml(agent.browserEvidence.screenshotPath)}</code>` : ''}
+          ${agent.browserEvidence.recordingPath ? `<code>${escapeHtml(agent.browserEvidence.recordingPath)}</code>` : ''}
+        </div>`
+      : '';
+    const running = ['queued', 'running', 'cancelling'].includes(agent.status);
+    const canReview = ['completed', 'failed', 'cancelled', 'interrupted'].includes(agent.status);
+    return `<article class="mc-agent">
+      <div class="mc-agent-head">
+        <div>
+          <strong>${escapeHtml(agent.roleLabel || 'Agent')}</strong>
+          <span>${escapeHtml(agent.squad || 'Solo')} / ${escapeHtml(agent.status || 'ready')}</span>
+        </div>
+        <span class="status ${escapeHtml(agent.status || 'ready')}">${escapeHtml(agent.status || 'ready')}</span>
+      </div>
+      <p>${escapeHtml(agent.task || '')}</p>
+      <code>${escapeHtml(agent.branch || agent.path || '')}</code>
+      ${agent.summary ? `<div class="note">${escapeHtml(agent.summary)}</div>` : ''}
+      ${browserEvidence}
+      ${agent.error ? `<div class="note danger">${escapeHtml(agent.error)}</div>` : ''}
+      <div class="mc-mini-grid">
+        <section><h4>Inbox</h4><ul>${inbox || '<li>No follow-ups yet.</li>'}</ul></section>
+        <section><h4>Live log</h4><ul>${events || '<li>No log events yet.</li>'}</ul></section>
+        <section><h4>Verification</h4><ul>${verification || '<li>No verification evidence yet.</li>'}</ul></section>
+      </div>
+      <div class="actions">
+        <button data-command="runBackgroundAgent" data-agent-id="${escapeHtml(agent.id)}" ${running ? 'disabled' : ''}>Run</button>
+        ${running ? `<button data-command="cancelBackgroundAgent" data-agent-id="${escapeHtml(agent.id)}">Cancel</button>` : ''}
+        <button data-command="followUpBackgroundAgent" data-agent-id="${escapeHtml(agent.id)}">Send follow-up</button>
+        <button data-command="openBackgroundAgent" data-agent-id="${escapeHtml(agent.id)}">Take over</button>
+        ${canReview ? `<button class="primary" data-command="reviewBackgroundAgent" data-agent-id="${escapeHtml(agent.id)}">Queue merge review</button>` : ''}
+        ${agent.logFile ? `<button data-command="openBackgroundAgentLog" data-agent-id="${escapeHtml(agent.id)}">Open log</button>` : ''}
+      </div>
+    </article>`;
+  }
+
+  renderMissionPlannerCard(mission) {
+    const graph = mission.taskGraph;
+    if (!graph) {
+      return `<section class="mc-card planner-card">
+        <h3>Planner Controller</h3>
+        <p>No controller graph has been created yet.</p>
+      </section>`;
+    }
+    const latest = graph.updates?.[0];
+    const items = (graph.items || [])
+      .slice(0, 12)
+      .map((item) => `<li>
+        <div>
+          <strong>${escapeHtml(item.title)}</strong>
+          <p>${escapeHtml(item.handoff || item.rationale || '')}</p>
+          ${item.acceptance ? `<small>${escapeHtml(item.acceptance)}</small>` : ''}
+        </div>
+        <span>${escapeHtml(item.ownerRole || 'shared')} / ${escapeHtml(item.status || 'pending')}</span>
+      </li>`)
+      .join('');
+    const nextRoles = graph.nextRoles?.length
+      ? graph.nextRoles.map((roleId) => `<span>${escapeHtml(roleId)}</span>`).join('')
+      : '<p>No role preference. Dependency-ready agents may run.</p>';
+    const blockers = graph.blockedReasons?.length
+      ? `<div class="note danger">${escapeHtml(graph.blockedReasons.join(' | '))}</div>`
+      : '';
+    const risks = graph.risks?.length
+      ? `<div class="note">${escapeHtml(graph.risks.join(' | '))}</div>`
+      : '';
+    return `<section class="mc-card planner-card">
+      <div class="planner-head">
+        <div>
+          <h3>Planner Controller</h3>
+          <p>${escapeHtml(latest?.summary || 'Controller is supervising the mission.')}</p>
+        </div>
+        <span class="status ${escapeHtml(graph.controllerStatus || graph.status || 'running')}">v${escapeHtml(graph.version || 1)} ${escapeHtml(graph.controllerStatus || graph.status || 'running')}</span>
+      </div>
+      <div class="planner-next">${nextRoles}</div>
+      ${blockers}
+      ${risks}
+      <ol class="planner-list">${items || '<li><div><strong>No tasks yet</strong><p>Run the swarm to generate a controller graph.</p></div><span>waiting</span></li>'}</ol>
+    </section>`;
+  }
+
+  renderMissionControlMission(mission) {
+    const agents = (this.state.backgroundAgents || []).filter((agent) => mission.agentIds?.includes(agent.id));
+    const artifacts = this.missionArtifacts(mission);
+    const approvals = this.missionApprovals(mission);
+    const browserEvidence = artifacts.filter((artifact) => artifact.kind === 'preview' || artifact.kind === 'browser' || artifact.kind === 'browser-verify' || artifact.kind === 'browser-agent');
+    const conflicts = (mission.conflicts || [])
+      .map((conflict) => `<li><strong>${escapeHtml(conflict.filePath)}</strong><span>${escapeHtml((conflict.owners || []).map((owner) => owner.roleLabel || owner.roleId).join(' vs '))}</span></li>`)
+      .join('');
+    return `<section class="mc-mission">
+      <div class="mc-mission-head">
+        <div>
+          <div class="eyebrow">Swarm Mission</div>
+          <h2>${escapeHtml(mission.task || 'Untitled mission')}</h2>
+          <p>${escapeHtml(mission.id)}</p>
+        </div>
+        <span class="status ${escapeHtml(mission.status || 'ready')}">${escapeHtml(mission.status || 'ready')}</span>
+      </div>
+      ${mission.error ? `<div class="note danger">${escapeHtml(mission.error)}</div>` : ''}
+      <div class="mc-stat-row">
+        ${['ready', 'queued', 'running', 'completed', 'blocked', 'failed', 'cancelled', 'interrupted'].map((status) => {
+          const count = agents.filter((agent) => agent.status === status).length;
+          return count ? `<span>${escapeHtml(status)} <strong>${count}</strong></span>` : '';
+        }).join('')}
+        <span>artifacts <strong>${artifacts.length}</strong></span>
+        <span>approvals <strong>${approvals.length}</strong></span>
+      </div>
+      <div class="actions">
+        <button class="primary" data-command="runSwarmMission" data-mission-id="${escapeHtml(mission.id)}">Run Swarm</button>
+        <button data-command="cancelSwarmMission" data-mission-id="${escapeHtml(mission.id)}">Cancel</button>
+        <button data-command="reviewSwarmMission" data-mission-id="${escapeHtml(mission.id)}">Create Merge Queue</button>
+        <button data-command="exportProofBundle">Export Proof Bundle</button>
+      </div>
+      ${this.renderMissionPlannerCard(mission)}
+      <div class="mc-layout">
+        <section class="mc-card wide">
+          <h3>Live Timeline</h3>
+          <ol class="timeline">${this.renderMissionControlTimeline(mission, agents, artifacts)}</ol>
+        </section>
+        <section class="mc-card">
+          <h3>Approval Queue</h3>
+          <div class="approval-list">
+            ${approvals.length ? approvals.map((item) => `<div class="approval">
+              <div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.detail)}</p><code>${escapeHtml(item.kind)}</code></div>
+              <button class="primary" data-command="${escapeHtml(item.command)}" data-proposal-id="${escapeHtml(item.proposalId || '')}" data-mcp-card-id="${escapeHtml(item.mcpCardId || '')}">Approve</button>
+            </div>`).join('') : '<p>No pending approvals.</p>'}
+          </div>
+        </section>
+        <section class="mc-card">
+          <h3>Artifacts</h3>
+          ${artifacts.length ? artifacts.slice(0, 10).map((artifact) => `<div class="artifact"><strong>${escapeHtml(artifact.title)}</strong><p>${escapeHtml(artifact.summary || '')}</p><code>${escapeHtml(artifact.kind)}</code></div>`).join('') : '<p>No artifacts yet.</p>'}
+        </section>
+        <section class="mc-card">
+          <h3>Browser Verification</h3>
+          ${browserEvidence.length ? browserEvidence.slice(0, 8).map((artifact) => `<div class="artifact"><strong>${escapeHtml(artifact.title)}</strong><p>${escapeHtml(artifact.summary || '')}</p>${artifact.data?.screenshotPath ? `<code>${escapeHtml(artifact.data.screenshotPath)}</code>` : ''}</div>`).join('') : '<p>No browser proof yet.</p>'}
+        </section>
+        ${conflicts ? `<section class="mc-card danger-card"><h3>Conflict Blockers</h3><ul>${conflicts}</ul></section>` : ''}
+      </div>
+      <section class="mc-agent-grid">
+        ${agents.length ? agents.map((agent) => this.renderMissionControlAgent(agent)).join('') : '<p>No role agents are attached.</p>'}
+      </section>
+    </section>`;
+  }
+
+  renderMissionControl() {
+    const missions = this.state.swarmMissions || [];
+    const agents = this.state.backgroundAgents || [];
+    const running = agents.filter((agent) => ['queued', 'running', 'cancelling'].includes(agent.status));
+    const approvals = (this.state.proposals || []).filter((proposal) => proposal.status === 'proposed' || proposal.status === 'partially_applied');
+    const artifacts = this.state.artifacts || [];
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0f0f10; color: #f4f4f5; font: 13px/1.45 var(--vscode-font-family); }
+    button { border: 1px solid #323238; border-radius: 7px; background: #17171a; color: #e8e8ec; padding: 6px 9px; font: inherit; cursor: pointer; }
+    button:hover { background: #242428; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button.primary, .primary { background: #f4f4f5; color: #101012; border-color: #f4f4f5; }
+    code { display: inline-block; max-width: 100%; padding: 2px 5px; border: 1px solid #303037; border-radius: 5px; color: #d7e8ff; background: #111114; overflow-wrap: anywhere; }
+    p { margin: 4px 0 0; color: #a8a8b0; }
+    .mc-shell { min-height: 100vh; display: flex; flex-direction: column; }
+    .mc-top { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 18px; background: #0f0f10; border-bottom: 1px solid #25252a; }
+    .mc-top h1 { margin: 0; font-size: 16px; }
+    .mc-top p { margin: 2px 0 0; }
+    .mc-actions { display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
+    .mc-overview { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 10px; padding: 14px 18px 0; }
+    .mc-stat, .mc-card, .mc-mission, .mc-agent { border: 1px solid #28282f; border-radius: 12px; background: #161619; }
+    .mc-stat { padding: 12px; }
+    .mc-stat span { color: #92929c; font-size: 11px; text-transform: uppercase; }
+    .mc-stat strong { display: block; margin-top: 3px; font-size: 22px; }
+    .mc-feed { display: flex; flex-direction: column; gap: 14px; padding: 14px 18px 24px; }
+    .mc-mission { padding: 14px; }
+    .mc-mission-head, .mc-agent-head, .approval { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+    .eyebrow { color: #888892; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+    h2, h3, h4 { margin: 0; color: #f4f4f5; }
+    h2 { font-size: 16px; }
+    h3 { font-size: 13px; margin-bottom: 9px; }
+    h4 { font-size: 11px; color: #bdbdc5; text-transform: uppercase; letter-spacing: .04em; }
+    .status { border: 1px solid #34343b; border-radius: 999px; padding: 4px 8px; color: #c9c9d1; font-size: 10px; text-transform: uppercase; }
+    .status.running, .status.queued, .status.cancelling, .status.blocked { color: #fde68a; border-color: #5f4b1b; }
+    .status.completed { color: #86efac; border-color: #235c35; }
+    .status.failed, .status.cancelled, .status.interrupted { color: #fca5a5; border-color: #693030; }
+    .mc-stat-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+    .mc-stat-row span { border: 1px solid #303037; border-radius: 999px; padding: 3px 8px; color: #a8a8b0; font-size: 11px; text-transform: uppercase; }
+    .actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+    .planner-card { margin-top: 14px; }
+    .planner-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .planner-next { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .planner-next span { border: 1px solid #303037; border-radius: 999px; padding: 3px 8px; color: #d7e8ff; font-size: 11px; }
+    .planner-list { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; }
+    .planner-list li { display: flex; justify-content: space-between; gap: 12px; margin: 0; border-top: 1px solid #28282f; padding-top: 8px; }
+    .planner-list li:first-child { border-top: 0; padding-top: 0; }
+    .planner-list strong { color: #f4f4f5; }
+    .planner-list small { display: block; color: #85858e; margin-top: 3px; }
+    .planner-list span { flex: 0 0 auto; color: #a8a8b0; font-size: 11px; text-transform: uppercase; }
+    .mc-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .85fr); gap: 12px; margin-top: 14px; }
+    .mc-card { padding: 12px; min-width: 0; }
+    .mc-card.wide { grid-row: span 2; }
+    .timeline { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+    .timeline li { border-left: 2px solid #34343b; padding: 2px 0 8px 10px; }
+    .timeline span { color: #777781; font-size: 11px; }
+    .timeline strong { display: block; margin-top: 2px; color: #e8e8ec; }
+    .approval, .artifact { border-top: 1px solid #28282f; padding: 9px 0; }
+    .approval:first-child, .artifact:first-child { border-top: 0; padding-top: 0; }
+    .mc-agent-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; margin-top: 14px; }
+    .mc-agent { padding: 12px; }
+    .mc-agent-head strong { display: block; }
+    .mc-agent-head span:not(.status) { color: #8f8f99; font-size: 11px; }
+    .note { margin-top: 8px; border-left: 2px solid #32323a; padding-left: 8px; color: #cfcfd5; }
+    .danger, .danger-card, .note.danger { color: #fca5a5; }
+    .danger-card { border-color: #693030; }
+    .mc-mini-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+    .mc-mini-grid section { border: 1px solid #28282f; border-radius: 9px; padding: 8px; min-width: 0; }
+    ul, ol { margin: 6px 0 0; padding-left: 18px; }
+    li { margin: 5px 0; color: #cfcfd5; }
+    li span { display: block; color: #85858e; font-size: 11px; }
+    @media (max-width: 900px) {
+      .mc-overview, .mc-layout, .mc-mini-grid { grid-template-columns: 1fr; }
+      .mc-top, .mc-mission-head, .mc-agent-head, .approval { flex-direction: column; align-items: stretch; }
+    }
+  </style>
+</head>
+<body>
+  <div class="mc-shell">
+    <header class="mc-top">
+      <div>
+        <h1>Neura Mission Control</h1>
+        <p>${escapeHtml(this.projectName)} / ${escapeHtml(this.rootPath || 'No workspace')}</p>
+      </div>
+      <div class="mc-actions">
+        <button class="primary" data-command="createSwarmMission">New Swarm</button>
+        <button data-command="createBackgroundAgent">Solo Agent</button>
+        <button data-command="exportProofBundle">Export Proof</button>
+        <button data-command="refresh">Refresh</button>
+      </div>
+    </header>
+    <section class="mc-overview">
+      <div class="mc-stat"><span>Missions</span><strong>${missions.length}</strong></div>
+      <div class="mc-stat"><span>Running agents</span><strong>${running.length}</strong></div>
+      <div class="mc-stat"><span>Pending approvals</span><strong>${approvals.length}</strong></div>
+      <div class="mc-stat"><span>Artifacts</span><strong>${artifacts.length}</strong></div>
+    </section>
+    <main class="mc-feed">
+      ${missions.length ? missions.map((mission) => this.renderMissionControlMission(mission)).join('') : '<section class="mc-card"><h2>No missions yet</h2><p>Create an agent swarm to plan, build, verify, and review work across isolated role agents.</p><div class="actions"><button class="primary" data-command="createSwarmMission">Create Agent Swarm</button></div></section>'}
+    </main>
+  </div>
+  <script>
+    const vscode = acquireVsCodeApi();
+    function postFrom(element) {
+      vscode.postMessage({
+        command: element.dataset.command,
+        agentId: element.dataset.agentId,
+        missionId: element.dataset.missionId,
+        proposalId: element.dataset.proposalId,
+        mcpCardId: element.dataset.mcpCardId
+      });
+    }
+    document.querySelectorAll('[data-command]').forEach((element) => {
+      element.addEventListener('click', () => postFrom(element));
+    });
+  </script>
+</body>
+</html>`;
   }
 
   render(isBusy = false) {
@@ -6043,6 +8894,10 @@ class NeuraComposerProvider {
     body { background: #111112; color: #f5f5f5; font-size: 13px; }
     header { height: 38px; padding: 0 12px; background: #111112; border-bottom: 1px solid #252528; }
     h1 { font-size: 12px; text-transform: uppercase; letter-spacing: .02em; color: #dcdcdc; }
+    .top-actions { gap: 8px; min-width: 0; }
+    .top-actions .session-select { flex: 1 1 auto; min-width: 126px; max-width: 240px; height: 30px; border-radius: 7px; background: #1f1f22; border-color: #303036; padding: 0 10px; }
+    .settings-button { flex: 0 0 auto; width: 30px; height: 30px; border: 1px solid #303036; border-radius: 8px; background: #1f1f22; color: #efeff3; font-size: 15px; }
+    .settings-button:hover { background: #2a2a2f; border-color: #42424a; }
     .tabs { padding: 0 12px; gap: 12px; background: #111112; border-bottom: 1px solid #252528; overflow-x: auto; flex-shrink: 0; }
     .tab { padding: 9px 0 8px; color: #8f8f98; border: 0; border-bottom: 1px solid transparent; background: transparent; }
     .tab.active { color: #ffffff; border-bottom-color: #ffffff; background: transparent; }
@@ -6057,6 +8912,12 @@ class NeuraComposerProvider {
     .thinking summary { color: #a6a6ad; font-size: 12px; }
     .thinking pre { border: 0; background: #18181a; color: #b7b7bd; }
     .card { border: 1px solid #29292d; border-radius: 10px; background: #18181b; }
+    .artifact-preview { display: block; width: 100%; max-height: 220px; object-fit: contain; border: 1px solid #303036; border-radius: 8px; margin-top: 8px; background: #0f0f10; }
+    .artifact-row { align-items: flex-start; }
+    .vertical-actions { flex-direction: column; align-items: flex-end; }
+    .tool-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+    .tool-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #2a2a30; border-radius: 8px; padding: 6px 8px; background: #141416; }
+    .tool-row span { min-width: 0; overflow-wrap: anywhere; color: #d7d7dd; }
     .agent-run { border: 1px solid #29292d; border-radius: 12px; background: #18181b; overflow: hidden; }
     .run-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; padding: 14px 14px 12px; border-bottom: 1px solid #27272b; }
     .run-kicker { color: #9a9aa3; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
@@ -6092,12 +8953,36 @@ class NeuraComposerProvider {
     .preview-row { margin: 0 14px 12px; border-bottom: 0; }
     footer { padding: 10px 12px 12px; background: #111112; border-top: 1px solid #252528; }
     .project-name { font-size: 12px; color: #dcdce2; margin-left: 2px; }
-    .composer { border-radius: 14px; background: #202023; border-color: #303036; padding: 8px; }
-    textarea { min-height: 44px; padding: 7px; color: #f7f7f8; }
-    .bar { margin-top: 2px; }
+    .composer { border-radius: 18px; background: #1f1f22; border-color: #303036; padding: 10px; box-shadow: 0 0 0 1px rgba(255,255,255,.02) inset; }
+    .composer:focus-within { border-color: #4a4a52; background: #222226; }
+    textarea { min-height: 58px; padding: 8px 10px; color: #f7f7f8; line-height: 1.45; }
+    textarea::placeholder { color: #85858d; }
+    .bar { margin-top: 5px; align-items: flex-end; }
+    .bar-left { gap: 6px; min-width: 0; }
+    .bar-left select, .bar-left button:not(.icon-button) { height: 30px; border-radius: 8px; background: transparent; color: #e4e4e8; padding: 4px 8px; }
+    .bar-left select:hover, .bar-left button:not(.icon-button):hover { background: #2b2b30; }
     select, button { color: #e1e1e6; }
-    .send { width: 34px; height: 34px; border-radius: 10px; background: #34343a; }
+    .send { width: 38px; height: 38px; border-radius: 50%; background: #f4f4f5; color: #111112; border: 0; font-size: 18px; font-weight: 700; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+    .send:hover { background: #ffffff; color: #111112; }
+    .send.queue { width: auto; min-width: 54px; border-radius: 999px; font-size: 12px; padding: 0 12px; }
     .fine-print { color: #6f6f78; margin-left: 2px; }
+    .settings-panel { display: flex; flex-direction: column; gap: 12px; }
+    .settings-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; border: 1px solid #29292d; border-radius: 12px; background: #18181b; padding: 14px; }
+    .settings-hero h2 { margin: 0; font-size: 15px; color: #f5f5f5; }
+    .settings-hero p, .settings-card p, .settings-note { color: #9b9ba4; margin: 5px 0 0; }
+    .settings-form { display: grid; grid-template-columns: 1fr; gap: 10px; }
+    .settings-card { border: 1px solid #29292d; border-radius: 12px; background: #18181b; padding: 12px; }
+    .settings-card-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+    .settings-card strong { color: #f3f3f5; font-size: 13px; }
+    .provider-state { flex: 0 0 auto; border: 1px solid #34343a; border-radius: 999px; padding: 3px 8px; font-size: 10px; text-transform: uppercase; color: #c9c9d1; }
+    .provider-state.ready { color: #86efac; border-color: #235c35; }
+    .provider-state.missing { color: #fca5a5; border-color: #693030; }
+    .settings-card label { display: flex; flex-direction: column; gap: 5px; margin-top: 9px; }
+    .settings-card label span { color: #b7b7bf; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    .settings-card input, .settings-card select { width: 100%; border: 1px solid #303036; border-radius: 8px; background: #111112; color: #f4f4f5; padding: 8px 9px; outline: 0; }
+    .settings-card input:focus, .settings-card select:focus { border-color: #565660; }
+    .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .settings-note { font-size: 11px; }
     @media (max-width: 420px) {
       .run-head, .review-bar, .change-row, .command-row, .preview-row { flex-direction: column; align-items: stretch; }
       .change-side, .command-side { max-width: none; align-items: flex-start; }
@@ -6112,9 +8997,7 @@ class NeuraComposerProvider {
       <h1>Agent</h1>
       <div class="top-actions">
         <select class="session-select" id="sessionSelect" title="Composer session">${this.renderSessionOptions()}</select>
-        <button class="icon-button" id="newChat" title="New session">+</button>
-        <button class="icon-button" data-command="refresh" title="Refresh">R</button>
-        <button class="icon-button" id="mcpButton" title="Create MCP approval card">...</button>
+        <button class="icon-button settings-button" data-command="configureProviders" title="Neura settings" aria-label="Neura settings">⚙</button>
       </div>
     </header>
     ${this.renderTabs()}
@@ -6122,7 +9005,7 @@ class NeuraComposerProvider {
       ${
         configured
           ? ''
-          : '<section class="empty"><strong>Set up NVIDIA NIM</strong><p>Open Settings and set neura.nim.apiKey, neura.nim.baseUrl, and neura.nim.model. The API key is never shown in this panel.</p><div class="actions"><button data-command="openSettings">Open Settings</button></div></section>'
+          : '<section class="empty"><strong>Set up an AI provider</strong><p>Neura tries OpenRouter first, then Ollama, then NVIDIA NIM. Use the gear icon to configure provider keys and models inside this panel. API keys are never shown after saving.</p><div class="actions"><button data-command="configureProviders">Open Neura Settings</button></div></section>'
       }
       ${this.renderQueuePanel()}
       ${this.renderMainPanel()}
@@ -6131,7 +9014,7 @@ class NeuraComposerProvider {
       <div class="project-name">${escapeHtml(this.projectName)}</div>
       <div class="composer">
         <div id="attachments" class="attachment-row"></div>
-        <textarea id="prompt" placeholder="${configured ? (isBusy ? 'Neura is working. Send another message to queue it.' : 'Ask for code changes, @ to mention, / for workflows') : 'Configure NVIDIA NIM to use the coding Composer.'}"></textarea>
+        <textarea id="prompt" placeholder="${configured ? (isBusy ? 'Neura is working. Send another message to queue it.' : 'Ask for code changes, @ to mention, / for workflows') : 'Configure OpenRouter, Ollama, or NIM to use the coding Composer.'}"></textarea>
         <div id="mentions">${this.renderSuggestions()}</div>
         <div id="workflows" class="workflow-menu">
           <button data-slash="/plan ">Plan implementation</button>
@@ -6139,19 +9022,19 @@ class NeuraComposerProvider {
           <button data-slash="/edit ">Edit code</button>
           <button data-slash="/build ">Build app/site</button>
           <button data-slash="/explain ">Explain code</button>
-          <button data-command="openSettings">NIM settings</button>
+          <button data-command="configureProviders">AI provider settings</button>
           <button data-command="promptMcpToolCall">MCP tool card</button>
         </div>
         <div class="bar">
           <div class="bar-left">
             <button class="icon-button" id="attachButton" title="Attach image or text">+</button>
-            <select id="modelSelect" title="NVIDIA NIM model">${this.renderModelOptions()}</select>
+            <select id="modelSelect" title="Active AI provider model">${this.renderModelOptions()}</select>
             <select id="reasoningSelect" title="Reasoning level">${this.renderReasoningOptions()}</select>
             <select id="permissionSelect" title="Permission mode">${this.renderPermissionOptions()}</select>
             <button id="workflowButton">${escapeHtml(modeLabel)}</button>
           </div>
           <div class="bar-right">
-            <button class="send" id="send" title="${isBusy ? 'Queue message' : 'Send'}">${isBusy ? 'Queue' : 'Send'}</button>
+            <button class="send ${isBusy ? 'queue' : ''}" id="send" title="${isBusy ? 'Queue message' : 'Send'}">${isBusy ? 'Queue' : '↑'}</button>
           </div>
         </div>
       </div>
@@ -6193,9 +9076,16 @@ class NeuraComposerProvider {
         agentId: element.dataset.agentId,
         missionId: element.dataset.missionId,
         mcpCardId: element.dataset.mcpCardId,
+        serverName: element.dataset.serverName,
+        toolName: element.dataset.toolName,
         pluginName: element.dataset.pluginName,
+        artifactId: element.dataset.artifactId,
         queueId: element.dataset.queueId
       });
+    }
+    function valueOf(id) {
+      const element = document.getElementById(id);
+      return element ? element.value : '';
     }
     document.querySelectorAll('[data-command]').forEach((element) => {
       element.addEventListener('click', () => postFrom(element));
@@ -6218,15 +9108,8 @@ class NeuraComposerProvider {
       workflows.style.display = workflows.style.display === 'block' ? 'none' : 'block';
       prompt.focus();
     });
-    document.getElementById('newChat').addEventListener('click', () => {
-      vscode.postMessage({ command: 'createSession' });
-    });
-    sessionSelect.addEventListener('change', () => {
+    sessionSelect?.addEventListener('change', () => {
       vscode.postMessage({ command: 'switchSession', sessionId: sessionSelect.value });
-    });
-    document.getElementById('mcpButton').addEventListener('click', () => {
-      prompt.value = '/mcp ';
-      prompt.focus();
     });
     modelSelect.addEventListener('change', () => {
       vscode.postMessage({ command: 'setModel', model: modelSelect.value });
@@ -6280,6 +9163,31 @@ class NeuraComposerProvider {
     });
     prompt.addEventListener('keydown', (event) => {
       if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') send.click();
+    });
+    const providerSettingsForm = document.getElementById('providerSettingsForm');
+    providerSettingsForm?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      vscode.postMessage({
+        command: 'saveProviderSettings',
+        settings: {
+          providerOrder: valueOf('providerOrder'),
+          openrouter: {
+            apiKey: valueOf('openrouterApiKey'),
+            baseUrl: valueOf('openrouterBaseUrl'),
+            model: valueOf('openrouterModel')
+          },
+          ollama: {
+            apiKey: valueOf('ollamaApiKey'),
+            baseUrl: valueOf('ollamaBaseUrl'),
+            model: valueOf('ollamaModel')
+          },
+          nim: {
+            apiKey: valueOf('nimApiKey'),
+            baseUrl: valueOf('nimBaseUrl'),
+            model: valueOf('nimModel')
+          }
+        }
+      });
     });
   </script>
 </body>

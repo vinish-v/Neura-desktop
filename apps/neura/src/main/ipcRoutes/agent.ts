@@ -20,17 +20,13 @@ import { StatusEnum, Conversation, Message } from '@neura-desktop/shared/types';
 import { store } from '@main/store/create';
 import { runAgent } from '@main/services/runAgent';
 import { showWindow } from '@main/window/index';
-import OpenAI from 'openai';
 
-import { GUIAgent } from '@neura-desktop/sdk';
-import { Operator } from '@neura-desktop/sdk/core';
-import { SettingStore } from '@main/store/setting';
 import { logger } from '@main/logger';
-import { runQuickLocalTask } from '@main/services/quickLocalTask';
 import { resolveUserApproval } from '@main/services/approvalGate';
 import { TaskRunRegistry } from '@main/services/taskRunRegistry';
 import { ComputerRuntimeController } from '@main/services/computerRuntimeController';
 import { writeProcessInput } from '@main/services/nativeComputerTools';
+import { TaskManager } from '@main/services/task-manager';
 
 const t = initIpc.create();
 
@@ -121,44 +117,20 @@ const formatRunSummary = (
     '',
   ].join('\n');
 
-export class GUIAgentManager {
-  private static instance: GUIAgentManager;
-  private currentAgent: GUIAgent<Operator> | null = null;
-
-  // eslint-disable-next-line @typescript-eslint/no-empty-function
-  private constructor() {}
-
-  public static getInstance(): GUIAgentManager {
-    if (!GUIAgentManager.instance) {
-      GUIAgentManager.instance = new GUIAgentManager();
-    }
-    return GUIAgentManager.instance;
-  }
-
-  public setAgent(agent: GUIAgent<Operator>) {
-    this.currentAgent = agent;
-  }
-
-  public getAgent(): GUIAgent<Operator> | null {
-    return this.currentAgent;
-  }
-
-  public clearAgent() {
-    this.currentAgent = null;
-  }
-}
-
 export const agentRoute = t.router({
   runQuickLocalTask: t.procedure
     .input<{ instructions: string }>()
     .handle(async ({ input }) => {
       try {
-        return await runQuickLocalTask(input.instructions);
+        return {
+          handled: true,
+          message: await TaskManager.getInstance().runDirect(input.instructions),
+        };
       } catch (error) {
         logger.warn('[runQuickLocalTask] failed:', error);
         return {
           handled: true,
-          message: `I tried to complete that local task quickly, but it failed: ${
+          message: `Hermes tried to complete that task, but it failed: ${
             error instanceof Error ? error.message : String(error)
           }`,
         };
@@ -168,72 +140,35 @@ export const agentRoute = t.router({
     .input<{ instructions: string; history?: Message[] }>()
     .handle(async ({ input }) => {
       const instructions = input.instructions.trim();
-      const settings = SettingStore.getStore();
-      const baseURL = settings.plannerBaseUrl || settings.vlmBaseUrl;
-      const apiKey = settings.plannerApiKey || settings.vlmApiKey;
-      const model =
-        settings.usePlannerModel !== false && settings.plannerModelName
-          ? settings.plannerModelName
-          : settings.vlmModelName;
 
       if (!instructions) {
         return '';
       }
 
-      if (!apiKey || !baseURL || !model) {
-        if (/^(hi|hii|hello|hey)\s*[!.?]*$/i.test(instructions)) {
-          return 'Hi. What would you like me to do?';
-        }
-        return 'I can answer directly once a chat/planner model is configured. For automation tasks, ask me to open, search, click, or work on a file.';
-      }
-
       try {
-        const openai = new OpenAI({
-          apiKey,
-          baseURL,
-          maxRetries: 0,
-        });
-
-        const history = (input.history || [])
+        const historyText = (input.history || [])
           .filter((message) => message.value && message.value !== '<image>')
           .slice(-8)
-          .map((message) => ({
-            role: message.from === 'human' ? 'user' : 'assistant',
-            content: message.value,
-          })) as Array<{
-          role: 'user' | 'assistant';
-          content: string;
-        }>;
+          .map(
+            (message) =>
+              `${message.from === 'human' ? 'User' : 'Neura'}: ${message.value}`,
+          )
+          .join('\n');
 
-        const completion = await openai.chat.completions.create(
-          {
-            model,
-            temperature: 0.4,
-            max_tokens: 700,
-            stream: false,
-            messages: [
-              {
-                role: 'system',
-                content:
-                  'You are Neura in direct-answer mode. Reply conversationally and concisely. Never claim you are operating the browser, clicking anything, seeing the screen, typing into apps, running shell commands, managing processes, monitoring pages, or changing local files. Neura has native file, document, browser extraction, process, and webpage monitor tools for action-taking tasks. If an action-taking request reaches this direct-answer path, do not provide instructions or pretend it is done; say only that Neura needs to use its computer or browser tools for that action.',
-              },
-              ...history,
-              {
-                role: 'user',
-                content: instructions,
-              },
-            ],
-          },
-          { timeout: settings.plannerTimeoutInMs || 90_000 },
-        );
-
-        return (
-          completion.choices?.[0]?.message?.content?.trim() ||
-          'I could not produce a direct answer.'
+        return await TaskManager.getInstance().runDirect(
+          [
+            'Answer inside Neura Desktop using the Hermes backend.',
+            historyText ? `Recent conversation:\n${historyText}` : '',
+            `User: ${instructions}`,
+          ]
+            .filter(Boolean)
+            .join('\n\n'),
         );
       } catch (error) {
         logger.warn('[directChat] failed:', error);
-        return 'I had trouble reaching the chat model. Automation mode is still available for browser or computer tasks.';
+        return `Hermes had trouble completing that direct answer: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
       }
     }),
   runAgent: t.procedure.input<void>().handle(async () => {
@@ -252,12 +187,6 @@ export const agentRoute = t.router({
         nextInstructions,
       });
       abortController?.abort();
-      const guiAgent = GUIAgentManager.getInstance().getAgent();
-      if (guiAgent instanceof GUIAgent) {
-        guiAgent.resume();
-        guiAgent.stop();
-      }
-      GUIAgentManager.getInstance().clearAgent();
       ComputerRuntimeController.complete('Previous task stopped');
       store.setState({
         status: StatusEnum.END,
@@ -283,22 +212,6 @@ export const agentRoute = t.router({
         return null;
       }
       const runtime = ComputerRuntimeController.setTakeover(input.enabled);
-      const guiAgent = GUIAgentManager.getInstance().getAgent();
-      if (guiAgent instanceof GUIAgent) {
-        if (input.enabled) {
-          guiAgent.pause();
-          ComputerRuntimeController.update({
-            status: 'paused',
-            activity: 'User takeover',
-          });
-        } else {
-          guiAgent.resume();
-          ComputerRuntimeController.update({
-            status: 'running',
-            activity: 'Neura resumed',
-          });
-        }
-      }
       return store.getState().computerRuntime || runtime;
     }),
   setComputerSurfaceBounds: t.procedure
@@ -355,16 +268,6 @@ export const agentRoute = t.router({
           return { ok: true };
         }
         throw new Error('Terminal takeover supports keyboard input only.');
-      }
-
-      const guiAgent = GUIAgentManager.getInstance().getAgent();
-      if (guiAgent) {
-        await guiAgent.executeTakeoverInput(input, {
-          width: runtime.latestFrame?.width,
-          height: runtime.latestFrame?.height,
-          scaleFactor: runtime.latestFrame?.scaleFactor,
-        });
-        return { ok: true };
       }
 
       if (input.type === 'click') {
@@ -425,27 +328,19 @@ export const agentRoute = t.router({
       throw new Error(`Unsupported takeover input: ${input.type}`);
     }),
   pauseRun: t.procedure.input<void>().handle(async () => {
-    const guiAgent = GUIAgentManager.getInstance().getAgent();
-    if (guiAgent instanceof GUIAgent) {
-      guiAgent.pause();
-      store.setState({
-        thinking: false,
-      });
-      ComputerRuntimeController.update({ status: 'paused', activity: 'Paused' });
-    }
+    store.setState({
+      thinking: false,
+    });
+    ComputerRuntimeController.update({ status: 'paused', activity: 'Paused' });
   }),
   resumeRun: t.procedure.input<void>().handle(async () => {
-    const guiAgent = GUIAgentManager.getInstance().getAgent();
-    if (guiAgent instanceof GUIAgent) {
-      guiAgent.resume();
-      store.setState({
-        thinking: false,
-      });
-      ComputerRuntimeController.update({
-        status: 'running',
-        activity: 'Resumed',
-      });
-    }
+    store.setState({
+      thinking: false,
+    });
+    ComputerRuntimeController.update({
+      status: 'running',
+      activity: 'Resumed',
+    });
   }),
   stopRun: t.procedure.input<void>().handle(async () => {
     const { abortController } = store.getState();
@@ -458,11 +353,6 @@ export const agentRoute = t.router({
     showWindow();
 
     abortController?.abort();
-    const guiAgent = GUIAgentManager.getInstance().getAgent();
-    if (guiAgent instanceof GUIAgent) {
-      guiAgent.resume();
-      guiAgent.stop();
-    }
   }),
   resolveApproval: t.procedure
     .input<{ runId: string; eventId: string; approved: boolean }>()

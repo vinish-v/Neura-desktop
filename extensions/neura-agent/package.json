@@ -22,15 +22,23 @@
     "onView:neura-ai.chat",
     "onCommand:neura.openAiPanel",
     "onCommand:neura.openComposer",
+    "onCommand:neura.openMissionControl",
+    "onCommand:neura.configureProviders",
     "onCommand:neura.ask",
     "onCommand:neura.generatePlan",
     "onCommand:neura.runAgent",
     "onCommand:neura.buildApp",
+    "onCommand:neura.shipApp",
     "onCommand:neura.editSelection",
     "onCommand:neura.explainCurrentFile",
     "onCommand:neura.reviewCurrentFileProposal",
+    "onCommand:neura.acceptCurrentFileProposal",
+    "onCommand:neura.rejectCurrentFileProposal",
+    "onCommand:neura.reapplyCurrentFileProposal",
+    "onCommand:neura.openNextPendingEdit",
     "onCommand:neura.acceptCurrentFileHunk",
     "onCommand:neura.rejectCurrentFileHunk",
+    "onCommand:neura.fixWorkspaceProblems",
     "onCommand:neura.continueTrajectory",
     "onCommand:neura.applyChanges",
     "onCommand:neura.restoreCheckpoint",
@@ -76,17 +84,89 @@
     "configuration": {
       "title": "Neura IDE",
       "properties": {
+        "neura.provider.order": {
+          "type": "array",
+          "default": ["openrouter", "ollama", "nim"],
+          "description": "AI provider fallback order. Neura tries each configured provider in order for Composer, agent, planner, and background-agent chat calls.",
+          "markdownDescription": "AI provider fallback order. Default: **OpenRouter → Ollama → NVIDIA NIM**.",
+          "order": 1,
+          "items": {
+            "type": "string",
+            "enum": ["openrouter", "ollama", "nim"]
+          },
+          "scope": "resource"
+        },
+        "neura.openrouter.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OpenRouter API key. Also reads OPENROUTER_API_KEY.",
+          "markdownDescription": "OpenRouter API key for Neura IDE. Stored in VS Code settings or supplied by `OPENROUTER_API_KEY`. Neura redacts this value from logs and UI.",
+          "order": 10,
+          "scope": "machine-overridable"
+        },
+        "neura.openrouter.baseUrl": {
+          "type": "string",
+          "default": "https://openrouter.ai/api/v1",
+          "description": "OpenRouter OpenAI-compatible base URL.",
+          "order": 11,
+          "scope": "resource"
+        },
+        "neura.openrouter.model": {
+          "type": "string",
+          "default": "",
+          "description": "OpenRouter model ID, for example anthropic/claude-sonnet-4.5 or openai/gpt-4o-mini. Also reads OPENROUTER_MODEL.",
+          "markdownDescription": "OpenRouter model ID, for example `anthropic/claude-sonnet-4.5`, `openai/gpt-4o-mini`, or another OpenRouter model.",
+          "order": 12,
+          "scope": "resource"
+        },
+        "neura.openrouter.httpReferer": {
+          "type": "string",
+          "default": "https://neura.local",
+          "description": "Optional HTTP-Referer header sent to OpenRouter.",
+          "scope": "resource"
+        },
+        "neura.openrouter.appTitle": {
+          "type": "string",
+          "default": "Neura IDE",
+          "description": "Optional X-Title header sent to OpenRouter.",
+          "scope": "resource"
+        },
+        "neura.ollama.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Ollama Cloud API key. Also reads OLLAMA_API_KEY or OLLAMA_CLOUD_API_KEY. Local Ollama endpoints do not require a key.",
+          "markdownDescription": "Ollama Cloud API key. Also reads `OLLAMA_API_KEY` or `OLLAMA_CLOUD_API_KEY`. Local Ollama endpoints do not require a key.",
+          "order": 20,
+          "scope": "machine-overridable"
+        },
+        "neura.ollama.baseUrl": {
+          "type": "string",
+          "default": "https://ollama.com",
+          "description": "Ollama base URL. Use https://ollama.com for Ollama Cloud native /api/chat, http://localhost:11434 for local native /api/chat, or http://localhost:11434/v1 for local OpenAI-compatible chat completions.",
+          "order": 21,
+          "scope": "resource"
+        },
+        "neura.ollama.model": {
+          "type": "string",
+          "default": "",
+          "description": "Ollama model name, for example gpt-oss:20b, qwen2.5-coder:7b, or another model available to your Ollama endpoint. Also reads OLLAMA_MODEL.",
+          "markdownDescription": "Ollama model name, for example `gpt-oss:20b`, `qwen2.5-coder:7b`, or another model available to your Ollama endpoint.",
+          "order": 22,
+          "scope": "resource"
+        },
         "neura.nim.apiKey": {
           "type": "string",
           "default": "",
           "description": "NVIDIA NIM API key.",
           "markdownDescription": "**Required.** NVIDIA NIM API key used by Neura IDE Composer. This secret is never rendered in the Composer UI. Also reads `NVIDIA_NIM_API_KEY`, `NVIDIA_API_KEY`, or the existing Neura Desktop key as a fallback.",
+          "order": 30,
           "scope": "machine-overridable"
         },
         "neura.nim.baseUrl": {
           "type": "string",
           "default": "https://integrate.api.nvidia.com/v1",
           "description": "OpenAI-compatible NVIDIA NIM base URL.",
+          "order": 31,
           "scope": "resource"
         },
         "neura.nim.model": {
@@ -112,6 +192,7 @@
             "nvidia/llama-3.1-nemotron-51b-instruct"
           ],
           "description": "NVIDIA NIM model used for Neura Composer coding requests.",
+          "order": 32,
           "scope": "resource"
         },
         "neura.nim.reasoning": {
@@ -152,10 +233,63 @@
           "description": "Optional NVIDIA NIM embeddings API key. Falls back to the main Neura NIM API key when empty.",
           "scope": "machine-overridable"
         },
+        "neura.index.sharedPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional shared semantic index JSON path for team or multi-workspace reuse. Relative paths resolve from the workspace root.",
+          "scope": "resource"
+        },
+        "neura.index.useShared": {
+          "type": "boolean",
+          "default": false,
+          "description": "Load the configured shared semantic index instead of the local workspace index when available.",
+          "scope": "resource"
+        },
+        "neura.index.publishShared": {
+          "type": "boolean",
+          "default": false,
+          "description": "Write rebuilt semantic indexes to the configured shared semantic index path.",
+          "scope": "resource"
+        },
         "neura.inlineCompletions": {
           "type": "boolean",
           "default": false,
           "description": "Enable Copilot-style inline ghost text completions. Off by default to avoid background model calls.",
+          "scope": "resource"
+        },
+        "neura.permissions.rules": {
+          "type": "array",
+          "default": [],
+          "description": "Allow/Deny/Ask policy rules for Neura actions such as command, mcp, browser_url, file_read, file_write, and plugin.",
+          "markdownDescription": "Policy rules evaluated before sensitive actions.\n```json\n[{ \"action\": \"command\", \"pattern\": \"npm test\", \"effect\": \"allow\" }, { \"action\": \"mcp\", \"pattern\": \"filesystem/delete_file\", \"effect\": \"deny\" }]\n```",
+          "items": {
+            "type": "object",
+            "required": ["action", "pattern", "effect"],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": ["*", "command", "mcp", "browser_url", "read_url", "file_read", "file_write", "plugin"]
+              },
+              "pattern": {
+                "type": "string",
+                "description": "Wildcard resource pattern, for example npm test, npm*, server/tool, or *.example.com."
+              },
+              "effect": {
+                "type": "string",
+                "enum": ["allow", "deny", "ask"]
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          },
+          "scope": "resource"
+        },
+        "neura.permissions.browser.allowedDomains": {
+          "type": "array",
+          "default": ["localhost", "127.0.0.1", "::1"],
+          "description": "Browser URL allowlist for preview verification and browser agent access.",
+          "items": { "type": "string" },
           "scope": "resource"
         },
         "neura.mcp.servers": {
@@ -187,7 +321,16 @@
               },
               "env": {
                 "type": "object",
-                "description": "Extra environment variables for stdio MCP servers."
+                "description": "Extra environment variables for stdio MCP servers. Supports ${env:NAME} and ${workspaceFolder} interpolation."
+              },
+              "disabledTools": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Tool names disabled for this MCP server."
+              },
+              "capabilities": {
+                "type": "object",
+                "description": "Optional capability manifest metadata for this MCP server."
               },
               "url": {
                 "type": "string",
@@ -209,6 +352,14 @@
         "title": "Neura: Open Composer"
       },
       {
+        "command": "neura.openMissionControl",
+        "title": "Neura: Open Mission Control"
+      },
+      {
+        "command": "neura.configureProviders",
+        "title": "Neura: Configure AI Providers"
+      },
+      {
         "command": "neura.ask",
         "title": "Neura: Explain Code"
       },
@@ -225,6 +376,10 @@
         "title": "Neura: Build App / Site"
       },
       {
+        "command": "neura.shipApp",
+        "title": "Neura: Ship Production App"
+      },
+      {
         "command": "neura.editSelection",
         "title": "Neura: Edit Selection"
       },
@@ -237,12 +392,32 @@
         "title": "Neura: Review Pending Edit"
       },
       {
+        "command": "neura.acceptCurrentFileProposal",
+        "title": "Neura: Accept Current File"
+      },
+      {
+        "command": "neura.rejectCurrentFileProposal",
+        "title": "Neura: Reject Current File"
+      },
+      {
+        "command": "neura.reapplyCurrentFileProposal",
+        "title": "Neura: Reapply Current File"
+      },
+      {
+        "command": "neura.openNextPendingEdit",
+        "title": "Neura: Open Next Pending Edit"
+      },
+      {
         "command": "neura.acceptCurrentFileHunk",
         "title": "Neura: Accept Current File Hunk"
       },
       {
         "command": "neura.rejectCurrentFileHunk",
         "title": "Neura: Reject Current File Hunk"
+      },
+      {
+        "command": "neura.fixWorkspaceProblems",
+        "title": "Neura: Fix Workspace Problems"
       },
       {
         "command": "neura.continueTrajectory",

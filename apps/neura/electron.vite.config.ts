@@ -50,7 +50,7 @@ export default defineConfig({
             }),
           ]
         : []),
-      tsconfigPaths(),
+      tsconfigPaths({ ignoreConfigErrors: true }),
       externalizeDepsPlugin({
         include: [...getExternalPkgs()],
       }),
@@ -76,7 +76,7 @@ export default defineConfig({
         entry: './src/preload/index.ts',
       },
     },
-    plugins: [tsconfigPaths()],
+    plugins: [tsconfigPaths({ ignoreConfigErrors: true })],
   },
   renderer: {
     root: 'src/renderer',
@@ -96,7 +96,7 @@ export default defineConfig({
         },
       },
     },
-    plugins: [react(), tsconfigPaths(), tailwindcss()],
+    plugins: [react(), tsconfigPaths({ ignoreConfigErrors: true }), tailwindcss()],
     define: {
       APP_VERSION: JSON.stringify(pkg.version),
     },
