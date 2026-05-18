@@ -25,6 +25,10 @@ Acceptance: launch actions produce explicit, routable prompts and every task run
 - [x] Add per-run browser restore snapshots with last URL, title, backend, takeover state, CDP URL, and profile health.
 - [x] Add automatic browser restart when CDP disconnects and no user takeover is active.
 - [x] Add health checks for local browser executable, profile writability, profile lock state, CDP port reachability, and bridge status.
+- [x] Add browser action audit records with URL/title before and after, duration, status, and failure class.
+- [x] Add browser timing metrics and slow-step diagnostics for launch, navigation, click/action, extraction, download, login wait, and recovery phases.
+- [x] Add a local browser performance report artifact for real browser runs.
+- [x] Expand browser recovery classes for stale DOM, download failure, network timeout, captcha/paywall/login blocks, selector miss, permission denial, and browser crash.
 
 Acceptance: a browser task can recover from page crashes, stale CDP connections, and app restarts with clear user controls and no hidden hosted dependency.
 
@@ -90,7 +94,7 @@ Acceptance: multimodal flows create real local artifacts only when providers are
 - [x] Add completion proof validators per task type.
 - [x] Add focused regression tests for launcher routing, source proof, artifact refinement, and browser recovery.
 
-Evidence: focused tests passed with `npm.cmd --prefix apps/neura run test -- --run src/main/services/intentArbitration.test.ts src/main/services/task-manager.test.ts src/main/services/artifactThumbnail.test.ts src/main/ipcRoutes/window.test.ts src/main/services/connectors-service.test.ts src/main/services/artifactValidation.test.ts src/main/services/nativeComputerTools.test.ts src/main/services/taskRunRegistry.test.ts src/shared/taskEvidence.test.ts src/shared/intentClassification.test.ts src/shared/taskLauncherCatalog.test.ts src/main/services/mail-task-intake-service.test.ts` (12 files, 61 tests); node/web typechecks passed with `npm.cmd --prefix apps/neura run typecheck:node` and `npm.cmd --prefix apps/neura run typecheck:web`; production build/package passed with `npm.cmd --prefix apps/neura run build:dist` and `npm.cmd --prefix apps/neura run package`.
+Evidence: focused browser tests passed with `npm.cmd --prefix apps/neura run test -- --run src/shared/browserAutomationRecovery.test.ts src/shared/taskEvidence.test.ts src/main/services/hermesBrowserBridge.test.ts src/main/services/taskRunRegistry.test.ts src/main/services/task-manager.test.ts` (5 files, 26 tests); node/web typechecks passed with `npm.cmd --prefix apps/neura run typecheck:node` and `npm.cmd --prefix apps/neura run typecheck:web`; production build passed with `npm.cmd --prefix apps/neura run build:dist`.
 
 Acceptance: Neura never silently marks brittle work complete; users see what happened, what remains, and how to resume.
 

@@ -7,6 +7,8 @@ import { randomUUID } from 'crypto';
 import {
   AgentRunMode,
   ApprovalEvent,
+  BrowserActionAuditRecord,
+  BrowserTimingMetrics,
   CompletionProof,
   TaskArtifact,
   TaskProgressItem,
@@ -21,6 +23,11 @@ import {
 import { SettingStore } from '@main/store/setting';
 import { persistTaskRunContext } from './taskContextMemory';
 import { scoreSourceQuality } from './sourceQuality';
+import {
+  BROWSER_ACTION_TIMEOUT_BUDGETS_MS,
+  BrowserActionKind,
+  classifyBrowserActionKind,
+} from '@shared/browserAutomationRecovery';
 import {
   TaskEvidence,
   TaskEvidenceRequirements,
@@ -94,6 +101,57 @@ const toolCallEvidenceKind = (
 
 const summarizeToolCall = (toolCall: TaskToolCallRecord) =>
   `${toolCall.serverName}.${toolCall.toolName} ${toolCall.status}`;
+
+const EMPTY_BROWSER_TIMING: BrowserTimingMetrics = {
+  launchMs: 0,
+  launchCount: 0,
+  navigationMs: 0,
+  navigationCount: 0,
+  clickMs: 0,
+  clickCount: 0,
+  extractionMs: 0,
+  extractionCount: 0,
+  downloadMs: 0,
+  downloadCount: 0,
+  loginWaitMs: 0,
+  loginWaitCount: 0,
+  recoveryMs: 0,
+  recoveryCount: 0,
+  otherMs: 0,
+  otherCount: 0,
+  slowSteps: [],
+};
+
+const normalizeBrowserTiming = (
+  metrics?: Partial<BrowserTimingMetrics>,
+): BrowserTimingMetrics => ({
+  ...EMPTY_BROWSER_TIMING,
+  ...metrics,
+  slowSteps: Array.isArray(metrics?.slowSteps) ? metrics.slowSteps : [],
+});
+
+const browserTimingKeys = (
+  kind: BrowserActionKind,
+): { msKey: keyof BrowserTimingMetrics; countKey: keyof BrowserTimingMetrics } => {
+  switch (kind) {
+    case 'launch':
+      return { msKey: 'launchMs', countKey: 'launchCount' };
+    case 'navigation':
+      return { msKey: 'navigationMs', countKey: 'navigationCount' };
+    case 'click':
+      return { msKey: 'clickMs', countKey: 'clickCount' };
+    case 'extraction':
+      return { msKey: 'extractionMs', countKey: 'extractionCount' };
+    case 'download':
+      return { msKey: 'downloadMs', countKey: 'downloadCount' };
+    case 'login_wait':
+      return { msKey: 'loginWaitMs', countKey: 'loginWaitCount' };
+    case 'recovery':
+      return { msKey: 'recoveryMs', countKey: 'recoveryCount' };
+    default:
+      return { msKey: 'otherMs', countKey: 'otherCount' };
+  }
+};
 
 export const collectTaskEvidenceForRun = (
   run: TaskRunRecord,
@@ -339,6 +397,7 @@ export const createTaskRun = (
     factsFound: [],
     sourcesVisited: [],
     sourceRecords: [],
+    browserActionAudit: [],
     wideResearchWorkers: [],
     toolCalls: [],
     artifacts: [],
@@ -366,6 +425,10 @@ const normalizeRun = (run: TaskRunRecord): TaskRunRecord => {
     approvalEvents: run.approvalEvents || [],
     validationFailures: run.validationFailures || [],
     retrievedRunIds: run.retrievedRunIds || [],
+    browserActionAudit: run.browserActionAudit || [],
+    browserTiming: run.browserTiming
+      ? normalizeBrowserTiming(run.browserTiming)
+      : undefined,
   };
   const evidence = collectTaskEvidenceForRun(normalized);
   return {
@@ -770,6 +833,132 @@ export class TaskRunRegistry {
       ...run,
       browserRestoreSnapshot,
     });
+  }
+
+  static addBrowserActionAudit(
+    runId: string,
+    action: Omit<BrowserActionAuditRecord, 'id' | 'startedAt'> & {
+      startedAt?: number;
+    },
+  ) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run) {
+      return null;
+    }
+    const startedAt = action.startedAt || Date.now();
+    const record: BrowserActionAuditRecord = {
+      ...action,
+      id: `browser-action-${startedAt}-${run.browserActionAudit?.length || 0}`,
+      startedAt,
+      completedAt:
+        action.status === 'completed' ||
+        action.status === 'failed' ||
+        action.status === 'blocked'
+          ? action.completedAt || startedAt
+          : action.completedAt,
+    };
+    return TaskRunRegistry.upsert({
+      ...run,
+      browserActionAudit: [...(run.browserActionAudit || []), record].slice(-150),
+    });
+  }
+
+  static updateBrowserActionAudit(
+    runId: string,
+    externalCallId: string | undefined,
+    patch: Partial<Omit<BrowserActionAuditRecord, 'id' | 'startedAt'>>,
+  ) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run || !externalCallId) {
+      return null;
+    }
+    let matched: BrowserActionAuditRecord | undefined;
+    const completedAt =
+      patch.status === 'completed' ||
+      patch.status === 'failed' ||
+      patch.status === 'blocked'
+        ? patch.completedAt || Date.now()
+        : patch.completedAt;
+    const browserActionAudit = (run.browserActionAudit || []).map((action) => {
+      if (action.externalCallId !== externalCallId) {
+        return action;
+      }
+      const next = {
+        ...action,
+        ...patch,
+        completedAt,
+        durationMs:
+          patch.durationMs ??
+          (completedAt ? completedAt - action.startedAt : action.durationMs),
+      };
+      matched = next;
+      return next;
+    });
+    if (!matched) {
+      return null;
+    }
+    return TaskRunRegistry.upsert({
+      ...run,
+      browserActionAudit,
+    });
+  }
+
+  static recordBrowserTiming(
+    runId: string,
+    action: string,
+    durationMs: number,
+    kind: BrowserActionKind = classifyBrowserActionKind(action),
+  ) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run || !Number.isFinite(durationMs) || durationMs < 0) {
+      return null;
+    }
+    const now = Date.now();
+    const metrics = normalizeBrowserTiming(run.browserTiming);
+    const { msKey, countKey } = browserTimingKeys(kind);
+    const nextMetrics: BrowserTimingMetrics = {
+      ...metrics,
+      browserTaskStartedAt: metrics.browserTaskStartedAt || now,
+      browserTaskLastActivityAt: now,
+    };
+    (nextMetrics[msKey] as number) =
+      Number(nextMetrics[msKey] || 0) + Math.round(durationMs);
+    (nextMetrics[countKey] as number) = Number(nextMetrics[countKey] || 0) + 1;
+    const startedAt = nextMetrics.browserTaskStartedAt || now;
+    nextMetrics.totalBrowserTaskMs = now - startedAt;
+    const budgetMs = BROWSER_ACTION_TIMEOUT_BUDGETS_MS[kind];
+    if (durationMs > budgetMs) {
+      nextMetrics.slowSteps = [
+        ...nextMetrics.slowSteps,
+        {
+          action,
+          kind,
+          durationMs: Math.round(durationMs),
+          budgetMs,
+          recordedAt: now,
+        },
+      ].slice(-20);
+    }
+    return TaskRunRegistry.upsert({
+      ...run,
+      browserTiming: nextMetrics,
+    });
+  }
+
+  static summarizeBrowserPerformance(runId: string) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run || !run.browserTiming) {
+      return null;
+    }
+    return {
+      runId,
+      sessionId: run.sessionId,
+      browserBackend: run.browserBackend,
+      metrics: run.browserTiming,
+      actionAudit: run.browserActionAudit || [],
+      lastSnapshot: run.browserRestoreSnapshot,
+      generatedAt: Date.now(),
+    };
   }
 
   static addArtifact(

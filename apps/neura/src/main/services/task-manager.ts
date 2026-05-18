@@ -39,7 +39,11 @@ import { classifyHermesTaskWithArbitration } from './intentArbitration';
 import { summarizeSourceQuality } from './sourceQuality';
 import { validateArtifactFile } from './artifactValidation';
 import { DesktopProjectsService } from './desktop-projects-service';
-import { buildAutomationRecoveryReport } from '@shared/browserAutomationRecovery';
+import {
+  buildAutomationRecoveryReport,
+  classifyAutomationFailure,
+  classifyBrowserActionKind,
+} from '@shared/browserAutomationRecovery';
 import { TaskEvidenceRequirements, validateTaskEvidence } from '@shared/taskEvidence';
 
 type TaskStartOptions = {
@@ -109,6 +113,7 @@ const ARTIFACT_EXTENSIONS: Record<
 
 const IGNORED_ARTIFACT_NAMES = new Set(['context.md']);
 const ARTIFACT_MANIFEST_NAME = 'neura-artifacts.json';
+const BROWSER_PERFORMANCE_REPORT_NAME = 'neura-browser-performance.json';
 const URL_PATTERN = /\bhttps?:\/\/[^\s"'<>)]{4,}/gi;
 const LIST_ITEM_PATTERN = /(?:^|\n)\s*(?:[-*]|\d+[.)])\s+(.{8,180})/g;
 
@@ -128,6 +133,9 @@ const buildHermesTaskPrompt = (
     'Neura is the UI cockpit. Keep progress observable through tool use and save user-facing deliverables into the workspace below.',
     'Optimize for speed: act immediately, avoid ceremony, use the fewest tools needed, and do not delegate or create a long plan unless the task is genuinely complex.',
     'For simple research or browsing tasks, open the strongest source quickly, extract the answer, cite the source, and finish without repeated searching.',
+    'Browser retry policy: retry navigation at most once; refresh a stale DOM/snapshot at most once; then pause with recovery evidence and ask for takeover/resume instead of looping.',
+    'Before and after browser form submissions, checkout-like flows, downloads, or external-write actions, verify the URL/title/page state and record evidence before claiming success.',
+    'Prefer accessible labels, roles, text, and semantic selectors first; use visible DOM evidence next; use coordinates only when visible evidence is recorded.',
     route.validationHint,
     ...route.promptDirectives,
     route.runMode === 'wide_research'
@@ -241,6 +249,27 @@ const writeArtifactManifest = async (
     'utf8',
   );
   return manifestPath;
+};
+
+const writeBrowserPerformanceReport = async (run: TaskRunRecord) => {
+  if (!run.workspacePath) {
+    return undefined;
+  }
+  const performance = TaskRunRegistry.summarizeBrowserPerformance(run.runId);
+  if (
+    !performance ||
+    (!performance.actionAudit.length &&
+      !performance.metrics.browserTaskLastActivityAt)
+  ) {
+    return undefined;
+  }
+  const reportPath = path.join(run.workspacePath, BROWSER_PERFORMANCE_REPORT_NAME);
+  await fs.promises.writeFile(
+    reportPath,
+    JSON.stringify(performance, null, 2),
+    'utf8',
+  );
+  return reportPath;
 };
 
 const extractUrls = (...values: Array<unknown>) => {
@@ -384,6 +413,113 @@ const isAutomationToolEvent = (event: HermesBridgeEvent) => {
   return /browser|page|dom|click|type|navigate|screenshot|computer|desktop|mouse|keyboard/i.test(
     toolName,
   );
+};
+
+const isBrowserToolEvent = (event: HermesBridgeEvent) =>
+  /browser|page|dom|click|type|navigate|screenshot|extract|download|search/i.test(
+    event.toolName || '',
+  );
+
+const browserActionTarget = (event: HermesBridgeEvent) =>
+  getStringField(event.arguments, 'url') ||
+  getStringField(event.arguments, 'selector') ||
+  getStringField(event.arguments, 'locator') ||
+  getStringField(event.arguments, 'query') ||
+  getStringField(event.arguments, 'text');
+
+const inferUrlAfterBrowserAction = (
+  event: HermesBridgeEvent,
+  currentRun: TaskRunRecord,
+) =>
+  getStringField(event.arguments, 'url') ||
+  extractUrls(event.resultPreview, event.preview)[0] ||
+  currentRun.browserRestoreSnapshot?.url;
+
+const recordBrowserActionStart = (
+  runId: string,
+  event: HermesBridgeEvent,
+  workerId?: string,
+) => {
+  if (!isBrowserToolEvent(event)) {
+    return;
+  }
+  const currentRun =
+    TaskRunRegistry.list().find((item) => item.runId === runId) || null;
+  TaskRunRegistry.addBrowserActionAudit(runId, {
+    externalCallId: event.callId,
+    action: event.toolName || 'browser_action',
+    target: browserActionTarget(event),
+    urlBefore: currentRun?.browserRestoreSnapshot?.url,
+    titleBefore: currentRun?.browserRestoreSnapshot?.title,
+    status: 'pending',
+    workerId,
+  });
+};
+
+const recordBrowserActionComplete = (
+  runId: string,
+  event: HermesBridgeEvent,
+  workerId?: string,
+) => {
+  if (!isBrowserToolEvent(event)) {
+    return;
+  }
+  const currentRun =
+    TaskRunRegistry.list().find((item) => item.runId === runId) || null;
+  const message = [event.resultPreview, event.preview, event.error, event.traceback]
+    .filter(Boolean)
+    .join('\n');
+  const failureClass = event.isError
+    ? classifyAutomationFailure({
+        message,
+        toolName: event.toolName,
+        action: event.toolName,
+      })
+    : undefined;
+  const durationMs =
+    typeof event.duration === 'number' && Number.isFinite(event.duration)
+      ? Math.max(0, Math.round(event.duration))
+      : undefined;
+  const status = event.isError
+    ? failureClass === 'blocked_or_login_required' ||
+      failureClass === 'permission_denied'
+      ? 'blocked'
+      : 'failed'
+    : 'completed';
+  const updated = TaskRunRegistry.updateBrowserActionAudit(runId, event.callId, {
+    action: event.toolName || 'browser_action',
+    target: browserActionTarget(event),
+    urlAfter: currentRun ? inferUrlAfterBrowserAction(event, currentRun) : undefined,
+    titleAfter: currentRun?.browserRestoreSnapshot?.title,
+    status,
+    durationMs,
+    failureClass,
+    workerId,
+  });
+  if (!updated) {
+    TaskRunRegistry.addBrowserActionAudit(runId, {
+      externalCallId: event.callId,
+      action: event.toolName || 'browser_action',
+      target: browserActionTarget(event),
+      urlBefore: currentRun?.browserRestoreSnapshot?.url,
+      titleBefore: currentRun?.browserRestoreSnapshot?.title,
+      urlAfter: currentRun ? inferUrlAfterBrowserAction(event, currentRun) : undefined,
+      titleAfter: currentRun?.browserRestoreSnapshot?.title,
+      status,
+      durationMs,
+      failureClass,
+      workerId,
+      completedAt: Date.now(),
+    });
+  }
+  if (typeof durationMs === 'number') {
+    TaskRunRegistry.recordBrowserTiming(
+      runId,
+      event.toolName || 'browser_action',
+      durationMs,
+      classifyBrowserActionKind(event.toolName),
+    );
+  }
 };
 
 const recordAutomationRecovery = (
@@ -533,6 +669,7 @@ const maybeRecordHermesEvent = (
       status: 'pending',
       resultPreview: event.preview,
     });
+    recordBrowserActionStart(runId, event, workerId);
   }
 
   if (event.type === 'tool.call.completed') {
@@ -557,6 +694,7 @@ const maybeRecordHermesEvent = (
         resultPreview: event.resultPreview,
       });
     }
+    recordBrowserActionComplete(runId, event, workerId);
     recordAutomationRecovery(runId, event);
   }
 
@@ -821,6 +959,7 @@ export class TaskManager {
           });
         },
       });
+      await writeBrowserPerformanceReport(run);
       const discoveredArtifacts = await discoverRunArtifacts(run);
       const artifactValidations = await Promise.all(
         discoveredArtifacts.map((artifact) => validateArtifactFile(artifact)),

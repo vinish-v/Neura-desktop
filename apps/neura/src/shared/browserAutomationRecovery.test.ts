@@ -42,6 +42,12 @@ describe('browser automation recovery', () => {
     expect(
       classifyAutomationFailure({
         toolName: 'browser_click',
+        message: 'Element id was stale because the DOM node detached',
+      }),
+    ).toBe('stale_dom');
+    expect(
+      classifyAutomationFailure({
+        toolName: 'browser_click',
         message: 'Element button.submit was not found in the DOM',
       }),
     ).toBe('selector_not_found');
@@ -52,9 +58,24 @@ describe('browser automation recovery', () => {
     ).toBe('blocked_or_login_required');
     expect(
       classifyAutomationFailure({
+        message: 'This article is behind a paywall and requires subscription',
+      }),
+    ).toBe('blocked_or_login_required');
+    expect(
+      classifyAutomationFailure({
         message: 'EACCES: permission denied opening screen recording',
       }),
     ).toBe('permission_denied');
+    expect(
+      classifyAutomationFailure({
+        message: 'Download failed because the file was interrupted',
+      }),
+    ).toBe('download_failure');
+    expect(
+      classifyAutomationFailure({
+        message: 'net::ERR_INTERNET_DISCONNECTED while loading page',
+      }),
+    ).toBe('network_timeout');
     expect(
       classifyAutomationFailure({
         message: 'CDP WebSocket connect failed: no connection could be made',

@@ -283,6 +283,13 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
   const wideResearchWorkers = taskState?.wideResearchWorkers || [];
   const completionProof = taskState?.completionProof;
   const evidenceValidation = taskState?.evidenceValidation;
+  const browserActionAudit = taskState?.browserActionAudit || [];
+  const latestBrowserAction =
+    browserActionAudit[browserActionAudit.length - 1] || null;
+  const browserTiming = taskState?.browserTiming;
+  const lastSlowBrowserStep = browserTiming?.slowSteps.length
+    ? browserTiming.slowSteps[browserTiming.slowSteps.length - 1]
+    : null;
   const recoveryEvidence: RecoveryEvidenceItem[] = (taskState?.evidence || [])
     .map((item) => ({
       evidence: item,
@@ -592,6 +599,20 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
               {taskState.browserRestoreSnapshot.url ? (
                 <div className="truncate" title={taskState.browserRestoreSnapshot.url}>
                   Last URL: {taskState.browserRestoreSnapshot.url}
+                </div>
+              ) : null}
+              {taskState.browserRestoreSnapshot.title ? (
+                <div
+                  className="truncate"
+                  title={taskState.browserRestoreSnapshot.title}
+                >
+                  Page title: {taskState.browserRestoreSnapshot.title}
+                </div>
+              ) : null}
+              {latestBrowserAction ? (
+                <div className="truncate" title={latestBrowserAction.action}>
+                  Last action: {latestBrowserAction.action.replace(/_/g, ' ')} /{' '}
+                  {latestBrowserAction.status}
                 </div>
               ) : null}
               {taskState.browserRestoreSnapshot.health.issues.length > 0 ? (
@@ -976,6 +997,36 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
           </Button>
           {showDiagnostics && (
             <div className="mt-2 max-h-44 overflow-y-auto rounded-2xl border border-white/[0.08] bg-black/25 p-3 text-[11px] leading-4 text-white/45">
+              {browserTiming ? (
+                <div className="mb-3 border-b border-white/[0.06] pb-2">
+                  <div className="text-white/70">browser timing</div>
+                  <div>
+                    launch {browserTiming.launchCount} / {browserTiming.launchMs}
+                    ms, navigation {browserTiming.navigationCount} /{' '}
+                    {browserTiming.navigationMs}ms, extraction{' '}
+                    {browserTiming.extractionCount} / {browserTiming.extractionMs}
+                    ms
+                  </div>
+                  {browserTiming.slowSteps.length > 0 ? (
+                    <div className="mt-1 text-amber-100/70">
+                      slow: {lastSlowBrowserStep?.action} took{' '}
+                      {lastSlowBrowserStep?.durationMs}ms
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {browserActionAudit.length > 0 ? (
+                <div className="mb-3 border-b border-white/[0.06] pb-2">
+                  <div className="text-white/70">browser actions</div>
+                  {browserActionAudit.slice(-4).map((action) => (
+                    <div key={action.id} className="mt-1">
+                      {action.status}: {action.action.replace(/_/g, ' ')}
+                      {action.durationMs ? ` (${action.durationMs}ms)` : ''}
+                      {action.urlAfter ? ` -> ${action.urlAfter}` : ''}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               {progressItems.slice(-12).map((item) => (
                 <div key={item.id} className="mb-2 last:mb-0">
                   <div className="text-white/70">

@@ -121,4 +121,67 @@ describe('task evidence validation', () => {
       'hunter2',
     );
   });
+
+  it('keeps numeric browser research claims unverified without independent source support', () => {
+    const result = validateTaskEvidence({
+      claim: 'The market grew 42 percent in 2026.',
+      evidence: [
+        {
+          id: 'source-1',
+          kind: 'citation_source',
+          summary: 'Market grew 42 percent in 2026',
+          status: 'completed',
+          url: 'https://example.com/report',
+          excerpt: 'The market grew 42 percent in 2026.',
+          sourceQualityTier: 'medium',
+          sourceQualityScore: 75,
+        },
+      ],
+      requirements: {
+        requireCitationSource: true,
+        minimumMediumConfidenceSources: 1,
+        validateResearchClaims: true,
+      },
+    });
+
+    expect(result.completionStatus).toBe('needs_verification');
+    expect(result.missingEvidence.join(' ')).toContain(
+      'needs 2 independent medium-or-better sources; found 1',
+    );
+  });
+
+  it('verifies numeric browser research when two independent sources support it', () => {
+    const result = validateTaskEvidence({
+      claim: 'The market grew 42 percent in 2026.',
+      evidence: [
+        {
+          id: 'source-1',
+          kind: 'citation_source',
+          summary: 'Market grew 42 percent in 2026',
+          status: 'completed',
+          url: 'https://example.com/report',
+          excerpt: 'The market grew 42 percent in 2026.',
+          sourceQualityTier: 'medium',
+          sourceQualityScore: 75,
+        },
+        {
+          id: 'source-2',
+          kind: 'citation_source',
+          summary: 'Market grew 42 percent in 2026',
+          status: 'completed',
+          url: 'https://independent.test/analysis',
+          excerpt: 'The market grew 42 percent in 2026.',
+          sourceQualityTier: 'high',
+          sourceQualityScore: 92,
+        },
+      ],
+      requirements: {
+        requireCitationSource: true,
+        minimumMediumConfidenceSources: 2,
+        validateResearchClaims: true,
+      },
+    });
+
+    expect(result.completionStatus).toBe('verified');
+  });
 });

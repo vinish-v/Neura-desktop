@@ -437,6 +437,13 @@ export class HermesBrowserBridgeSession {
     return this.stopped || this.child.killed;
   }
 
+  getLastStableState() {
+    return {
+      url: this.lastUrl || undefined,
+      title: this.lastTitle || undefined,
+    };
+  }
+
   async connect() {
     const puppeteer = await import('puppeteer-core');
     this.browser = await puppeteer.connect({
@@ -664,6 +671,8 @@ export class HermesBrowserBridgeSession {
   }
 
   private async restartAfterDisconnect(reason: string) {
+    const recoveryStartedAt = Date.now();
+    const runId = TaskRunRegistry.getActiveRunId();
     this.restarting = true;
     await this.publishRestoreSnapshot({
       url: this.lastUrl,
@@ -700,6 +709,23 @@ export class HermesBrowserBridgeSession {
         url: this.lastUrl,
         status: 'done',
       });
+      if (runId) {
+        TaskRunRegistry.addBrowserActionAudit(runId, {
+          action: 'browser_restart',
+          status: 'completed',
+          urlBefore: this.lastUrl || undefined,
+          urlAfter: this.lastUrl || undefined,
+          titleAfter: this.lastTitle || undefined,
+          durationMs: Date.now() - recoveryStartedAt,
+          completedAt: Date.now(),
+        });
+        TaskRunRegistry.recordBrowserTiming(
+          runId,
+          'browser_restart',
+          Date.now() - recoveryStartedAt,
+          'recovery',
+        );
+      }
       await this.publishRestoreSnapshot({
         url: this.lastUrl,
         title: this.lastTitle,
@@ -713,6 +739,25 @@ export class HermesBrowserBridgeSession {
         url: this.lastUrl,
         status: 'failed',
       });
+      if (runId) {
+        TaskRunRegistry.addBrowserActionAudit(runId, {
+          action: 'browser_restart',
+          status: 'failed',
+          urlBefore: this.lastUrl || undefined,
+          failureClass: classifyAutomationFailure({
+            message,
+            toolName: 'browser_restart',
+          }),
+          durationMs: Date.now() - recoveryStartedAt,
+          completedAt: Date.now(),
+        });
+        TaskRunRegistry.recordBrowserTiming(
+          runId,
+          'browser_restart',
+          Date.now() - recoveryStartedAt,
+          'recovery',
+        );
+      }
       await this.publishRestoreSnapshot({
         url: this.lastUrl,
         title: this.lastTitle,
@@ -779,10 +824,35 @@ export const startHermesBrowserBridge = async ({
   dedicated = false,
   onProgress,
 }: HermesBrowserBridgeInput = {}) => {
+  const launchStartedAt = Date.now();
+  const runId = TaskRunRegistry.getActiveRunId();
+  onProgress?.({
+    title: 'Starting browser automation',
+    detail: dedicated
+      ? 'Preparing an isolated browser worker session.'
+      : 'Preparing the local persistent browser session.',
+    status: 'in_progress',
+  });
   if (!dedicated && activeSession && !activeSession.isStopped) {
     if (idleShutdownTimer) {
       clearTimeout(idleShutdownTimer);
       idleShutdownTimer = null;
+    }
+    if (runId) {
+      TaskRunRegistry.addBrowserActionAudit(runId, {
+        action: 'browser_reuse',
+        status: 'completed',
+        urlAfter: activeSession.getLastStableState().url,
+        titleAfter: activeSession.getLastStableState().title,
+        durationMs: Date.now() - launchStartedAt,
+        completedAt: Date.now(),
+      });
+      TaskRunRegistry.recordBrowserTiming(
+        runId,
+        'browser_reuse',
+        Date.now() - launchStartedAt,
+        'launch',
+      );
     }
     onProgress?.({
       title: 'Browser automation ready',
@@ -874,6 +944,22 @@ export const startHermesBrowserBridge = async ({
       child.kill();
     }
     throw error;
+  }
+  if (runId) {
+    TaskRunRegistry.addBrowserActionAudit(runId, {
+      action: 'browser_launch',
+      status: 'completed',
+      urlAfter: 'about:blank',
+      titleAfter: 'Browser',
+      durationMs: Date.now() - launchStartedAt,
+      completedAt: Date.now(),
+    });
+    TaskRunRegistry.recordBrowserTiming(
+      runId,
+      'browser_launch',
+      Date.now() - launchStartedAt,
+      'launch',
+    );
   }
   if (!dedicated) {
     activeSession = session;

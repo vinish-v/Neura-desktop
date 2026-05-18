@@ -557,4 +557,94 @@ describe('TaskRunRegistry', () => {
     );
     expect(persistedRuns[1]).not.toHaveProperty('browserRestoreSnapshot');
   });
+
+  it('records browser action audit and timing budgets for slow steps', () => {
+    let persistedRuns: TaskRunRecord[] = [
+      {
+        ...buildRun('run_browser_metrics', 'running'),
+        runMode: 'executor_browser',
+        browserRestoreSnapshot: {
+          url: 'https://example.com/start',
+          title: 'Start',
+          profilePath: 'C:\\Users\\HP\\AppData\\Roaming\\Neura\\browser',
+          backend: 'local',
+          cdpUrl: 'http://127.0.0.1:9222',
+          takeoverActive: false,
+          bridgeStatus: 'connected',
+          capturedAt: 12,
+          health: {
+            executableExists: true,
+            portReachable: true,
+            bridgeStatus: 'connected',
+            checkedAt: 12,
+            issues: [],
+            profile: {
+              exists: true,
+              writable: true,
+              lockState: 'unlocked',
+              issues: [],
+            },
+          },
+        },
+      },
+    ];
+    mocks.settingGet.mockImplementation(() => persistedRuns);
+    mocks.settingSet.mockImplementation((_key, value) => {
+      persistedRuns = value as TaskRunRecord[];
+    });
+
+    TaskRunRegistry.addBrowserActionAudit('run_browser_metrics', {
+      externalCallId: 'call-1',
+      action: 'browser_navigate',
+      target: 'https://example.com/final',
+      urlBefore: 'https://example.com/start',
+      status: 'pending',
+      startedAt: 100,
+    });
+    TaskRunRegistry.updateBrowserActionAudit('run_browser_metrics', 'call-1', {
+      status: 'completed',
+      urlAfter: 'https://example.com/final',
+      titleAfter: 'Final',
+      completedAt: 35_200,
+    });
+    TaskRunRegistry.recordBrowserTiming(
+      'run_browser_metrics',
+      'browser_navigate',
+      35_100,
+      'navigation',
+    );
+
+    expect(persistedRuns[0].browserActionAudit?.[0]).toEqual(
+      expect.objectContaining({
+        action: 'browser_navigate',
+        status: 'completed',
+        urlBefore: 'https://example.com/start',
+        urlAfter: 'https://example.com/final',
+        durationMs: 35_100,
+      }),
+    );
+    expect(persistedRuns[0].browserTiming).toEqual(
+      expect.objectContaining({
+        navigationCount: 1,
+        navigationMs: 35_100,
+        slowSteps: [
+          expect.objectContaining({
+            action: 'browser_navigate',
+            kind: 'navigation',
+            budgetMs: 30_000,
+          }),
+        ],
+      }),
+    );
+    expect(
+      TaskRunRegistry.summarizeBrowserPerformance('run_browser_metrics'),
+    ).toEqual(
+      expect.objectContaining({
+        runId: 'run_browser_metrics',
+        actionAudit: expect.arrayContaining([
+          expect.objectContaining({ action: 'browser_navigate' }),
+        ]),
+      }),
+    );
+  });
 });

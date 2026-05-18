@@ -245,6 +245,10 @@ vi.mock('./taskRunRegistry', () => {
       },
       addToolCall: vi.fn(),
       updateToolCall: vi.fn(),
+      addBrowserActionAudit: vi.fn(),
+      updateBrowserActionAudit: vi.fn(),
+      recordBrowserTiming: vi.fn(),
+      summarizeBrowserPerformance: vi.fn(() => null),
       upsertTodo: vi.fn(),
       addSource: (runId: string, source: any) => {
         const run = mocks.runs.find((record) => record.runId === runId);

@@ -177,6 +177,29 @@ const publicToolName = (toolName?: string) => {
   return normalized || 'tool';
 };
 
+const browserProgressTitle = (
+  toolName?: string,
+  phase: 'started' | 'completed' = 'started',
+) => {
+  const normalized = (toolName || '').toLowerCase();
+  if (!/browser|page|dom|navigate|click|type|extract|download|search/i.test(normalized)) {
+    return null;
+  }
+  if (/navigate|goto|url|search/i.test(normalized)) {
+    return phase === 'started' ? 'Navigating browser' : 'Navigation finished';
+  }
+  if (/click|type|input|select|submit/i.test(normalized)) {
+    return phase === 'started' ? 'Acting on page' : 'Page action finished';
+  }
+  if (/extract|read|dom|screenshot|snapshot/i.test(normalized)) {
+    return phase === 'started' ? 'Reading page evidence' : 'Page evidence captured';
+  }
+  if (/download/i.test(normalized)) {
+    return phase === 'started' ? 'Downloading in browser' : 'Download action finished';
+  }
+  return phase === 'started' ? 'Using browser' : 'Browser action finished';
+};
+
 const publicProgressDetail = (value?: string) => {
   const cleaned = (value || '')
     .replace(/hermes[-_.]agent/gi, 'runtime')
@@ -650,7 +673,7 @@ export class HermesRuntimeService {
         if (event.type === 'tool.started' || event.type === 'tool.call.started') {
           const toolLabel = publicToolName(event.toolName);
           input.onProgress?.({
-            title: `Using ${toolLabel}`,
+            title: browserProgressTitle(event.toolName) || `Using ${toolLabel}`,
             detail: publicProgressDetail(
               event.preview || JSON.stringify(event.arguments || {}),
             ),
@@ -661,8 +684,11 @@ export class HermesRuntimeService {
 
         if (event.type === 'tool.completed' || event.type === 'tool.call.completed') {
           const toolLabel = publicToolName(event.toolName);
+          const browserTitle = browserProgressTitle(event.toolName, 'completed');
           input.onProgress?.({
-            title: `${toolLabel[0]?.toUpperCase() || 'T'}${toolLabel.slice(1)} completed`,
+            title:
+              browserTitle ||
+              `${toolLabel[0]?.toUpperCase() || 'T'}${toolLabel.slice(1)} completed`,
             detail: publicProgressDetail(event.resultPreview || event.preview),
             status: event.isError ? 'failed' : 'done',
           });

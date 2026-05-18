@@ -13,7 +13,10 @@ export type AutomationFailureKind =
   | 'validation_error'
   | 'connector_auth_error'
   | 'navigation_timeout'
+  | 'network_timeout'
+  | 'stale_dom'
   | 'selector_not_found'
+  | 'download_failure'
   | 'blocked_or_login_required'
   | 'permission_denied'
   | 'browser_crashed'
@@ -33,11 +36,69 @@ export type AutomationRecoveryNextAction =
   | 'collect_missing_validation_evidence'
   | 'reauthenticate_connector'
   | 'retry_navigation'
+  | 'check_network'
+  | 'refresh_dom'
+  | 'retry_download'
   | 'capture_snapshot'
   | 'ask_user_for_login_or_captcha'
   | 'request_permission'
   | 'relaunch_browser'
   | 'manual_handoff';
+
+export type BrowserActionKind =
+  | 'launch'
+  | 'navigation'
+  | 'click'
+  | 'extraction'
+  | 'download'
+  | 'login_wait'
+  | 'recovery'
+  | 'other';
+
+export const BROWSER_ACTION_TIMEOUT_BUDGETS_MS: Record<
+  BrowserActionKind,
+  number
+> = {
+  launch: 15_000,
+  navigation: 30_000,
+  click: 5_000,
+  extraction: 12_000,
+  download: 60_000,
+  login_wait: 120_000,
+  recovery: 20_000,
+  other: 10_000,
+};
+
+export const classifyBrowserActionKind = (
+  action?: string,
+): BrowserActionKind => {
+  const text = normalize(action);
+  if (!text) {
+    return 'other';
+  }
+  if (/\b(launch|start|connect|reuse)\b/i.test(text)) {
+    return 'launch';
+  }
+  if (/\b(navigate|goto|open_url|search|url|visit)\b/i.test(text)) {
+    return 'navigation';
+  }
+  if (/\b(click|press|tap|select|type|input|fill|submit)\b/i.test(text)) {
+    return 'click';
+  }
+  if (/\b(extract|read|scrape|snapshot|screenshot|dom|content)\b/i.test(text)) {
+    return 'extraction';
+  }
+  if (/\b(download|save|export)\b/i.test(text)) {
+    return 'download';
+  }
+  if (/\b(login|signin|captcha|paywall|wait)\b/i.test(text)) {
+    return 'login_wait';
+  }
+  if (/\b(recover|restart|reconnect|retry)\b/i.test(text)) {
+    return 'recovery';
+  }
+  return 'other';
+};
 
 export type AutomationRecoveryInput = {
   surface: AutomationSurface;
@@ -120,11 +181,21 @@ export const classifyAutomationFailure = (
   if (
     includesAny(text, [
       /\b(captcha|recaptcha|hcaptcha|cloudflare|bot detection|verify you are human)\b/i,
+      /\b(paywall|subscribe to continue|subscription required|members only)\b/i,
       /\b(sign in|signin|login|log in|authentication required|session expired)\b/i,
       /\b(403|forbidden|access denied)\b/i,
     ])
   ) {
     return 'blocked_or_login_required';
+  }
+
+  if (
+    includesAny(text, [
+      /\b(detached|stale|stale element|element id was stale|execution context was destroyed)\b/i,
+      /\b(dom|node|element)\b.*\b(stale|detached|changed|no longer attached)\b/i,
+    ])
+  ) {
+    return 'stale_dom';
   }
 
   if (
@@ -143,6 +214,24 @@ export const classifyAutomationFailure = (
     ])
   ) {
     return 'navigation_timeout';
+  }
+
+  if (
+    includesAny(text, [
+      /\b(net::err_internet_disconnected|net::err_network_changed|net::err_name_not_resolved|dns|offline)\b/i,
+      /\b(network timeout|network error|connection timed out|connection reset)\b/i,
+    ])
+  ) {
+    return 'network_timeout';
+  }
+
+  if (
+    includesAny(text, [
+      /\b(download)\b.*\b(failed|timeout|interrupted|blocked|cancelled|canceled)\b/i,
+      /\b(download_failure|failed to download|download did not complete)\b/i,
+    ])
+  ) {
+    return 'download_failure';
   }
 
   if (
@@ -267,6 +356,34 @@ export const recommendAutomationRecovery = (
         userFacingMessage:
           'The page did not finish loading in time. Neura should capture what is visible, retry once, and report the final URL/title.',
       };
+    case 'network_timeout':
+      return {
+        kind,
+        status: 'retryable',
+        label: 'Network timeout',
+        nextAction: 'check_network',
+        steps: [
+          'Record the URL and network error.',
+          'Retry once after checking the local connection or DNS state.',
+          'Escalate to user guidance if the network error repeats.',
+        ],
+        userFacingMessage:
+          'The browser could not reach the network reliably. Neura should retry once and then show the network blocker honestly.',
+      };
+    case 'stale_dom':
+      return {
+        kind,
+        status: 'retryable',
+        label: 'Stale page element',
+        nextAction: 'refresh_dom',
+        steps: [
+          'Capture the current URL and visible page state.',
+          'Refresh the DOM snapshot once.',
+          'Retry with a semantic or visible selector before using coordinates.',
+        ],
+        userFacingMessage:
+          'The page changed before Neura could act on the element. Neura should refresh the page snapshot and retry once with visible evidence.',
+      };
     case 'selector_not_found':
       return {
         kind,
@@ -280,6 +397,20 @@ export const recommendAutomationRecovery = (
         ],
         userFacingMessage:
           'Neura could not find the target page element. It should refresh the page snapshot and retry against visible evidence.',
+      };
+    case 'download_failure':
+      return {
+        kind,
+        status: 'retryable',
+        label: 'Download failed',
+        nextAction: 'retry_download',
+        steps: [
+          'Record the attempted download target and current URL.',
+          'Retry the download once.',
+          'Verify the downloaded file exists before claiming completion.',
+        ],
+        userFacingMessage:
+          'The browser download did not complete. Neura should retry once and verify a real local file before saying it succeeded.',
       };
     case 'blocked_or_login_required':
       return {

@@ -34,6 +34,8 @@ vi.mock('./taskRunRegistry', () => ({
     addEvidence: vi.fn(),
     addProgress: vi.fn(),
     setBrowserRestoreSnapshot: vi.fn(),
+    addBrowserActionAudit: vi.fn(),
+    recordBrowserTiming: vi.fn(),
   },
 }));
 

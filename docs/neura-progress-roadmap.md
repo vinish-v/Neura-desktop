@@ -99,6 +99,9 @@ Evidence values: `test`, `typecheck`, `build`, `manual`, `commit`, `tag`.
 | P7.29 | Launcher routing regression coverage    | Done        | Launcher prompts are tested against semantic task types and proof expectations, including design artifact proof |
 | P7.30 | Gmail mail task intake                  | Done        | Disabled-by-default Gmail intake reads explicit `[Neura Task]` unread subjects through the real read-only connector and queues background Hermes tasks |
 | P7.31 | Checkpoint state digests                | Done        | Checkpoints persist compact phase, next-action, workspace, session, browser, evidence, artifact, and todo digests for resume continuity |
+| P7.32 | Browser action audit and timing         | Done        | Browser runs record action URL/title before and after, durations, failure classes, phase timing budgets, slow-step diagnostics, and a local performance report artifact |
+| P7.33 | Browser recovery class coverage         | Done        | Recovery classification covers stale DOM, selector miss, login/captcha/paywall blocks, permission denial, download failure, network timeout, and browser crash |
+| P7.34 | Browser research proof regression       | Done        | Numeric/current research claims remain needs-verification until two independent medium-or-better source records support them |
 
 ## Phase Checkpoint
 
@@ -112,6 +115,7 @@ Before any phase is marked done:
 
 Latest local proof:
 
+- `npm.cmd --prefix apps/neura run test -- --run src/shared/browserAutomationRecovery.test.ts src/shared/taskEvidence.test.ts src/main/services/hermesBrowserBridge.test.ts src/main/services/taskRunRegistry.test.ts src/main/services/task-manager.test.ts` passed (5 files, 26 tests).
 - `npm.cmd --prefix apps/neura run test -- --run src/main/services/intentArbitration.test.ts src/main/services/task-manager.test.ts src/main/services/artifactThumbnail.test.ts src/main/ipcRoutes/window.test.ts src/main/services/connectors-service.test.ts src/main/services/artifactValidation.test.ts src/main/services/nativeComputerTools.test.ts src/main/services/taskRunRegistry.test.ts src/shared/taskEvidence.test.ts src/shared/intentClassification.test.ts src/shared/taskLauncherCatalog.test.ts src/main/services/mail-task-intake-service.test.ts` passed (12 files, 61 tests).
 - `npm.cmd --prefix apps/neura run test -- --run src/shared/browserAutomationRecovery.test.ts src/main/services/hermesBrowserBridge.test.ts src/main/services/taskRunRegistry.test.ts src/main/services/artifactValidation.test.ts src/main/services/nativeComputerTools.test.ts` passed.
 - `npm.cmd --prefix apps/neura run test -- --run src/main/services/scheduled-task-service.test.ts src/main/services/desktop-projects-service.test.ts` passed.

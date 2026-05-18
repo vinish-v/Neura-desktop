@@ -199,6 +199,61 @@ export type BrowserRestoreSnapshot = {
   capturedAt: number;
 };
 
+export type BrowserActionStatus =
+  | 'pending'
+  | 'completed'
+  | 'failed'
+  | 'retrying'
+  | 'blocked';
+
+export type BrowserActionAuditRecord = {
+  id: string;
+  externalCallId?: string;
+  action: string;
+  target?: string;
+  urlBefore?: string;
+  urlAfter?: string;
+  titleBefore?: string;
+  titleAfter?: string;
+  status: BrowserActionStatus;
+  durationMs?: number;
+  failureClass?: string;
+  workerId?: string;
+  startedAt: number;
+  completedAt?: number;
+};
+
+export type BrowserSlowStep = {
+  action: string;
+  kind: string;
+  durationMs: number;
+  budgetMs: number;
+  recordedAt: number;
+};
+
+export type BrowserTimingMetrics = {
+  browserTaskStartedAt?: number;
+  browserTaskLastActivityAt?: number;
+  launchMs: number;
+  launchCount: number;
+  navigationMs: number;
+  navigationCount: number;
+  clickMs: number;
+  clickCount: number;
+  extractionMs: number;
+  extractionCount: number;
+  downloadMs: number;
+  downloadCount: number;
+  loginWaitMs: number;
+  loginWaitCount: number;
+  recoveryMs: number;
+  recoveryCount: number;
+  otherMs: number;
+  otherCount: number;
+  totalBrowserTaskMs?: number;
+  slowSteps: BrowserSlowStep[];
+};
+
 export type TaskToolCallRecord = {
   id: string;
   externalCallId?: string;
@@ -441,6 +496,8 @@ export type TaskState = {
   memorySummary?: string;
   retrievedRunIds?: string[];
   browserRestoreSnapshot?: BrowserRestoreSnapshot;
+  browserActionAudit?: BrowserActionAuditRecord[];
+  browserTiming?: BrowserTimingMetrics;
   wideResearchWorkers?: WideResearchWorkerRecord[];
   checkpoints?: TaskCheckpoint[];
   todoItems: TaskTodoItem[];
