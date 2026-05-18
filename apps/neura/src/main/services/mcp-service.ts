@@ -39,6 +39,18 @@ type McpCallToolInput = {
 
 type BuiltInServerKey = 'filesystem' | 'commands' | 'search' | 'browser';
 
+export type McpDiscoveryDiagnostic = {
+  serverName: string;
+  enabled: boolean;
+  transport?: string;
+  command?: string;
+  args?: string[];
+  urlConfigured?: boolean;
+  toolCount: number;
+  status: 'ready' | 'disabled' | 'error';
+  issue?: string;
+};
+
 const DEFAULT_BUILTIN_SERVERS: BuiltInServerKey[] = [
   'filesystem',
   'commands',
@@ -408,6 +420,83 @@ export class MCPService {
       toolCount: tools.length + connectorTools.length,
       appPath: app.getAppPath(),
     };
+  }
+
+  async diagnostics(): Promise<McpDiscoveryDiagnostic[]> {
+    const configuredServers = createConfiguredServers();
+    const configuredNames = new Set(configuredServers.map((server) => server.name));
+    const expectedServers: Array<{
+      name: NeuraMcpServerName;
+      connectorId: string;
+      key?: BuiltInServerKey;
+    }> = [
+      { name: 'neura-filesystem', connectorId: 'builtin_mcp', key: 'filesystem' },
+      { name: 'neura-commands', connectorId: 'builtin_mcp', key: 'commands' },
+      { name: 'neura-search', connectorId: 'builtin_mcp', key: 'search' },
+      { name: 'neura-browser', connectorId: 'builtin_mcp', key: 'browser' },
+      { name: 'custom-mcp', connectorId: 'custom_mcp' },
+    ];
+    await this.start();
+    const diagnostics: McpDiscoveryDiagnostic[] = [];
+    for (const expected of expectedServers) {
+      const server = configuredServers.find((item) => item.name === expected.name);
+      if (!server) {
+        const connector = getConnector(expected.connectorId);
+        diagnostics.push({
+          serverName: expected.name,
+          enabled: false,
+          toolCount: 0,
+          status: 'disabled',
+          issue:
+            expected.connectorId === 'builtin_mcp'
+              ? `${expected.key} MCP server is not enabled in builtin_mcp config.`
+              : connector?.enabled
+                ? 'Custom MCP connector is enabled but missing url or command.'
+                : 'Custom MCP connector is disabled.',
+        });
+        continue;
+      }
+      try {
+        const tools = await this.listTools(server.name);
+        const record = server as unknown as Record<string, unknown>;
+        diagnostics.push({
+          serverName: server.name,
+          enabled: configuredNames.has(server.name),
+          transport: server.type,
+          command:
+            typeof record.command === 'string'
+              ? path.basename(record.command)
+              : undefined,
+          args: Array.isArray(record.args)
+            ? (record.args as string[]).map((arg) =>
+                arg.includes(workspaceRoot)
+                  ? arg.replace(workspaceRoot, '<workspace>')
+                  : arg,
+              )
+            : undefined,
+          urlConfigured: typeof record.url === 'string' && Boolean(record.url),
+          toolCount: tools.length,
+          status: 'ready',
+        });
+      } catch (error) {
+        diagnostics.push({
+          serverName: server.name,
+          enabled: true,
+          transport: server.type,
+          toolCount: 0,
+          status: 'error',
+          issue: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    diagnostics.push({
+      serverName: 'neura-connectors',
+      enabled: true,
+      transport: 'internal',
+      toolCount: (await this.listConnectorTools()).length,
+      status: 'ready',
+    });
+    return diagnostics;
   }
 
   async cleanup() {

@@ -36,6 +36,9 @@ import {
   BackgroundTaskService,
   registerBackgroundTaskIpcHandlers,
 } from './services/background-task-service';
+import { ScheduledTaskService } from './services/scheduled-task-service';
+import { DeepLinkTaskService } from './services/deep-link-task-service';
+import { LocalTaskApiService } from './services/local-task-api-service';
 import { CanvasIdeBridge } from './services/canvas-ide-bridge';
 import { registerConnectorsIpcHandlers } from './services/connectors-service';
 
@@ -52,6 +55,33 @@ if (squirrelStartup) {
 logger.debug('[env]', env);
 
 ElectronStore.initRenderer();
+
+const deepLinkService = DeepLinkTaskService.getInstance();
+try {
+  app.setAsDefaultProtocolClient('neura');
+} catch (error) {
+  logger.warn('[DeepLinkTaskService] protocol registration failed', error);
+}
+
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    void deepLinkService.handleArgv(argv);
+    const focusedWindow = BrowserWindow.getAllWindows()[0];
+    if (focusedWindow) {
+      if (focusedWindow.isMinimized()) {
+        focusedWindow.restore();
+      }
+      focusedWindow.focus();
+    }
+  });
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    void deepLinkService.handleUrl(url);
+  });
+}
 
 if (isProd) {
   import('source-map-support').then(({ default: sourceMapSupport }) => {
@@ -148,6 +178,9 @@ const initializeApp = async () => {
       logger.warn('[MCPService] startup skipped or failed:', error);
     });
   BackgroundTaskService.getInstance().start();
+  ScheduledTaskService.getInstance().start();
+  await LocalTaskApiService.getInstance().start();
+  await deepLinkService.start(process.argv);
 
   app.on('window-all-closed', () => {
     logger.info('window-all-closed');
@@ -165,6 +198,8 @@ const initializeApp = async () => {
   app.on('quit', () => {
     logger.info('app quit');
     BackgroundTaskService.getInstance().cleanup();
+    ScheduledTaskService.getInstance().cleanup();
+    void LocalTaskApiService.getInstance().stop();
     void CanvasIdeBridge.getInstance().stop();
     void MCPService.getInstance().cleanup();
     unsubscribe();

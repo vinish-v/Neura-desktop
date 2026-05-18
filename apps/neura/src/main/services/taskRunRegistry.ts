@@ -32,6 +32,40 @@ const MAX_STORED_RUNS = 100;
 const pathEquals = (left?: string, right?: string) =>
   (left || '').trim().toLowerCase() === (right || '').trim().toLowerCase();
 
+const normalizeSourceUrl = (value: string) => {
+  try {
+    const url = new URL(value.trim());
+    url.hash = '';
+    if (url.pathname !== '/') {
+      url.pathname = url.pathname.replace(/\/+$/u, '');
+    }
+    return url.toString();
+  } catch {
+    return value.trim();
+  }
+};
+
+const VISIBLE_DATE_PATTERN =
+  /\b(?:published|updated|posted|date)?\s*:?\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4})\b/i;
+
+const extractVisibleDate = (...values: Array<string | undefined>) => {
+  for (const value of values) {
+    const match = value?.match(VISIBLE_DATE_PATTERN)?.[1];
+    if (match) {
+      return match.trim();
+    }
+  }
+  return undefined;
+};
+
+const parseVisibleDate = (value?: string) => {
+  if (!value) {
+    return undefined;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+};
+
 const toolNameIncludes = (toolCall: TaskToolCallRecord, pattern: RegExp) =>
   pattern.test(`${toolCall.serverName}.${toolCall.toolName}`);
 
@@ -75,13 +109,17 @@ export const collectTaskEvidenceForRun = (
         url: source.url,
         title: source.title,
         sourceName: source.sourceName,
-        excerpt: source.excerpt,
-        sourceQualityScore: source.quality?.score,
-        sourceQualityTier: source.quality?.tier,
         metadata: {
+          visibleDate: source.visibleDate,
+          publishedAt: source.publishedAt,
+          claimIds: source.claimIds,
+          workerId: source.workerId,
           validationNotes: source.validationNotes,
           qualityReasons: source.quality?.reasons,
         },
+        excerpt: source.excerpt,
+        sourceQualityScore: source.quality?.score,
+        sourceQualityTier: source.quality?.tier,
       }),
   );
 
@@ -128,12 +166,40 @@ export const collectTaskEvidenceForRun = (
       }),
     );
 
+  const browserSnapshotEvidence: TaskEvidence[] = run.browserRestoreSnapshot
+    ? [
+        sanitizeTaskEvidence({
+          id: `${run.runId}-browser-restore`,
+          kind: 'browser_snapshot',
+          summary:
+            run.browserRestoreSnapshot.title ||
+            run.browserRestoreSnapshot.url ||
+            'Browser restore snapshot',
+          status:
+            run.browserRestoreSnapshot.bridgeStatus === 'failed'
+              ? 'failed'
+              : 'completed',
+          confidence:
+            run.browserRestoreSnapshot.bridgeStatus === 'connected'
+              ? 0.82
+              : 0.45,
+          capturedAt: run.browserRestoreSnapshot.capturedAt,
+          url: run.browserRestoreSnapshot.url,
+          title: run.browserRestoreSnapshot.title,
+          metadata: {
+            browserRestoreSnapshot: run.browserRestoreSnapshot,
+          },
+        }),
+      ]
+    : [];
+
   const explicitEvidence = (run.evidence || []).map(sanitizeTaskEvidence);
   const evidenceById = new Map<string, TaskEvidence>();
   for (const item of [
     ...sourceEvidence,
     ...artifactEvidence,
     ...toolEvidence,
+    ...browserSnapshotEvidence,
     ...explicitEvidence,
   ]) {
     evidenceById.set(item.id, item);
@@ -207,6 +273,7 @@ export const createTaskRun = (
     factsFound: [],
     sourcesVisited: [],
     sourceRecords: [],
+    wideResearchWorkers: [],
     toolCalls: [],
     artifacts: [],
     approvalEvents: [],
@@ -227,6 +294,7 @@ const normalizeRun = (run: TaskRunRecord): TaskRunRecord => {
     factsFound: run.factsFound || [],
     sourcesVisited: run.sourcesVisited || [],
     sourceRecords: run.sourceRecords || [],
+    wideResearchWorkers: run.wideResearchWorkers || [],
     toolCalls: run.toolCalls || [],
     artifacts: run.artifacts || [],
     approvalEvents: run.approvalEvents || [],
@@ -347,6 +415,10 @@ export class TaskRunRegistry {
       ...run,
       progressItems: [...run.progressItems, progress],
       currentStep: item.title,
+      nextAction:
+        item.status === 'failed'
+          ? 'Review the failure guidance, fix the setup or evidence gap, then resume or retry.'
+          : run.nextAction,
     });
   }
 
@@ -355,17 +427,40 @@ export class TaskRunRegistry {
     if (!run || !source.url.trim()) {
       return null;
     }
-    const url = source.url.trim();
-    const existingIndex = run.sourceRecords.findIndex((item) => item.url === url);
+    const url = normalizeSourceUrl(source.url);
+    const visibleDate =
+      source.visibleDate ||
+      extractVisibleDate(source.title, source.sourceName, source.excerpt, url);
+    const existingIndex = run.sourceRecords.findIndex(
+      (item) => normalizeSourceUrl(item.url) === url,
+    );
+    const existingSource =
+      existingIndex >= 0 ? run.sourceRecords[existingIndex] : undefined;
+    const mergedClaimIds = [
+      ...new Set([...(existingSource?.claimIds || []), ...(source.claimIds || [])]),
+    ];
+    const mergedValidationNotes = [
+      ...new Set([
+        ...(existingSource?.validationNotes || []),
+        ...(source.validationNotes || []),
+      ]),
+    ];
     const sourceRecord: TaskSourceRecord = {
+      ...existingSource,
       ...source,
       url,
-      quality: source.quality || scoreSourceQuality({ ...source, url }),
-      validationNotes: source.validationNotes || [],
-      id:
-        existingIndex >= 0
-          ? run.sourceRecords[existingIndex].id
-          : `source-${Date.now()}-${run.sourceRecords.length}`,
+      visibleDate: visibleDate || existingSource?.visibleDate,
+      publishedAt:
+        source.publishedAt ||
+        parseVisibleDate(visibleDate) ||
+        existingSource?.publishedAt,
+      claimIds: mergedClaimIds,
+      quality:
+        source.quality ||
+        existingSource?.quality ||
+        scoreSourceQuality({ ...source, url }),
+      validationNotes: mergedValidationNotes,
+      id: existingSource?.id || `source-${Date.now()}-${run.sourceRecords.length}`,
       capturedAt: Date.now(),
     };
     const sourceRecords =
@@ -374,10 +469,91 @@ export class TaskRunRegistry {
             index === existingIndex ? { ...item, ...sourceRecord } : item,
           )
         : [...run.sourceRecords, sourceRecord];
+    const fallbackWorkerId = !source.workerId
+      ? (run.wideResearchWorkers || [])
+          .filter((worker) => worker.status === 'running')
+          .sort((left, right) => left.sourceUrls.length - right.sourceUrls.length)
+          [0]?.id
+      : undefined;
+
     return TaskRunRegistry.upsert({
       ...run,
       sourcesVisited: [...new Set([...run.sourcesVisited, url])].slice(-50),
       sourceRecords: sourceRecords.slice(-50),
+      wideResearchWorkers: run.wideResearchWorkers?.length
+        ? run.wideResearchWorkers.map((worker) => {
+            const shouldAttach =
+              source.workerId === worker.id ||
+              (!source.workerId && fallbackWorkerId === worker.id);
+            if (!shouldAttach) {
+              return worker;
+            }
+            return {
+              ...worker,
+              sourceUrls: [...new Set([...worker.sourceUrls, url])],
+              claimIds: [
+                ...new Set([...worker.claimIds, ...(source.claimIds || [])]),
+              ],
+              updatedAt: Date.now(),
+            };
+          })
+        : run.wideResearchWorkers,
+    });
+  }
+
+  static setWideResearchWorkers(
+    runId: string,
+    workers: TaskRunRecord['wideResearchWorkers'],
+  ) {
+    return TaskRunRegistry.patch(runId, {
+      wideResearchWorkers: workers || [],
+    });
+  }
+
+  static updateWideResearchWorker(
+    runId: string,
+    workerId: string,
+    patch: Partial<NonNullable<TaskRunRecord['wideResearchWorkers']>[number]>,
+  ) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run) {
+      return null;
+    }
+    return TaskRunRegistry.upsert({
+      ...run,
+      wideResearchWorkers: (run.wideResearchWorkers || []).map((worker) =>
+        worker.id === workerId
+          ? {
+              ...worker,
+              ...patch,
+              attempts: patch.attempts ?? worker.attempts,
+              updatedAt: Date.now(),
+            }
+          : worker,
+      ),
+    });
+  }
+
+  static retryFailedWideResearchWorkers(runId: string) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run) {
+      return null;
+    }
+    const now = Date.now();
+    return TaskRunRegistry.upsert({
+      ...run,
+      wideResearchWorkers: (run.wideResearchWorkers || []).map((worker) =>
+        worker.status === 'failed'
+          ? {
+              ...worker,
+              status: 'pending',
+              attempts: worker.attempts + 1,
+              error: undefined,
+              completedAt: undefined,
+              updatedAt: now,
+            }
+          : worker,
+      ),
     });
   }
 
@@ -512,6 +688,20 @@ export class TaskRunRegistry {
     return TaskRunRegistry.upsert({
       ...run,
       checkpoints: [...(run.checkpoints || []), record].slice(-50),
+    });
+  }
+
+  static setBrowserRestoreSnapshot(
+    runId: string,
+    browserRestoreSnapshot: TaskRunRecord['browserRestoreSnapshot'],
+  ) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run || !browserRestoreSnapshot) {
+      return null;
+    }
+    return TaskRunRegistry.upsert({
+      ...run,
+      browserRestoreSnapshot,
     });
   }
 

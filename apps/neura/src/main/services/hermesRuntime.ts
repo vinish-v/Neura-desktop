@@ -60,6 +60,7 @@ export type HermesRunInput = {
   toolsets?: string[];
   browserBackend?: HermesBrowserBackend;
   keepBrowserAlive?: boolean;
+  dedicatedBrowserSession?: boolean;
   signal?: AbortSignal;
   onProcessStart?: (event: {
     processId: string;
@@ -480,6 +481,8 @@ export class HermesRuntimeService {
       toolsetsNeedBrowserBridge(toolsets) && isLocalBrowserBackend(browserBackend)
       ? await startHermesBrowserBridge({
           signal: input.signal,
+          backend: browserBackend,
+          dedicated: input.dedicatedBrowserSession,
           onProgress: input.onProgress,
         })
       : null;

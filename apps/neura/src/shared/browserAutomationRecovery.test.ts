@@ -10,6 +10,31 @@ describe('browser automation recovery', () => {
   it('classifies common browser and computer failures', () => {
     expect(
       classifyAutomationFailure({
+        message: 'Action requires approval before posting to Slack',
+      }),
+    ).toBe('approval_needed');
+    expect(
+      classifyAutomationFailure({
+        message: 'Planner provider API key is missing',
+      }),
+    ).toBe('provider_config_missing');
+    expect(
+      classifyAutomationFailure({
+        message: 'GitHub connector returned 401 invalid token',
+      }),
+    ).toBe('connector_auth_error');
+    expect(
+      classifyAutomationFailure({
+        message: 'Validation failed: missing evidence for completion proof',
+      }),
+    ).toBe('validation_error');
+    expect(
+      classifyAutomationFailure({
+        message: 'Tool run_command failed with exit code 1',
+      }),
+    ).toBe('tool_error');
+    expect(
+      classifyAutomationFailure({
         toolName: 'browser_navigate',
         message: 'Navigation timeout of 30000 ms exceeded',
       }),

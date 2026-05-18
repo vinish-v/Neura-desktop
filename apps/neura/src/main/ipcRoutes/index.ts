@@ -13,6 +13,9 @@ import { skillsRoute } from './skills';
 import { tasksRoute } from './tasks';
 import { connectorsRoute } from './connectors';
 import { canvasRoute } from './canvas';
+import { healthRoute } from './health';
+import { projectsRoute } from './projects';
+import { localTaskApiRoute } from './localTaskApi';
 
 const t = initIpc.create();
 
@@ -27,6 +30,9 @@ export const ipcRoutes = t.router({
   ...tasksRoute,
   ...connectorsRoute,
   ...canvasRoute,
+  ...healthRoute,
+  ...projectsRoute,
+  ...localTaskApiRoute,
 });
 export type Router = typeof ipcRoutes;
 

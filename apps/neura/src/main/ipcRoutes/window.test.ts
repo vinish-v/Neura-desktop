@@ -1,6 +1,7 @@
 import { windowRoute } from './window';
 import { showWindow } from '@main/window';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import JSZip from 'jszip';
 
 const mocks = vi.hoisted(() => ({
   openPath: vi.fn(),
@@ -113,6 +114,29 @@ describe('windowRoute.readArtifactPreview', () => {
     if (result.kind === 'binary') {
       expect(result.mimeType).toBe('image/png');
       expect(result.dataUrl.startsWith('data:image/png;base64,')).toBe(true);
+    }
+  });
+
+  it('returns real text previews for office zip artifacts', async () => {
+    const zip = new JSZip();
+    zip.file(
+      'word/document.xml',
+      '<w:document><w:t>Quarterly report summary</w:t></w:document>',
+    );
+    mocks.stat.mockResolvedValue({ size: 1024 });
+    mocks.readFile.mockResolvedValue(await zip.generateAsync({ type: 'nodebuffer' }));
+
+    const result = await windowRoute.readArtifactPreview.handle({
+      input: { path: 'D:\\tmp\\report.docx' },
+      context: {} as any,
+    });
+
+    expect(result.kind).toBe('text');
+    if (result.kind === 'text') {
+      expect(result.mimeType).toBe(
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      );
+      expect(result.text).toContain('Quarterly report summary');
     }
   });
 

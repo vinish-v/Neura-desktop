@@ -13,7 +13,16 @@ import { app } from 'electron';
 import type { KeyInput } from 'puppeteer-core';
 
 import { logger } from '@main/logger';
-import { buildAutomationRecoveryReport } from '@shared/browserAutomationRecovery';
+import { store } from '@main/store/create';
+import type {
+  BrowserBridgeHealth,
+  BrowserRestoreSnapshot,
+  HermesBrowserBackend,
+} from '@main/store/types';
+import {
+  buildAutomationRecoveryReport,
+  classifyAutomationFailure,
+} from '@shared/browserAutomationRecovery';
 import { ComputerRuntimeController } from './computerRuntimeController';
 import { TaskRunRegistry } from './taskRunRegistry';
 
@@ -27,11 +36,26 @@ type ChromeTarget = {
 
 type HermesBrowserBridgeInput = {
   signal?: AbortSignal;
+  backend?: HermesBrowserBackend;
+  dedicated?: boolean;
   onProgress?: (event: {
     title: string;
     detail?: string;
     status?: 'pending' | 'in_progress' | 'done' | 'failed';
   }) => void;
+};
+
+export type BrowserHealthProbeInput = {
+  executablePath?: string | null;
+  executableExists?: boolean;
+  profilePath?: string;
+  profileExists?: boolean;
+  profileWritable?: boolean;
+  profileLockPresent?: boolean;
+  port?: number;
+  portReachable?: boolean;
+  bridgeStatus?: BrowserBridgeHealth['bridgeStatus'];
+  checkedAt?: number;
 };
 
 const POLL_INTERVAL_MS = 600;
@@ -138,6 +162,11 @@ const ensurePersistentBrowserProfile = async () => {
   return profileDir;
 };
 
+const createDedicatedBrowserProfile = async () => {
+  const tempRoot = app.getPath('temp');
+  return fs.promises.mkdtemp(path.join(tempRoot, 'neura-browser-worker-'));
+};
+
 const resolveChromeExecutable = () => {
   const candidates: string[] = [];
   if (process.platform === 'win32') {
@@ -242,10 +271,146 @@ const recordBrowserRecovery = ({
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
+const cdpPortFromUrl = (cdpUrl?: string) => {
+  if (!cdpUrl) {
+    return undefined;
+  }
+  try {
+    return new URL(cdpUrl).port
+      ? Number(new URL(cdpUrl).port)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+export const buildBrowserHealthReport = ({
+  executablePath,
+  executableExists = Boolean(executablePath),
+  profilePath,
+  profileExists = Boolean(profilePath),
+  profileWritable = false,
+  profileLockPresent = false,
+  port,
+  portReachable = false,
+  bridgeStatus = 'not_started',
+  checkedAt = Date.now(),
+}: BrowserHealthProbeInput): BrowserBridgeHealth => {
+  const issues: string[] = [];
+  const profileIssues: string[] = [];
+
+  if (!executableExists) {
+    issues.push('No supported local browser executable was found.');
+  }
+  if (!profileExists) {
+    profileIssues.push('The local browser automation profile does not exist.');
+  }
+  if (!profileWritable) {
+    profileIssues.push('The local browser automation profile is not writable.');
+  }
+  if (profileLockPresent) {
+    profileIssues.push('The browser profile lock is present.');
+  }
+  if (
+    bridgeStatus === 'connected' &&
+    typeof port === 'number' &&
+    !portReachable
+  ) {
+    issues.push('The configured CDP port is not reachable.');
+  }
+  if (bridgeStatus === 'failed') {
+    issues.push('The local browser bridge is in a failed state.');
+  }
+
+  return {
+    executablePath: executablePath || undefined,
+    executableExists,
+    port,
+    portReachable,
+    bridgeStatus,
+    profile: {
+      profilePath,
+      exists: profileExists,
+      writable: profileWritable,
+      lockState: profileLockPresent
+        ? 'locked'
+        : profileExists
+          ? 'unlocked'
+          : 'unknown',
+      issues: profileIssues,
+    },
+    checkedAt,
+    issues: [...issues, ...profileIssues],
+  };
+};
+
+const isProfileWritable = async (profilePath?: string) => {
+  if (!profilePath) {
+    return false;
+  }
+  const probePath = path.join(profilePath, `.neura-health-${process.pid}.tmp`);
+  try {
+    await fs.promises.mkdir(profilePath, { recursive: true });
+    await fs.promises.writeFile(probePath, 'ok', 'utf8');
+    await fs.promises.unlink(probePath);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const hasProfileLock = (profilePath?: string) =>
+  Boolean(
+    profilePath &&
+      ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'LOCK'].some(
+        (name) => fs.existsSync(path.join(profilePath, name)),
+      ),
+  );
+
+export const checkLocalBrowserHealth = async ({
+  executablePath = resolveChromeExecutable(),
+  profilePath,
+  cdpUrl,
+  bridgeStatus = 'not_started',
+}: {
+  executablePath?: string | null;
+  profilePath?: string;
+  cdpUrl?: string;
+  bridgeStatus?: BrowserBridgeHealth['bridgeStatus'];
+} = {}) => {
+  const port = cdpPortFromUrl(cdpUrl);
+  const profileExists = Boolean(profilePath && fs.existsSync(profilePath));
+  const profileWritable = await isProfileWritable(profilePath);
+  let portReachable = false;
+
+  if (cdpUrl) {
+    try {
+      await httpJson(`${cdpUrl}/json/version`, 1000);
+      portReachable = true;
+    } catch {
+      portReachable = false;
+    }
+  }
+
+  return buildBrowserHealthReport({
+    executablePath,
+    executableExists: Boolean(executablePath && fs.existsSync(executablePath)),
+    profilePath,
+    profileExists,
+    profileWritable,
+    profileLockPresent: hasProfileLock(profilePath),
+    port,
+    portReachable,
+    bridgeStatus,
+  });
+};
+
 export class HermesBrowserBridgeSession {
   private pollTimer: NodeJS.Timeout | null = null;
   private lastUrl = '';
+  private lastTitle = '';
   private stopped = false;
+  private restarting = false;
   private browser: Awaited<
     ReturnType<typeof import('puppeteer-core')['connect']>
   > | null = null;
@@ -255,11 +420,16 @@ export class HermesBrowserBridgeSession {
     >
   > | null = null;
   private lastRecoverySignature = '';
+  private lastSnapshotAt = 0;
+  private lastSnapshotSignature = '';
 
   constructor(
     readonly cdpUrl: string,
-    private readonly child: ChildProcessWithoutNullStreams,
+    private child: ChildProcessWithoutNullStreams,
     private readonly userDataDir: string,
+    private readonly executable: string,
+    private readonly launchArgs: string[],
+    private readonly backend: HermesBrowserBackend = 'local',
     private readonly preserveProfile = false,
   ) {}
 
@@ -306,8 +476,16 @@ export class HermesBrowserBridgeSession {
           activity: target.title ? `Browsing ${target.title}` : 'Browsing',
         });
         await this.publishScreenshot(target.title);
+        await this.publishRestoreSnapshot({
+          url,
+          title: target.title,
+          bridgeStatus: 'connected',
+        });
         if (url && url !== 'about:blank' && url !== this.lastUrl) {
           this.lastUrl = url;
+        }
+        if (target.title && target.title !== this.lastTitle) {
+          this.lastTitle = target.title;
         }
       } catch (error) {
         const message = errorMessage(error);
@@ -321,6 +499,14 @@ export class HermesBrowserBridgeSession {
           });
         }
         logger.debug('[HermesBrowserBridge] poll failed', error);
+        if (
+          classifyAutomationFailure({ message, toolName: 'browser_poll' }) ===
+            'browser_crashed' &&
+          !this.restarting &&
+          !store.getState().computerRuntime?.takeoverEnabled
+        ) {
+          await this.restartAfterDisconnect(message);
+        }
       }
     };
 
@@ -432,6 +618,111 @@ export class HermesBrowserBridgeSession {
       sourceName: title || page.url(),
     });
   }
+
+  private async publishRestoreSnapshot({
+    url,
+    title,
+    bridgeStatus,
+  }: {
+    url?: string;
+    title?: string;
+    bridgeStatus: BrowserBridgeHealth['bridgeStatus'];
+  }) {
+    const runId = TaskRunRegistry.getActiveRunId();
+    if (!runId) {
+      return;
+    }
+    const signature = `${url || ''}|${title || ''}|${bridgeStatus}`;
+    const now = Date.now();
+    if (
+      signature === this.lastSnapshotSignature &&
+      now - this.lastSnapshotAt < 5000
+    ) {
+      return;
+    }
+    this.lastSnapshotSignature = signature;
+    this.lastSnapshotAt = now;
+
+    const health = await checkLocalBrowserHealth({
+      executablePath: this.executable,
+      profilePath: this.userDataDir,
+      cdpUrl: this.cdpUrl,
+      bridgeStatus,
+    });
+    const snapshot: BrowserRestoreSnapshot = {
+      url: url || this.lastUrl || undefined,
+      title: title || this.lastTitle || undefined,
+      profilePath: this.userDataDir,
+      backend: this.backend,
+      cdpUrl: this.cdpUrl,
+      takeoverActive: Boolean(store.getState().computerRuntime?.takeoverEnabled),
+      bridgeStatus,
+      health,
+      capturedAt: now,
+    };
+    TaskRunRegistry.setBrowserRestoreSnapshot(runId, snapshot);
+  }
+
+  private async restartAfterDisconnect(reason: string) {
+    this.restarting = true;
+    await this.publishRestoreSnapshot({
+      url: this.lastUrl,
+      title: this.lastTitle,
+      bridgeStatus: 'restarting',
+    });
+    ComputerRuntimeController.update({
+      status: 'running',
+      activity: 'Restarting browser automation',
+      display: this.lastUrl || 'Reconnecting browser',
+    });
+
+    try {
+      void this.browser?.disconnect();
+      if (!this.child.killed) {
+        this.child.kill();
+      }
+      this.child = spawn(this.executable, this.launchArgs, {
+        detached: process.platform !== 'win32',
+        windowsHide: true,
+        stdio: 'ignore',
+      }) as ChildProcessWithoutNullStreams;
+      await waitForCdp(this.cdpUrl);
+      await this.connect();
+      if (this.lastUrl && this.page && this.lastUrl !== 'about:blank') {
+        await this.page.goto(this.lastUrl, {
+          waitUntil: 'domcontentloaded',
+          timeout: 20_000,
+        });
+      }
+      recordBrowserRecovery({
+        action: 'browser_restart',
+        message: `Restarted local browser bridge after disconnect: ${reason}`,
+        url: this.lastUrl,
+        status: 'done',
+      });
+      await this.publishRestoreSnapshot({
+        url: this.lastUrl,
+        title: this.lastTitle,
+        bridgeStatus: 'connected',
+      });
+    } catch (error) {
+      const message = errorMessage(error);
+      recordBrowserRecovery({
+        action: 'browser_restart',
+        message,
+        url: this.lastUrl,
+        status: 'failed',
+      });
+      await this.publishRestoreSnapshot({
+        url: this.lastUrl,
+        title: this.lastTitle,
+        bridgeStatus: 'failed',
+      });
+      logger.warn('[HermesBrowserBridge] automatic browser restart failed', error);
+    } finally {
+      this.restarting = false;
+    }
+  }
 }
 
 type BrowserTakeoverInput =
@@ -484,9 +775,11 @@ export const sendHermesBrowserTakeoverInput = async (
 
 export const startHermesBrowserBridge = async ({
   signal,
+  backend = 'local',
+  dedicated = false,
   onProgress,
 }: HermesBrowserBridgeInput = {}) => {
-  if (activeSession && !activeSession.isStopped) {
+  if (!dedicated && activeSession && !activeSession.isStopped) {
     if (idleShutdownTimer) {
       clearTimeout(idleShutdownTimer);
       idleShutdownTimer = null;
@@ -518,7 +811,9 @@ export const startHermesBrowserBridge = async ({
 
   const port = await getFreePort();
   const cdpUrl = `http://127.0.0.1:${port}`;
-  const userDataDir = await ensurePersistentBrowserProfile();
+  const userDataDir = dedicated
+    ? await createDedicatedBrowserProfile()
+    : await ensurePersistentBrowserProfile();
 
   const args = [
     `--remote-debugging-port=${port}`,
@@ -553,7 +848,15 @@ export const startHermesBrowserBridge = async ({
   let session: HermesBrowserBridgeSession;
   try {
     await waitForCdp(cdpUrl);
-    session = new HermesBrowserBridgeSession(cdpUrl, child, userDataDir, true);
+    session = new HermesBrowserBridgeSession(
+      cdpUrl,
+      child,
+      userDataDir,
+      executable,
+      args,
+      backend,
+      !dedicated,
+    );
     await session.connect();
   } catch (error) {
     const message = errorMessage(error);
@@ -572,19 +875,23 @@ export const startHermesBrowserBridge = async ({
     }
     throw error;
   }
-  activeSession = session;
-  session.startPolling();
-  ComputerRuntimeController.updateBrowserState({
-    surfaceId: 'neura-browser',
-    url: 'about:blank',
-    title: 'Browser',
-    canGoBack: false,
-    canGoForward: false,
-    updatedAt: Date.now(),
-  });
+  if (!dedicated) {
+    activeSession = session;
+    session.startPolling();
+    ComputerRuntimeController.updateBrowserState({
+      surfaceId: 'neura-browser',
+      url: 'about:blank',
+      title: 'Browser',
+      canGoBack: false,
+      canGoForward: false,
+      updatedAt: Date.now(),
+    });
+  }
   onProgress?.({
     title: 'Browser automation ready',
-    detail: `${path.basename(executable)} with persistent local session`,
+    detail: dedicated
+      ? `${path.basename(executable)} with dedicated worker session`
+      : `${path.basename(executable)} with persistent local session`,
     status: 'done',
   });
   logger.info('[HermesBrowserBridge] started', {
@@ -599,7 +906,11 @@ export const startHermesBrowserBridge = async ({
 export const releaseHermesBrowserBridge = (
   session: HermesBrowserBridgeSession | null | undefined,
 ) => {
-  if (!session || session.isStopped || session !== activeSession) {
+  if (!session || session.isStopped) {
+    return;
+  }
+  if (session !== activeSession) {
+    session.stop();
     return;
   }
   if (idleShutdownTimer) {

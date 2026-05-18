@@ -13,6 +13,22 @@ export const connectorsRoute = t.router({
   listConnectors: t.procedure.input<void>().handle(async () => {
     return ConnectorsService.getInstance().list();
   }),
+  listConnectorHealth: t.procedure.input<void>().handle(async () => {
+    return ConnectorsService.getInstance().getHealth();
+  }),
+  getConnectorAuditLog: t.procedure.input<void>().handle(async () => {
+    return ConnectorsService.getInstance().getAuditLog();
+  }),
+  testConnector: t.procedure
+    .input<{ connectorId: string }>()
+    .handle(async ({ input }) => {
+      return ConnectorsService.getInstance().testConnector(input.connectorId);
+    }),
+  refreshConnectorCredential: t.procedure
+    .input<{ connectorId: string }>()
+    .handle(async ({ input }) => {
+      return ConnectorsService.getInstance().refresh(input.connectorId);
+    }),
   connectConnector: t.procedure
     .input<{
       connectorId: string;

@@ -120,9 +120,10 @@ describe('TaskRunRegistry', () => {
     });
 
     TaskRunRegistry.addSource('run_source', {
-      url: 'https://example.com/report',
+      url: 'https://example.com/report#section',
       title: 'Report',
-      excerpt: 'A useful source excerpt.',
+      excerpt: 'Published: May 18, 2026. A useful source excerpt.',
+      claimIds: ['claim-1'],
     });
     TaskRunRegistry.addSource('run_source', {
       url: 'https://example.com/report',
@@ -138,10 +139,74 @@ describe('TaskRunRegistry', () => {
         url: 'https://example.com/report',
         title: 'Report',
         sourceName: 'Example',
+        visibleDate: 'May 18, 2026',
+        publishedAt: expect.any(Number),
+        claimIds: ['claim-1'],
         quality: expect.objectContaining({
           score: expect.any(Number),
           tier: expect.any(String),
         }),
+      }),
+    );
+  });
+
+  it('tracks Wide Research worker citations and retries failed workers independently', () => {
+    let persistedRuns: TaskRunRecord[] = [
+      {
+        ...buildRun('run_wide', 'running'),
+        runMode: 'wide_research',
+        wideResearchWorkers: [
+          {
+            id: 'worker-1',
+            subtask: 'Find official sources',
+            status: 'running',
+            sessionId: 'session-1',
+            attempts: 0,
+            sourceUrls: [],
+            claimIds: [],
+            updatedAt: 1,
+          },
+          {
+            id: 'worker-2',
+            subtask: 'Find analyst sources',
+            status: 'failed',
+            sessionId: 'session-2',
+            attempts: 1,
+            sourceUrls: [],
+            claimIds: [],
+            error: 'timeout',
+            completedAt: 2,
+            updatedAt: 2,
+          },
+        ],
+      },
+    ];
+    mocks.settingGet.mockImplementation(() => persistedRuns);
+    mocks.settingSet.mockImplementation((_key, value) => {
+      persistedRuns = value as TaskRunRecord[];
+    });
+
+    TaskRunRegistry.addSource('run_wide', {
+      url: 'https://www.sec.gov/report/',
+      title: 'Official report',
+      workerId: 'worker-1',
+      claimIds: ['claim-a'],
+    });
+    TaskRunRegistry.retryFailedWideResearchWorkers('run_wide');
+
+    expect(persistedRuns[0].wideResearchWorkers?.[0]).toEqual(
+      expect.objectContaining({
+        id: 'worker-1',
+        sourceUrls: ['https://www.sec.gov/report'],
+        claimIds: ['claim-a'],
+      }),
+    );
+    expect(persistedRuns[0].wideResearchWorkers?.[1]).toEqual(
+      expect.objectContaining({
+        id: 'worker-2',
+        status: 'pending',
+        attempts: 2,
+        error: undefined,
       }),
     );
   });
@@ -304,5 +369,70 @@ describe('TaskRunRegistry', () => {
     );
     expect(serialized).not.toContain('abc123');
     expect(serialized).toContain('[REDACTED]');
+  });
+
+  it('persists browser restore snapshots on the target run only', () => {
+    let persistedRuns: TaskRunRecord[] = [
+      buildRun('run_target', 'running'),
+      buildRun('run_other', 'completed'),
+    ];
+    mocks.settingGet.mockImplementation(() => persistedRuns);
+    mocks.settingSet.mockImplementation((_key, value) => {
+      persistedRuns = value as TaskRunRecord[];
+    });
+
+    TaskRunRegistry.setBrowserRestoreSnapshot('run_target', {
+      url: 'https://example.com/dashboard',
+      title: 'Dashboard',
+      profilePath: 'C:\\Users\\HP\\AppData\\Roaming\\Neura\\browser',
+      backend: 'local',
+      cdpUrl: 'http://127.0.0.1:9222',
+      takeoverActive: false,
+      bridgeStatus: 'connected',
+      capturedAt: 12,
+      health: {
+        executablePath:
+          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        executableExists: true,
+        port: 9222,
+        portReachable: true,
+        bridgeStatus: 'connected',
+        checkedAt: 12,
+        issues: [],
+        profile: {
+          profilePath: 'C:\\Users\\HP\\AppData\\Roaming\\Neura\\browser',
+          exists: true,
+          writable: true,
+          lockState: 'unlocked',
+          issues: [],
+        },
+      },
+    });
+
+    expect(persistedRuns[0]).toEqual(
+      expect.objectContaining({
+        runId: 'run_target',
+        browserRestoreSnapshot: expect.objectContaining({
+          url: 'https://example.com/dashboard',
+          title: 'Dashboard',
+          bridgeStatus: 'connected',
+        }),
+      }),
+    );
+    expect(persistedRuns[0].evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'run_target-browser-restore',
+          kind: 'browser_snapshot',
+          url: 'https://example.com/dashboard',
+        }),
+      ]),
+    );
+    expect(persistedRuns[1]).toEqual(
+      expect.objectContaining({
+        runId: 'run_other',
+      }),
+    );
+    expect(persistedRuns[1]).not.toHaveProperty('browserRestoreSnapshot');
   });
 });

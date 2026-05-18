@@ -45,6 +45,12 @@ export const DEFAULT_SETTING: LocalStore = {
   utioBaseUrl: '',
   taskRuns: [],
   backgroundTasks: [],
+  scheduledTasks: [],
+  localTaskApi: {
+    enabled: false,
+    port: 47837,
+  },
+  desktopProjects: [],
   neuraRoadmap: createStabilizedV1Roadmap(),
   connectors: [
     {
@@ -262,6 +268,21 @@ const normalizeSettingStore = (state: Partial<LocalStore>): LocalStore => {
   merged.taskRuns = Array.isArray(merged.taskRuns) ? merged.taskRuns : [];
   merged.backgroundTasks = Array.isArray(merged.backgroundTasks)
     ? merged.backgroundTasks
+    : [];
+  merged.scheduledTasks = Array.isArray(merged.scheduledTasks)
+    ? merged.scheduledTasks
+    : [];
+  merged.localTaskApi = {
+    enabled: Boolean(merged.localTaskApi?.enabled),
+    port:
+      typeof merged.localTaskApi?.port === 'number'
+        ? merged.localTaskApi.port
+        : 47837,
+    tokenHash: merged.localTaskApi?.tokenHash,
+    tokenCreatedAt: merged.localTaskApi?.tokenCreatedAt,
+  };
+  merged.desktopProjects = Array.isArray(merged.desktopProjects)
+    ? merged.desktopProjects
     : [];
   merged.neuraRoadmap = normalizeNeuraRoadmap(merged.neuraRoadmap);
   merged.connectors = normalizeConnectors(merged.connectors);

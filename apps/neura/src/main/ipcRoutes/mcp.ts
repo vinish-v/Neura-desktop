@@ -27,6 +27,9 @@ export const mcpRoute = t.router({
   getMcpStatus: t.procedure.input<void>().handle(async () => {
     return MCPService.getInstance().status();
   }),
+  getMcpDiagnostics: t.procedure.input<void>().handle(async () => {
+    return MCPService.getInstance().diagnostics();
+  }),
   runMcpAutonomousTask: t.procedure
     .input<{ goal: string }>()
     .handle(async ({ input }) => {

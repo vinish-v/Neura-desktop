@@ -1396,35 +1396,12 @@ async function synthesizeSpeech(inputs: ActionInputs) {
   return `Synthesized speech: ${outputPath}`;
 }
 
-async function analyzeVideo(inputs: ActionInputs) {
-  const extra = inputs as ExtendedActionInputs;
+async function analyzeVideo(inputs: ActionInputs): Promise<string> {
   requireMultimodalProvider('analyze_video');
   const sourcePath = resolveLocalPath(inputs.path);
-  const outputPath = resolveLocalPath(
-    inputs.output_path || `${sourcePath}.analysis.md`,
+  throw new Error(
+    `Video analysis provider credentials are configured, but Neura Desktop does not yet have a real video upload/analysis implementation for ${sourcePath}. Configure a supported video-capable provider adapter before retrying; Neura will not create a placeholder analysis artifact.`,
   );
-  const overwrite = asBool(inputs.overwrite);
-  await approveOverwrite('analyze_video_overwrite', outputPath, overwrite);
-  await assertSafeWritePath(outputPath, overwrite, 'output_path');
-  await fs.writeFile(
-    outputPath,
-    [
-      '# Video Analysis',
-      '',
-      `Source: ${sourcePath}`,
-      `Prompt: ${extra.prompt || 'Summarize video content'}`,
-      '',
-      'Provider credentials are configured. Video upload analysis is not implemented in this desktop build yet.',
-    ].join('\n'),
-    'utf8',
-  );
-  addActiveArtifact({
-    title: path.basename(outputPath),
-    kind: 'document',
-    filePath: outputPath,
-    mimeType: 'text/markdown',
-  });
-  return `Created video analysis request artifact: ${outputPath}`;
 }
 
 async function checkMultimodalReadiness() {
@@ -1698,7 +1675,10 @@ async function connectorDriveExport(inputs: ActionInputs) {
   if (!approved) {
     throw new Error('Google Drive export was denied by the user.');
   }
-  return `Prepared Google Drive-compatible export placeholder for ${sourcePath}. Full OAuth upload is planned for the connector marketplace phase.`;
+  throw new Error(
+    `Google Drive export is enabled but no real OAuth upload implementation is configured for ${sourcePath}. Connect a supported Drive connector before retrying; Neura will not create a fake export.`,
+  );
+  return '';
 }
 
 async function connectorMcpCall(inputs: ActionInputs) {

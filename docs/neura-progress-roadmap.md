@@ -76,6 +76,21 @@ Evidence values: `test`, `typecheck`, `build`, `manual`, `commit`, `tag`.
 | P7.6 | Deep claim-level validation               | Done        | Research claims are mapped to citation records, strong claims require independent support, and gaps become needs-verification |
 | P7.7 | Honest evidence status                    | Done        | Runs expose verified, needs-verification, or blocked status from recorded sources, artifacts, browser, command, and connector evidence |
 | P7.8 | Recovery evidence layer                   | Done        | Browser/computer failures are classified with next-action recovery evidence shown in the run trace |
+| P7.9 | Browser restore and health snapshots      | Done        | Runs persist last URL/title/backend/profile/CDP health and restart local CDP when disconnected outside takeover |
+| P7.10 | Artifact format validation               | Done        | DOCX/PPTX/XLSX/PDF/image/website/archive artifacts must exist, be non-empty, and pass expected format checks before proof |
+| P7.11 | Honest connector setup gaps              | Done        | Connector writes require approval and unavailable Drive upload reports a real setup gap instead of fake success |
+| P7.12 | Wide Research worker records             | Done        | Wide Research runs persist worker records, source attribution, visible citation dates, claim IDs, and failed-worker retry state |
+| P7.13 | Scheduled task management                | Done        | Recurring tasks can be created, edited, paused, deleted, run now, and audited through persisted history |
+| P7.14 | Desktop Projects                         | Done        | Projects persist master instructions, knowledge-file metadata, pin state, project runs, and project memory |
+| P7.15 | Connector diagnostics and approval proof | Done        | Connector tests do not write externally, writes require approval proof, audit logs are visible, and MCP discovery reports real tool status |
+| P7.16 | Office artifact previews                 | Done        | DOCX/PPTX/XLSX/ZIP previews extract real readable text or entry summaries without placeholder thumbnails |
+| P7.17 | Local deep-link task intake              | Done        | `neura://task?goal=...` and `neura://run?goal=...` queue real background Hermes tasks and reject empty links |
+| P7.18 | Local task API                           | Done        | Localhost-only bearer-token API queues real background Hermes tasks, exposes task/run status, and has Desktop controls without storing plaintext tokens |
+| P7.19 | Wide Research worker preflight          | Done        | Each Wide Research worker now runs an independent Hermes/browser-grounded preflight with a dedicated local browser profile before final synthesis |
+| P7.20 | Honest media capability gaps            | Done        | Video analysis no longer creates placeholder artifacts when no real video upload adapter exists; it reports the missing real adapter instead |
+| P7.21 | Connector lifecycle audit               | Done        | Connector connect, settings update, OAuth start/complete, and local revoke actions now write audit-log entries, not only connector tool calls |
+| P7.22 | Local API token integrity               | Done        | Local task API refuses to listen when settings lack a usable token hash and surfaces a regenerate-token setup gap instead of inventing an unknowable token |
+| P7.23 | Local API port recovery                 | Done        | Local task API reports an unavailable port as a setup gap instead of throwing through Desktop startup |
 
 ## Phase Checkpoint
 
@@ -86,3 +101,14 @@ Before any phase is marked done:
 - Run `npm run build`.
 - Commit with a clear phase label.
 - Tag stable milestones such as `v1-stable`, `v1-research-upgrade`, or `v1-orchestrator-alpha`.
+
+Latest local proof:
+
+- `npm.cmd --prefix apps/neura run test -- --run src/shared/browserAutomationRecovery.test.ts src/main/services/hermesBrowserBridge.test.ts src/main/services/taskRunRegistry.test.ts src/main/services/artifactValidation.test.ts src/main/services/nativeComputerTools.test.ts` passed.
+- `npm.cmd --prefix apps/neura run test -- --run src/main/services/scheduled-task-service.test.ts src/main/services/desktop-projects-service.test.ts` passed.
+- `npm.cmd --prefix apps/neura run test -- --run src/main/services/connectors-service.test.ts src/main/services/mcp-service.test.ts` passed.
+- `npm.cmd --prefix apps/neura run test -- --run src/main/ipcRoutes/window.test.ts` passed.
+- `npm.cmd --prefix apps/neura run test -- --run src/main/services/deep-link-task-service.test.ts` passed.
+- `npm.cmd --prefix apps/neura run test -- --run src/main/services/local-task-api-service.test.ts` passed.
+- `npm.cmd --prefix apps/neura run typecheck:node` passed.
+- `npm.cmd --prefix apps/neura run typecheck:web` passed.

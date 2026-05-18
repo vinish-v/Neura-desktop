@@ -67,7 +67,81 @@ const TaskSourceRecordSchema = z.object({
   url: z.string(),
   title: z.string().optional(),
   sourceName: z.string().optional(),
+  visibleDate: z.string().optional(),
+  publishedAt: z.number().optional(),
   excerpt: z.string().optional(),
+  claimIds: z.array(z.string()).optional(),
+  workerId: z.string().optional(),
+  quality: z
+    .object({
+      score: z.number(),
+      tier: z.enum(['high', 'medium', 'low']),
+      reasons: z.array(z.string()),
+      domain: z.string().optional(),
+    })
+    .optional(),
+  validationNotes: z.array(z.string()).optional(),
+  capturedAt: z.number(),
+});
+
+const WideResearchWorkerSchema = z.object({
+  id: z.string(),
+  subtask: z.string(),
+  status: z.enum(['pending', 'running', 'completed', 'failed']),
+  sessionId: z.string(),
+  attempts: z.number(),
+  sourceUrls: z.array(z.string()),
+  claimIds: z.array(z.string()),
+  error: z.string().optional(),
+  startedAt: z.number().optional(),
+  completedAt: z.number().optional(),
+  updatedAt: z.number(),
+});
+
+const BrowserProfileHealthSchema = z.object({
+  profilePath: z.string().optional(),
+  exists: z.boolean(),
+  writable: z.boolean(),
+  lockState: z.enum(['unlocked', 'locked', 'unknown']),
+  issues: z.array(z.string()),
+});
+
+const BrowserBridgeHealthSchema = z.object({
+  executablePath: z.string().optional(),
+  executableExists: z.boolean(),
+  port: z.number().optional(),
+  portReachable: z.boolean(),
+  bridgeStatus: z.enum([
+    'not_started',
+    'starting',
+    'connected',
+    'disconnected',
+    'restarting',
+    'failed',
+  ]),
+  profile: BrowserProfileHealthSchema,
+  checkedAt: z.number(),
+  issues: z.array(z.string()),
+});
+
+const BrowserRestoreSnapshotSchema = z.object({
+  url: z.string().optional(),
+  title: z.string().optional(),
+  profilePath: z.string().optional(),
+  backend: z
+    .enum(['local', 'browser-use', 'browserbase', 'camofox', 'firecrawl'])
+    .optional(),
+  cdpUrl: z.string().optional(),
+  takeoverActive: z.boolean(),
+  bridgeStatus: z.enum([
+    'not_started',
+    'starting',
+    'connected',
+    'disconnected',
+    'restarting',
+    'failed',
+  ]),
+  health: BrowserBridgeHealthSchema,
   capturedAt: z.number(),
 });
 
@@ -96,6 +170,56 @@ const BackgroundTaskSchema = z.object({
   createdAt: z.number(),
   startedAt: z.number().optional(),
   completedAt: z.number().optional(),
+});
+
+const ScheduledTaskHistorySchema = z.object({
+  id: z.string(),
+  runId: z.string().optional(),
+  status: z.enum(['queued', 'completed', 'failed']),
+  message: z.string().optional(),
+  queuedAt: z.number(),
+});
+
+const ScheduledTaskSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  goal: z.string(),
+  kind: z.enum(['mcp_autonomous', 'skill', 'multi_agent']),
+  intervalMinutes: z.number().min(1),
+  status: z.enum(['active', 'paused']),
+  nextRunAt: z.number(),
+  lastRunAt: z.number().optional(),
+  history: z.array(ScheduledTaskHistorySchema),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+
+const LocalTaskApiSchema = z.object({
+  enabled: z.boolean(),
+  port: z.number().int().min(1024).max(65535),
+  tokenHash: z.string().optional(),
+  tokenCreatedAt: z.number().optional(),
+});
+
+const DesktopProjectKnowledgeFileSchema = z.object({
+  id: z.string(),
+  path: z.string(),
+  name: z.string(),
+  sizeBytes: z.number(),
+  updatedAt: z.number(),
+  addedAt: z.number(),
+});
+
+const DesktopProjectSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  masterInstruction: z.string(),
+  pinned: z.boolean(),
+  knowledgeFiles: z.array(DesktopProjectKnowledgeFileSchema),
+  runIds: z.array(z.string()),
+  memory: z.array(z.string()),
+  createdAt: z.number(),
+  updatedAt: z.number(),
 });
 
 const ApprovalEventSchema = z.object({
@@ -203,12 +327,15 @@ const TaskRunSchema = z.object({
     .enum(['planner', 'researcher', 'executor', 'critic'])
     .optional(),
   backgroundTaskId: z.string().optional(),
+  projectId: z.string().optional(),
   retryOfRunId: z.string().optional(),
   retryCount: z.number().optional(),
   workspacePath: z.string().optional(),
   memoryFilePath: z.string().optional(),
   memorySummary: z.string().optional(),
   retrievedRunIds: z.array(z.string()).optional(),
+  browserRestoreSnapshot: BrowserRestoreSnapshotSchema.optional(),
+  wideResearchWorkers: z.array(WideResearchWorkerSchema).optional(),
   checkpoints: z
     .array(
       z.object({
@@ -231,6 +358,7 @@ const TaskRunSchema = z.object({
     .optional(),
   progressItems: z.array(TaskProgressItemSchema).optional(),
   currentStep: z.string().optional(),
+  nextAction: z.string().optional(),
   factsFound: z.array(z.string()).optional(),
   sourcesVisited: z.array(z.string()).optional(),
   sourceRecords: z.array(TaskSourceRecordSchema).optional(),
@@ -238,6 +366,8 @@ const TaskRunSchema = z.object({
   artifacts: z.array(TaskArtifactSchema).optional(),
   artifactManifestPath: z.string().optional(),
   approvalEvents: z.array(ApprovalEventSchema).optional(),
+  evidence: z.array(z.unknown()).optional(),
+  evidenceValidation: z.unknown().optional(),
   completionProof: CompletionProofSchema.optional(),
   roadmapProgress: RoadmapProgressSchema.optional(),
   finalAnswer: z.string().optional(),
@@ -268,6 +398,9 @@ const ConnectorAuditEventSchema = z.object({
   toolName: z.string(),
   permission: z.enum(['read', 'write', 'admin']),
   status: z.enum(['completed', 'failed']),
+  approvalStatus: z
+    .enum(['not_required', 'approved', 'denied', 'missing_run'])
+    .optional(),
   error: z.string().optional(),
   createdAt: z.number(),
 });
@@ -340,6 +473,9 @@ export const PresetSchema = z.object({
   monitors: z.array(WebMonitorSchema).optional(),
   taskRuns: z.array(TaskRunSchema).optional(),
   backgroundTasks: z.array(BackgroundTaskSchema).optional(),
+  scheduledTasks: z.array(ScheduledTaskSchema).optional(),
+  localTaskApi: LocalTaskApiSchema.optional(),
+  desktopProjects: z.array(DesktopProjectSchema).optional(),
   neuraRoadmap: RoadmapProgressSchema.optional(),
   connectors: z.array(ConnectorSchema).optional(),
   connectorAuditLog: z.array(ConnectorAuditEventSchema).optional(),

@@ -355,15 +355,38 @@ export const agentRoute = t.router({
     });
     ComputerRuntimeController.update({ status: 'paused', activity: 'Paused' });
   }),
-  resumeRun: t.procedure.input<void>().handle(async () => {
-    store.setState({
-      thinking: false,
-    });
-    ComputerRuntimeController.update({
-      status: 'running',
-      activity: 'Resumed',
-    });
-  }),
+  resumeRun: t.procedure
+    .input<{ runId?: string } | void>()
+    .handle(async ({ input }) => {
+      const targetRunId =
+        (input as { runId?: string } | undefined)?.runId ||
+        store.getState().taskState?.runId;
+      if (!targetRunId) {
+        store.setState({
+          thinking: false,
+        });
+        ComputerRuntimeController.update({
+          status: 'running',
+          activity: 'Resumed',
+        });
+        return null;
+      }
+      const abortController = new AbortController();
+      store.setState({
+        abortController,
+        thinking: true,
+        errorMsg: null,
+      });
+      const run = await TaskManager.getInstance().resumeRun(
+        targetRunId,
+        abortController.signal,
+      );
+      store.setState({
+        thinking: false,
+        taskState: run || store.getState().taskState,
+      });
+      return run;
+    }),
   retryRun: t.procedure
     .input<{ runId: string }>()
     .handle(async ({ input }) => {
@@ -375,6 +398,26 @@ export const agentRoute = t.router({
       });
       const run = await TaskManager.getInstance().retryRun(
         input.runId,
+        abortController.signal,
+      );
+      store.setState({
+        thinking: false,
+        taskState: run || store.getState().taskState,
+      });
+      return run;
+    }),
+  retryWideResearchWorker: t.procedure
+    .input<{ runId: string; workerId: string }>()
+    .handle(async ({ input }) => {
+      const abortController = new AbortController();
+      store.setState({
+        abortController,
+        thinking: true,
+        errorMsg: null,
+      });
+      const run = await TaskManager.getInstance().retryWideResearchWorker(
+        input.runId,
+        input.workerId,
         abortController.signal,
       );
       store.setState({

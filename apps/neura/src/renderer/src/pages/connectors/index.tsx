@@ -10,10 +10,14 @@ import {
   Lock,
   Plug,
   RefreshCw,
+  Stethoscope,
   ShieldCheck,
   Unplug,
 } from 'lucide-react';
 import type { ConnectorSummary } from '@agent-infra/shared';
+import type { ConnectorHealthRecord } from '@main/services/connectors-service';
+import type { McpDiscoveryDiagnostic } from '@main/services/mcp-service';
+import type { ConnectorAuditEvent } from '@main/store/types';
 
 import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
@@ -86,10 +90,16 @@ const BrandIcon = ({ connectorId }: { connectorId: string }) => {
 
 const ConnectorCard = ({
   connector,
+  health,
   onRefresh,
+  onTest,
+  onRefreshCredential,
 }: {
   connector: ConnectorSummary;
+  health?: ConnectorHealthRecord;
   onRefresh: () => Promise<void>;
+  onTest: (connectorId: string) => Promise<void>;
+  onRefreshCredential: (connectorId: string) => Promise<void>;
 }) => {
   const [draft, setDraft] = useState<Draft>({});
   const [busy, setBusy] = useState(false);
@@ -274,6 +284,30 @@ const ConnectorCard = ({
           <div className="mt-4 text-xs text-[#f6f1e8]/38">
             Tools: {connector.tools.map((tool) => tool.name).join(', ')}
           </div>
+          {health ? (
+            <div className="mt-3 rounded-2xl border border-[#f6f1e8]/[0.08] bg-black/20 p-3 text-xs text-[#f6f1e8]/48">
+              <div className="flex flex-wrap gap-2">
+                <span>{health.credentialPresent ? 'Credential stored' : 'No credential'}</span>
+                <span>/</span>
+                <span>
+                  {health.writeToolsRequireApproval
+                    ? 'Writes require approval'
+                    : 'Read-only tools'}
+                </span>
+                {health.credentialExpiresAt ? (
+                  <>
+                    <span>/</span>
+                    <span>
+                      Expires {new Date(health.credentialExpiresAt).toLocaleString()}
+                    </span>
+                  </>
+                ) : null}
+              </div>
+              {health.setupGap ? (
+                <div className="mt-2 text-red-100/78">{health.setupGap}</div>
+              ) : null}
+            </div>
+          ) : null}
 
           <form onSubmit={saveCredential} className="mt-4 grid gap-3">
             {connector.id === 'gmail' && (
@@ -449,7 +483,27 @@ const ConnectorCard = ({
             )}
 
             {connector.authType !== 'oauth2' && (
-              <div className="flex justify-end">
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  className="rounded-full border-[#f6f1e8]/[0.12] bg-transparent text-[#f6f1e8]/70"
+                  onClick={() => onTest(connector.id)}
+                >
+                  <Stethoscope className="h-4 w-4" />
+                  Test
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  className="rounded-full border-[#f6f1e8]/[0.12] bg-transparent text-[#f6f1e8]/70"
+                  onClick={() => onRefreshCredential(connector.id)}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Refresh auth
+                </Button>
                 <Button
                   type="submit"
                   disabled={busy}
@@ -457,6 +511,30 @@ const ConnectorCard = ({
                 >
                   <KeyRound className="h-4 w-4" />
                   Save Securely
+                </Button>
+              </div>
+            )}
+            {connector.authType === 'oauth2' && (
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  className="rounded-full border-[#f6f1e8]/[0.12] bg-transparent text-[#f6f1e8]/70"
+                  onClick={() => onTest(connector.id)}
+                >
+                  <Stethoscope className="h-4 w-4" />
+                  Test
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  className="rounded-full border-[#f6f1e8]/[0.12] bg-transparent text-[#f6f1e8]/70"
+                  onClick={() => onRefreshCredential(connector.id)}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Refresh auth
                 </Button>
               </div>
             )}
@@ -469,10 +547,26 @@ const ConnectorCard = ({
 
 export default function Connectors() {
   const [connectors, setConnectors] = useState<ConnectorSummary[]>([]);
+  const [health, setHealth] = useState<ConnectorHealthRecord[]>([]);
+  const [auditLog, setAuditLog] = useState<ConnectorAuditEvent[]>([]);
+  const [mcpDiagnostics, setMcpDiagnostics] = useState<McpDiscoveryDiagnostic[]>(
+    [],
+  );
+  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    setConnectors(await api.listConnectors());
+    const [nextConnectors, nextHealth, nextAuditLog, nextMcpDiagnostics] =
+      await Promise.all([
+        api.listConnectors(),
+        api.listConnectorHealth(),
+        api.getConnectorAuditLog(),
+        api.getMcpDiagnostics(),
+      ]);
+    setConnectors(nextConnectors);
+    setHealth(nextHealth);
+    setAuditLog(nextAuditLog);
+    setMcpDiagnostics(nextMcpDiagnostics);
     setLoading(false);
   }, []);
 
@@ -484,6 +578,32 @@ export default function Connectors() {
     (connector) =>
       !connector.configured && ['gmail', 'notion'].includes(connector.id),
   );
+  const healthByConnector = useMemo(
+    () => new Map(health.map((item) => [item.connectorId, item])),
+    [health],
+  );
+
+  const runTest = async (connectorId: string) => {
+    try {
+      const result = await api.testConnector({ connectorId });
+      setNotice(result.message);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      await refresh();
+    }
+  };
+
+  const refreshCredential = async (connectorId: string) => {
+    try {
+      const result = await api.refreshConnectorCredential({ connectorId });
+      setNotice(result.message);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      await refresh();
+    }
+  };
 
   return (
     <div className="neura-home-page h-full overflow-y-auto px-5 py-8 md:px-8">
@@ -534,6 +654,11 @@ export default function Connectors() {
             </div>
           )}
         </section>
+        {notice ? (
+          <section className="mb-5 rounded-[24px] border border-[#f6f1e8]/[0.1] bg-[#11100e]/82 p-4 text-sm text-[#f6f1e8]/64">
+            {notice}
+          </section>
+        ) : null}
 
         <div className="grid gap-4 pb-8">
           {loading ? (
@@ -545,11 +670,72 @@ export default function Connectors() {
               <ConnectorCard
                 key={connector.id}
                 connector={connector}
+                health={healthByConnector.get(connector.id)}
                 onRefresh={refresh}
+                onTest={runTest}
+                onRefreshCredential={refreshCredential}
               />
             ))
           )}
         </div>
+        <section className="grid gap-4 pb-8 lg:grid-cols-2">
+          <div className="rounded-[30px] border border-[#f6f1e8]/[0.1] bg-[#11100e]/82 p-5">
+            <h2 className="text-[17px] font-semibold text-[#f6f1e8]">
+              MCP Discovery Diagnostics
+            </h2>
+            <div className="mt-4 grid gap-2">
+              {mcpDiagnostics.map((item) => (
+                <div
+                  key={item.serverName}
+                  className="rounded-2xl border border-[#f6f1e8]/[0.08] bg-black/20 p-3 text-xs text-[#f6f1e8]/48"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-semibold text-[#f6f1e8]/72">
+                      {item.serverName}
+                    </span>
+                    <span>{item.status} / {item.toolCount} tools</span>
+                  </div>
+                  {item.issue ? (
+                    <div className="mt-2 text-red-100/72">{item.issue}</div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-[30px] border border-[#f6f1e8]/[0.1] bg-[#11100e]/82 p-5">
+            <h2 className="text-[17px] font-semibold text-[#f6f1e8]">
+              Connector Audit Log
+            </h2>
+            <div className="mt-4 grid max-h-[360px] gap-2 overflow-y-auto">
+              {auditLog.length ? (
+                auditLog.slice(0, 20).map((event) => (
+                  <div
+                    key={event.id}
+                    className="rounded-2xl border border-[#f6f1e8]/[0.08] bg-black/20 p-3 text-xs text-[#f6f1e8]/48"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold text-[#f6f1e8]/72">
+                        {event.connectorId} / {event.toolName}
+                      </span>
+                      <span>{event.status}</span>
+                    </div>
+                    <div className="mt-1">
+                      {event.permission} / {event.approvalStatus || 'not_recorded'} /{' '}
+                      {new Date(event.createdAt).toLocaleString()}
+                    </div>
+                    {event.error ? (
+                      <div className="mt-2 text-red-100/72">{event.error}</div>
+                    ) : null}
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-[#f6f1e8]/42">
+                  No connector actions recorded yet.
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   );

@@ -5,7 +5,9 @@
 import { initIpc } from '@neura-desktop/electron-ipc/main';
 
 import { BackgroundTaskService } from '@main/services/background-task-service';
+import { ScheduledTaskService } from '@main/services/scheduled-task-service';
 import { TaskManager } from '@main/services/task-manager';
+import type { BackgroundTaskKind } from '@main/store/types';
 
 const t = initIpc.create();
 
@@ -37,5 +39,51 @@ export const tasksRoute = t.router({
     .input<{ id: string }>()
     .handle(async ({ input }) => {
       return BackgroundTaskService.getInstance().retry(input.id);
+    }),
+  listScheduledTasks: t.procedure.input<void>().handle(async () => {
+    return ScheduledTaskService.getInstance().list();
+  }),
+  createScheduledTask: t.procedure
+    .input<{
+      name: string;
+      goal: string;
+      kind?: BackgroundTaskKind;
+      intervalMinutes: number;
+    }>()
+    .handle(async ({ input }) => {
+      return ScheduledTaskService.getInstance().create(input);
+    }),
+  updateScheduledTask: t.procedure
+    .input<{
+      id: string;
+      name?: string;
+      goal?: string;
+      kind?: BackgroundTaskKind;
+      intervalMinutes?: number;
+      status?: 'active' | 'paused';
+    }>()
+    .handle(async ({ input }) => {
+      const { id, ...patch } = input;
+      return ScheduledTaskService.getInstance().update(id, patch);
+    }),
+  pauseScheduledTask: t.procedure
+    .input<{ id: string }>()
+    .handle(async ({ input }) => {
+      return ScheduledTaskService.getInstance().pause(input.id);
+    }),
+  resumeScheduledTask: t.procedure
+    .input<{ id: string }>()
+    .handle(async ({ input }) => {
+      return ScheduledTaskService.getInstance().resume(input.id);
+    }),
+  deleteScheduledTask: t.procedure
+    .input<{ id: string }>()
+    .handle(async ({ input }) => {
+      return ScheduledTaskService.getInstance().delete(input.id);
+    }),
+  runScheduledTaskNow: t.procedure
+    .input<{ id: string }>()
+    .handle(async ({ input }) => {
+      return ScheduledTaskService.getInstance().runNow(input.id);
     }),
 });

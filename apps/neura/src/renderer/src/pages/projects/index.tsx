@@ -2,6 +2,7 @@
  * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
   Clock,
@@ -9,15 +10,21 @@ import {
   ExternalLink,
   FileText,
   FolderOpen,
+  Pin,
   Play,
+  Plus,
   ShieldCheck,
+  Trash2,
   XCircle,
 } from 'lucide-react';
 
 import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
+import { Input } from '@renderer/components/ui/input';
+import { Textarea } from '@renderer/components/ui/textarea';
 import { useSetting } from '@renderer/hooks/useSetting';
 import {
+  DesktopProjectRecord,
   RoadmapProgress,
   RoadmapTaskStatus,
   TaskRunRecord,
@@ -303,10 +310,101 @@ const RunCard = ({ run }: { run: TaskRunRecord }) => {
 
 export default function Projects() {
   const { settings } = useSetting();
+  const [projects, setProjects] = useState<DesktopProjectRecord[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  const [projectName, setProjectName] = useState('');
+  const [masterInstruction, setMasterInstruction] = useState('');
+  const [knowledgePath, setKnowledgePath] = useState('');
+  const [projectGoal, setProjectGoal] = useState('');
+  const [busy, setBusy] = useState(false);
   const roadmap = settings.neuraRoadmap as RoadmapProgress | undefined;
   const runs = ([...(settings.taskRuns || [])] as TaskRunRecord[]).sort(
     (a, b) => b.startedAt - a.startedAt,
   );
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === selectedProjectId),
+    [projects, selectedProjectId],
+  );
+  const selectedProjectRuns = selectedProject
+    ? runs.filter((run) => selectedProject.runIds.includes(run.runId))
+    : [];
+
+  const refreshProjects = useCallback(async () => {
+    const nextProjects = await api.listDesktopProjects();
+    setProjects(nextProjects);
+    setSelectedProjectId((current) => current || nextProjects[0]?.id || '');
+  }, []);
+
+  useEffect(() => {
+    void refreshProjects();
+  }, [refreshProjects]);
+
+  useEffect(() => {
+    if (selectedProject) {
+      setMasterInstruction(selectedProject.masterInstruction);
+    }
+  }, [selectedProject]);
+
+  const createProject = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = projectName.trim();
+    if (!name || busy) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const project = await api.createDesktopProject({
+        name,
+        masterInstruction,
+      });
+      setProjectName('');
+      setMasterInstruction('');
+      await refreshProjects();
+      setSelectedProjectId(project.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const updateSelectedInstruction = async () => {
+    if (!selectedProject) {
+      return;
+    }
+    await api.updateDesktopProject({
+      id: selectedProject.id,
+      masterInstruction,
+    });
+    await refreshProjects();
+  };
+
+  const selectProject = (project: DesktopProjectRecord) => {
+    setSelectedProjectId(project.id);
+    setMasterInstruction(project.masterInstruction);
+  };
+
+  const addKnowledgeFile = async () => {
+    if (!selectedProject || !knowledgePath.trim()) {
+      return;
+    }
+    await api.addDesktopProjectKnowledgeFile({
+      id: selectedProject.id,
+      path: knowledgePath.trim(),
+    });
+    setKnowledgePath('');
+    await refreshProjects();
+  };
+
+  const runProjectTask = async () => {
+    if (!selectedProject || !projectGoal.trim()) {
+      return;
+    }
+    await api.runDesktopProjectTask({
+      id: selectedProject.id,
+      goal: projectGoal.trim(),
+    });
+    setProjectGoal('');
+    await refreshProjects();
+  };
 
   return (
     <div className="h-full overflow-y-auto px-8 py-8">
@@ -317,6 +415,190 @@ export default function Projects() {
             Run history, artifacts, sources, and approval trail.
           </p>
         </div>
+        <section className="mb-6 grid gap-4 lg:grid-cols-[330px_minmax(0,1fr)]">
+          <div className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
+            <form onSubmit={createProject} className="grid gap-3">
+              <Input
+                value={projectName}
+                onChange={(event) => setProjectName(event.target.value)}
+                placeholder="Project name"
+                className="border-white/10 bg-black/20 text-white"
+              />
+              <Textarea
+                value={masterInstruction}
+                onChange={(event) => setMasterInstruction(event.target.value)}
+                placeholder="Master instruction"
+                className="min-h-[96px] border-white/10 bg-black/20 text-white"
+              />
+              <Button
+                type="submit"
+                disabled={busy || !projectName.trim()}
+                className="justify-center"
+              >
+                <Plus className="h-4 w-4" />
+                Create project
+              </Button>
+            </form>
+            <div className="mt-4 grid gap-2">
+              {projects.map((project) => (
+                <button
+                  key={project.id}
+                  type="button"
+                  onClick={() => selectProject(project)}
+                  className={`rounded-md border p-3 text-left ${
+                    project.id === selectedProjectId
+                      ? 'border-teal-300/30 bg-teal-300/10'
+                      : 'border-white/10 bg-black/20'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-semibold text-white">
+                      {project.name}
+                    </span>
+                    {project.pinned ? (
+                      <Pin className="h-3.5 w-3.5 text-teal-200" />
+                    ) : null}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {project.knowledgeFiles.length} files /{' '}
+                    {project.runIds.length} runs
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
+            {selectedProject ? (
+              <div className="grid gap-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold text-white">
+                      {selectedProject.name}
+                    </h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Project-scoped memory, knowledge, and Hermes runs.
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        api
+                          .updateDesktopProject({
+                            id: selectedProject.id,
+                            pinned: !selectedProject.pinned,
+                          })
+                          .then(refreshProjects)
+                      }
+                    >
+                      <Pin className="h-3.5 w-3.5" />
+                      {selectedProject.pinned ? 'Unpin' : 'Pin'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        api
+                          .deleteDesktopProject({ id: selectedProject.id })
+                          .then(refreshProjects)
+                      }
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+                <Textarea
+                  value={masterInstruction}
+                  onChange={(event) => setMasterInstruction(event.target.value)}
+                  className="min-h-[110px] border-white/10 bg-black/20 text-white"
+                  placeholder="Master instruction"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-fit"
+                  onClick={updateSelectedInstruction}
+                >
+                  Save instruction
+                </Button>
+                <div className="grid gap-2">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    Knowledge files
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      value={knowledgePath}
+                      onChange={(event) => setKnowledgePath(event.target.value)}
+                      placeholder="Absolute file path"
+                      className="border-white/10 bg-black/20 text-white"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={addKnowledgeFile}
+                    >
+                      Add
+                    </Button>
+                  </div>
+                  {selectedProject.knowledgeFiles.map((file) => (
+                    <div
+                      key={file.id}
+                      className="flex items-center justify-between gap-2 rounded-md border border-white/10 bg-black/20 p-2 text-xs"
+                    >
+                      <span className="truncate text-muted-foreground">
+                        {file.name} - {file.path}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2"
+                        onClick={() =>
+                          api
+                            .removeDesktopProjectKnowledgeFile({
+                              id: selectedProject.id,
+                              fileId: file.id,
+                            })
+                            .then(refreshProjects)
+                        }
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid gap-2">
+                  <Textarea
+                    value={projectGoal}
+                    onChange={(event) => setProjectGoal(event.target.value)}
+                    placeholder="Run a task in this project..."
+                    className="min-h-[90px] border-white/10 bg-black/20 text-white"
+                  />
+                  <Button
+                    type="button"
+                    className="w-fit"
+                    disabled={!projectGoal.trim()}
+                    onClick={runProjectTask}
+                  >
+                    <Play className="h-4 w-4" />
+                    Run in project
+                  </Button>
+                </div>
+                {selectedProjectRuns.length ? (
+                  <div className="text-xs text-muted-foreground">
+                    {selectedProjectRuns.length} project run(s) recorded.
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-white/10 bg-black/20 p-8 text-center text-sm text-muted-foreground">
+                Create a project to pin instructions and knowledge files.
+              </div>
+            )}
+          </div>
+        </section>
         <RoadmapPanel roadmap={roadmap} />
         <div className="space-y-3">
           {runs.length ? (

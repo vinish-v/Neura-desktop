@@ -417,21 +417,3 @@ export async function createWebsiteZipArtifact(
     mimeType: 'application/zip',
   });
 }
-
-export async function createPlaceholderImageArtifact(
-  runId: string,
-  title: string,
-  prompt: string,
-) {
-  const dir = await ensureRunArtifactDir(runId);
-  const filePath = path.join(dir, `${slugify(title)}.svg`);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><rect width="1200" height="800" fill="#0f172a"/><rect x="80" y="80" width="1040" height="640" rx="32" fill="#f8fafc"/><text x="120" y="180" font-family="Arial" font-size="44" font-weight="700" fill="#0f172a">${title.replace(/&/g, '&amp;')}</text><foreignObject x="120" y="240" width="960" height="360"><div xmlns="http://www.w3.org/1999/xhtml" style="font-family:Arial;font-size:28px;line-height:1.4;color:#334155">${prompt.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div></foreignObject><text x="120" y="660" font-family="Arial" font-size="20" fill="#2563eb">Provider-backed generation can replace this placeholder when configured.</text></svg>`;
-  await fs.writeFile(filePath, svg, 'utf8');
-  return artifact({
-    title,
-    kind: 'image',
-    filePath,
-    mimeType: 'image/svg+xml',
-    previewPath: filePath,
-  });
-}

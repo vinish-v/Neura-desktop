@@ -106,6 +106,28 @@ describe('native GitHub connector tools', () => {
       }),
     );
   });
+
+  it('does not fake Google Drive exports when no real uploader is configured', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neura-drive-test-'));
+    const sourcePath = path.join(tempDir, 'report.md');
+    await fs.writeFile(sourcePath, '# Report', 'utf8');
+    mocks.settingGet.mockReturnValue([
+      {
+        id: 'google_drive_export',
+        enabled: true,
+      },
+    ]);
+    mocks.requestUserApproval.mockResolvedValue(true);
+
+    const result = await executeNativeComputerTool('connector_drive_export', {
+      path: sourcePath,
+    } as never);
+
+    expect(result.status).toBe(StatusEnum.ERROR);
+    expect(result.message).toContain('no real OAuth upload implementation');
+    expect(result.message).toContain('will not create a fake export');
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
 });
 
 describe('native multimodal provider readiness tools', () => {
@@ -156,6 +178,36 @@ describe('native multimodal provider readiness tools', () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.requestUserApproval).not.toHaveBeenCalled();
+  });
+
+  it('does not create placeholder video analysis artifacts when no real adapter exists', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neura-video-test-'));
+    const sourcePath = path.join(tempDir, 'clip.mp4');
+    const outputPath = path.join(tempDir, 'clip.analysis.md');
+    await fs.writeFile(sourcePath, Buffer.from([0, 0, 0, 24]));
+    mocks.settingGet.mockReturnValue({
+      video: {
+        baseUrl: 'https://video.example.test/v1',
+        apiKey: 'secret-video-key',
+        model: 'video-model',
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await executeNativeComputerTool('analyze_video', {
+      path: sourcePath,
+      output_path: outputPath,
+      prompt: 'Summarize this clip',
+    } as never);
+
+    expect(result.status).toBe(StatusEnum.ERROR);
+    expect(result.message).toContain('does not yet have a real video upload/analysis implementation');
+    expect(result.message).toContain('will not create a placeholder analysis artifact');
+    await expect(fs.stat(outputPath)).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.requestUserApproval).not.toHaveBeenCalled();
+    await fs.rm(tempDir, { recursive: true, force: true });
   });
 });
 

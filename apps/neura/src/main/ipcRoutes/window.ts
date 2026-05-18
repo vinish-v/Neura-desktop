@@ -46,6 +46,8 @@ const IMAGE_ARTIFACT_EXTENSIONS = new Set([
 const PDF_ARTIFACT_EXTENSIONS = new Set(['.pdf']);
 const AUDIO_ARTIFACT_EXTENSIONS = new Set(['.aac', '.flac', '.m4a', '.mp3', '.ogg', '.wav']);
 const VIDEO_ARTIFACT_EXTENSIONS = new Set(['.mov', '.mp4', '.mpeg', '.mpg', '.webm']);
+const OFFICE_ARTIFACT_EXTENSIONS = new Set(['.docx', '.pptx', '.xlsx']);
+const ARCHIVE_ARTIFACT_EXTENSIONS = new Set(['.zip']);
 
 type ArtifactPreview =
   | {
@@ -83,6 +85,7 @@ type WorkspaceRoot = {
 
 const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024;
 const MAX_BINARY_PREVIEW_BYTES = 8 * 1024 * 1024;
+const MAX_ZIP_PREVIEW_BYTES = 16 * 1024 * 1024;
 const MAX_WORKSPACE_ENTRIES = 200;
 
 const EXTENSION_MIME_OVERRIDES: Record<string, string> = {
@@ -98,6 +101,10 @@ const EXTENSION_MIME_OVERRIDES: Record<string, string> = {
   '.csv': 'text/csv',
   '.svg': 'image/svg+xml',
   '.pdf': 'application/pdf',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.zip': 'application/zip',
   '.aac': 'audio/aac',
   '.flac': 'audio/flac',
   '.m4a': 'audio/mp4',
@@ -122,6 +129,45 @@ const resolveMimeType = (extension: string) =>
         : VIDEO_ARTIFACT_EXTENSIONS.has(extension)
           ? `video/${extension.replace(/^\./, '')}`
       : 'application/octet-stream');
+
+const stripXmlText = (value: string) =>
+  value
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const readZipTextPreview = async (artifactPath: string, extension: string) => {
+  const JSZip = (await import('jszip')).default;
+  const zip = await JSZip.loadAsync(await fs.readFile(artifactPath));
+  const entries = Object.keys(zip.files).filter((entry) => !zip.files[entry].dir);
+  if (extension === '.zip') {
+    return `Archive entries:\n${entries.slice(0, 80).join('\n')}`;
+  }
+  const patterns =
+    extension === '.docx'
+      ? [/^word\/document\.xml$/u]
+      : extension === '.pptx'
+        ? [/^ppt\/slides\/slide\d+\.xml$/u]
+        : [/^xl\/workbook\.xml$/u, /^xl\/worksheets\/sheet\d+\.xml$/u];
+  const chunks: string[] = [];
+  for (const entry of entries) {
+    if (!patterns.some((pattern) => pattern.test(entry))) {
+      continue;
+    }
+    const text = stripXmlText(await zip.files[entry].async('text'));
+    if (text) {
+      chunks.push(`${entry}\n${text}`);
+    }
+    if (chunks.join('\n\n').length > 12_000) {
+      break;
+    }
+  }
+  return chunks.length
+    ? chunks.join('\n\n').slice(0, 16_000)
+    : `Readable ${extension.toUpperCase().slice(1)} container with entries:\n${entries
+        .slice(0, 40)
+        .join('\n')}`;
+};
 
 const readArtifactPreview = async (
   artifactPath: string,
@@ -169,6 +215,28 @@ const readArtifactPreview = async (
       readable: true,
       dataUrl: `data:${mimeType};base64,${binary.toString('base64')}`,
       mimeType,
+      reason: '',
+    };
+  }
+
+  if (
+    OFFICE_ARTIFACT_EXTENSIONS.has(extension) ||
+    ARCHIVE_ARTIFACT_EXTENSIONS.has(extension)
+  ) {
+    const stat = await fs.stat(artifactPath);
+    if (stat.size > MAX_ZIP_PREVIEW_BYTES) {
+      return {
+        kind: 'unsupported',
+        readable: false,
+        reason: 'Preview is limited to 16 MB office/archive artifacts.',
+      };
+    }
+
+    return {
+      kind: 'text',
+      readable: true,
+      text: await readZipTextPreview(artifactPath, extension),
+      mimeType: resolveMimeType(extension),
       reason: '',
     };
   }

@@ -7,6 +7,11 @@ import { sanitizeTaskEvidence, type TaskEvidence } from './taskEvidence';
 export type AutomationSurface = 'browser' | 'computer';
 
 export type AutomationFailureKind =
+  | 'approval_needed'
+  | 'provider_config_missing'
+  | 'tool_error'
+  | 'validation_error'
+  | 'connector_auth_error'
   | 'navigation_timeout'
   | 'selector_not_found'
   | 'blocked_or_login_required'
@@ -22,6 +27,11 @@ export type AutomationRecoveryStatus =
   | 'blocked';
 
 export type AutomationRecoveryNextAction =
+  | 'request_approval'
+  | 'configure_provider'
+  | 'inspect_tool_error'
+  | 'collect_missing_validation_evidence'
+  | 'reauthenticate_connector'
   | 'retry_navigation'
   | 'capture_snapshot'
   | 'ask_user_for_login_or_captcha'
@@ -72,6 +82,43 @@ export const classifyAutomationFailure = (
 
   if (
     includesAny(text, [
+      /\b(approval required|requires approval|waiting for approval|approval needed|user approval)\b/i,
+      /\b(permission proof|explicit approval|approve this action|approval gate)\b/i,
+    ])
+  ) {
+    return 'approval_needed';
+  }
+
+  if (
+    includesAny(text, [
+      /\b(provider|model|planner|chat|llm|nim|openai|openrouter)\b.*\b(not configured|missing|required|invalid)\b/i,
+      /\b(api key|base url|model name|credential)\b.*\b(missing|required|not configured|invalid)\b/i,
+      /\b(provider_config_missing|configuration required)\b/i,
+    ])
+  ) {
+    return 'provider_config_missing';
+  }
+
+  if (
+    includesAny(text, [
+      /\b(connector|github|slack|drive|oauth|mcp)\b.*\b(auth|authentication|unauthorized|forbidden|token|expired|not configured|not connected)\b/i,
+      /\b(401|invalid token|oauth|refresh token|connector_auth_error)\b/i,
+    ])
+  ) {
+    return 'connector_auth_error';
+  }
+
+  if (
+    includesAny(text, [
+      /\b(validation failed|validator failed|missing evidence|completion proof|cannot mark complete|needs verification)\b/i,
+      /\b(validation_error|unsupported claim|contradictory evidence)\b/i,
+    ])
+  ) {
+    return 'validation_error';
+  }
+
+  if (
+    includesAny(text, [
       /\b(captcha|recaptcha|hcaptcha|cloudflare|bot detection|verify you are human)\b/i,
       /\b(sign in|signin|login|log in|authentication required|session expired)\b/i,
       /\b(403|forbidden|access denied)\b/i,
@@ -117,6 +164,15 @@ export const classifyAutomationFailure = (
     return 'browser_crashed';
   }
 
+  if (
+    includesAny(text, [
+      /\b(tool|command|terminal|shell|script|process)\b.*\b(failed|error|exception|traceback|non-zero|exit code)\b/i,
+      /\b(tool_error|runtime exited with code|uncaught exception)\b/i,
+    ])
+  ) {
+    return 'tool_error';
+  }
+
   return 'unknown';
 };
 
@@ -127,6 +183,76 @@ export const recommendAutomationRecovery = (
   const surfaceLabel = surface === 'browser' ? 'Browser' : 'Computer';
 
   switch (kind) {
+    case 'approval_needed':
+      return {
+        kind,
+        status: 'needs_user',
+        label: 'Approval needed',
+        nextAction: 'request_approval',
+        steps: [
+          'Record the exact requested action and target.',
+          'Ask the user for explicit approval before continuing.',
+          'Resume only after the approval event is recorded.',
+        ],
+        userFacingMessage:
+          'This action requires explicit approval. Neura should pause, show the requested action, and resume only after approval is recorded.',
+      };
+    case 'provider_config_missing':
+      return {
+        kind,
+        status: 'blocked',
+        label: 'Provider setup missing',
+        nextAction: 'configure_provider',
+        steps: [
+          'Record which provider setting is missing.',
+          'Tell the user the exact setup requirement without exposing secrets.',
+          'Retry only after the provider is configured.',
+        ],
+        userFacingMessage:
+          'A required model/provider setting is missing. Neura should report the setup gap honestly instead of pretending output was created.',
+      };
+    case 'connector_auth_error':
+      return {
+        kind,
+        status: 'blocked',
+        label: 'Connector authentication needed',
+        nextAction: 'reauthenticate_connector',
+        steps: [
+          'Record the connector and tool that failed.',
+          'Ask the user to connect, refresh, or revoke/reconnect the connector.',
+          'Retry the connector action only after authentication is healthy.',
+        ],
+        userFacingMessage:
+          'The connector is not authenticated or its token failed. Neura needs the connector to be connected again before continuing.',
+      };
+    case 'validation_error':
+      return {
+        kind,
+        status: 'blocked',
+        label: 'Validation evidence missing',
+        nextAction: 'collect_missing_validation_evidence',
+        steps: [
+          'Record the failed validation requirement.',
+          'Collect the missing source, artifact, browser, command, or connector evidence.',
+          'Do not mark the run complete until validation passes.',
+        ],
+        userFacingMessage:
+          'Neura could not validate the result yet. It should collect the missing proof before claiming completion.',
+      };
+    case 'tool_error':
+      return {
+        kind,
+        status: 'retryable',
+        label: 'Tool execution error',
+        nextAction: 'inspect_tool_error',
+        steps: [
+          'Record the failing tool and sanitized error output.',
+          'Inspect whether configuration, inputs, or environment caused the failure.',
+          'Retry only after the root cause is addressed.',
+        ],
+        userFacingMessage:
+          'A runtime tool failed. Neura should show the sanitized error, fix the root cause if possible, and retry only with proof.',
+      };
     case 'navigation_timeout':
       return {
         kind,

@@ -280,7 +280,7 @@ export const NATIVE_COMPUTER_TOOLS: NativeToolDefinition[] = [
     domain: 'connectors',
     actionSpace: "connector_drive_export(path='')",
     description:
-      'Prepare a Google Drive-compatible export placeholder for a local file.',
+      'Attempt a real Google Drive export only when a supported Drive connector is configured; otherwise surface the setup gap.',
   },
   {
     name: 'connector_mcp_call',
@@ -288,7 +288,7 @@ export const NATIVE_COMPUTER_TOOLS: NativeToolDefinition[] = [
     domain: 'connectors',
     actionSpace: "connector_mcp_call(tool='', payload='')",
     description:
-      'Call a configured custom MCP connector placeholder. Full MCP runtime execution is handled in the connector phase.',
+      'Call a configured custom MCP connector tool after user approval.',
   },
 ];
 

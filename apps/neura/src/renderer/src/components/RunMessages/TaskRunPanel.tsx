@@ -15,6 +15,7 @@ import {
   FolderOpen,
   Loader2,
   MonitorPlay,
+  PlayCircle,
   RefreshCw,
   ShieldCheck,
   Wand2,
@@ -193,6 +194,34 @@ const getRecoveryMetadata = (metadata?: Record<string, unknown>) => {
 const recoveryLabel = (value?: string) =>
   (value || 'unknown').replace(/_/g, ' ');
 
+const artifactRefinementInstruction = (
+  kind: string,
+  path: string,
+  originalGoal: string,
+) => {
+  const templates: Record<string, string> = {
+    presentation:
+      'Polish the deck narrative, slide hierarchy, speaker notes, citations, visual consistency, and export a validated PPTX.',
+    spreadsheet:
+      'Clean the workbook structure, headers, formulas, number formats, filters, summary sheet, and export a validated XLSX/CSV.',
+    website:
+      'Run website QA for layout, responsiveness, accessibility, console errors, build output, media reuse, and export a validated project/archive.',
+    report:
+      'Edit the report for source-backed claims, structure, citations, clarity, and export a validated DOCX/PDF/Markdown file.',
+    document:
+      'Edit the document for structure, proof, citations, readability, and export a validated DOCX/PDF.',
+    image:
+      'Reuse the media asset honestly, verify the file is readable, and create a real improved image artifact only if a configured provider/tool is available.',
+  };
+  return [
+    templates[kind] ||
+      'Inspect and improve this artifact, then save a real validated output file.',
+    `Artifact path: ${path}`,
+    `Original task: ${originalGoal}`,
+    'Validate file existence, nonzero size, readable preview, and expected format before saying it is complete.',
+  ].join('\n');
+};
+
 export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -213,6 +242,7 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
   const approvalEvents = taskState?.approvalEvents || [];
   const sourcesVisited = taskState?.sourcesVisited || [];
   const rawSourceRecords = taskState?.sourceRecords || [];
+  const wideResearchWorkers = taskState?.wideResearchWorkers || [];
   const completionProof = taskState?.completionProof;
   const evidenceValidation = taskState?.evidenceValidation;
   const recoveryEvidence: RecoveryEvidenceItem[] = (taskState?.evidence || [])
@@ -337,16 +367,42 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
     }
   };
 
+  const resumeRun = async () => {
+    if (!taskState) {
+      return;
+    }
+    setActionBusy('resume-run');
+    try {
+      await api.resumeRun({ runId: taskState.runId });
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
+  const retryWideResearchWorker = async (workerId: string) => {
+    if (!taskState) {
+      return;
+    }
+    setActionBusy(`retry-worker-${workerId}`);
+    try {
+      await api.retryWideResearchWorker({
+        runId: taskState.runId,
+        workerId,
+      });
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
   const refineArtifact = async (artifact: (typeof artifacts)[number]) => {
     if (!taskState) {
       return;
     }
-    const prompt = [
-      `Refine this ${artifact.kind} artifact and create an improved saved version.`,
-      `Artifact path: ${artifact.path}`,
-      `Original task: ${taskState.originalGoal}`,
-      'Open or inspect the file, improve quality, validate the output, and record the new artifact path.',
-    ].join('\n');
+    const prompt = artifactRefinementInstruction(
+      artifact.kind,
+      artifact.path,
+      taskState.originalGoal,
+    );
     setActionBusy(`refine-${artifact.id}`);
     try {
       await api.setInstructions({ instructions: prompt });
@@ -456,6 +512,16 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
             size="sm"
             variant="ghost"
             className="h-8 rounded-lg px-2 text-xs text-white/48 hover:bg-white/[0.05] hover:text-white"
+            disabled={actionBusy === 'resume-run' || taskState.status === 'running'}
+            onClick={resumeRun}
+          >
+            <PlayCircle className="h-3.5 w-3.5" />
+            Resume
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 rounded-lg px-2 text-xs text-white/48 hover:bg-white/[0.05] hover:text-white"
             disabled={actionBusy === 'retry-run' || taskState.status === 'running'}
             onClick={retryRun}
           >
@@ -465,6 +531,36 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
         </div>
       </div>
       <div className="p-5">
+
+      {taskState.nextAction || taskState.browserRestoreSnapshot ? (
+        <div className="mb-5 rounded-2xl border border-blue-300/15 bg-blue-300/[0.04] px-4 py-3 text-xs">
+          {taskState.nextAction ? (
+            <div className="text-blue-100">
+              Next action: {taskState.nextAction}
+            </div>
+          ) : null}
+          {taskState.browserRestoreSnapshot ? (
+            <div className="mt-2 grid gap-1 text-white/44">
+              <div>
+                Browser: {taskState.browserRestoreSnapshot.bridgeStatus}
+                {taskState.browserRestoreSnapshot.backend
+                  ? ` / ${taskState.browserRestoreSnapshot.backend}`
+                  : ''}
+              </div>
+              {taskState.browserRestoreSnapshot.url ? (
+                <div className="truncate" title={taskState.browserRestoreSnapshot.url}>
+                  Last URL: {taskState.browserRestoreSnapshot.url}
+                </div>
+              ) : null}
+              {taskState.browserRestoreSnapshot.health.issues.length > 0 ? (
+                <div className="text-amber-100/75">
+                  Health: {taskState.browserRestoreSnapshot.health.issues[0]}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {finalAnswer && (
         <div>
@@ -581,6 +677,50 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
                     {recovery.attemptedUrl || recovery.attemptedAction}
                   </div>
                 )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {wideResearchWorkers.length > 0 && (
+        <div className="mt-5 border-t border-white/[0.07] pt-4">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase text-white/35">
+            <FileSearch className="h-3.5 w-3.5" />
+            Wide Research Workers
+          </div>
+          <div className="divide-y divide-white/[0.06]">
+            {wideResearchWorkers.map((worker) => (
+              <div key={worker.id} className="py-2.5 text-xs">
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="line-clamp-2 text-white">
+                      {worker.subtask}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-white/38">
+                      <span>{worker.status}</span>
+                      <span>{worker.sourceUrls.length} sources</span>
+                      <span>{worker.attempts} attempts</span>
+                    </div>
+                    {worker.error ? (
+                      <div className="mt-1 line-clamp-2 text-[11px] text-red-100/72">
+                        {worker.error}
+                      </div>
+                    ) : null}
+                  </div>
+                  {worker.status === 'failed' ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 rounded-lg px-2 text-[11px] text-white/48 hover:bg-white/[0.05] hover:text-white"
+                      disabled={actionBusy === `retry-worker-${worker.id}`}
+                      onClick={() => retryWideResearchWorker(worker.id)}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Retry
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             ))}
           </div>

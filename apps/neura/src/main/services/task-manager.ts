@@ -17,6 +17,7 @@ import {
   CompletionProof,
   TaskArtifact,
   TaskRunRecord,
+  WideResearchWorkerRecord,
 } from '@main/store/types';
 import { ComputerRuntimeController } from './computerRuntimeController';
 import {
@@ -35,6 +36,8 @@ import {
 } from './taskRunRegistry';
 import { classifyHermesTask, HermesTaskRoute } from './hermesTaskRouter';
 import { summarizeSourceQuality } from './sourceQuality';
+import { validateArtifactFile } from './artifactValidation';
+import { DesktopProjectsService } from './desktop-projects-service';
 import { buildAutomationRecoveryReport } from '@shared/browserAutomationRecovery';
 import { TaskEvidenceRequirements, validateTaskEvidence } from '@shared/taskEvidence';
 
@@ -47,6 +50,7 @@ type TaskStartOptions = {
   sessionId?: string;
   retryOfRunId?: string;
   retryCount?: number;
+  projectId?: string;
 };
 
 const compact = (value: string, limit = 1200) =>
@@ -105,6 +109,7 @@ const ARTIFACT_EXTENSIONS: Record<
 const IGNORED_ARTIFACT_NAMES = new Set(['context.md']);
 const ARTIFACT_MANIFEST_NAME = 'neura-artifacts.json';
 const URL_PATTERN = /\bhttps?:\/\/[^\s"'<>)]{4,}/gi;
+const LIST_ITEM_PATTERN = /(?:^|\n)\s*(?:[-*]|\d+[.)])\s+(.{8,180})/g;
 
 const getArtifactMetadata = (filePath: string) =>
   ARTIFACT_EXTENSIONS[path.extname(filePath).toLowerCase()] || {
@@ -124,6 +129,12 @@ const buildHermesTaskPrompt = (
     'For simple research or browsing tasks, open the strongest source quickly, extract the answer, cite the source, and finish without repeated searching.',
     route.validationHint,
     ...route.promptDirectives,
+    route.runMode === 'wide_research'
+      ? wideResearchWorkerPrompt(run.wideResearchWorkers || [])
+      : '',
+    run.projectId
+      ? DesktopProjectsService.getInstance().buildProjectContext(run.projectId)
+      : '',
     `Workspace: ${run.workspacePath || 'default Hermes working directory'}`,
     'Use Hermes persistent memory for durable preferences, corrections, and stable environment facts. Do not save secrets or transient task logs to memory.',
     getTaskContextHint(run).trim(),
@@ -252,6 +263,121 @@ const getStringField = (value: unknown, key: string) =>
     ? ((value as Record<string, unknown>)[key] as string)
     : undefined;
 
+const createWideResearchWorkers = (
+  goal: string,
+  runId: string,
+): WideResearchWorkerRecord[] => {
+  const explicitItems = [...goal.matchAll(LIST_ITEM_PATTERN)]
+    .map((match) => match[1]?.trim())
+    .filter((item): item is string => Boolean(item));
+  const fallback = [
+    'Establish the best primary and official sources for the topic.',
+    'Collect current factual and numeric evidence from independent sources.',
+    'Find recommendation or comparison evidence and note disagreements.',
+    'Validate claims and produce artifact-ready citations.',
+  ];
+  const subtasks = (explicitItems.length >= 2 ? explicitItems : fallback).slice(
+    0,
+    8,
+  );
+  const now = Date.now();
+  return subtasks.map((subtask, index) => ({
+    id: `wr-${runId}-${index + 1}`,
+    subtask,
+    status: 'pending',
+    sessionId: `${runId}-worker-${index + 1}`,
+    attempts: 0,
+    sourceUrls: [],
+    claimIds: [],
+    updatedAt: now,
+  }));
+};
+
+const wideResearchWorkerPrompt = (workers: WideResearchWorkerRecord[]) =>
+  workers.length
+    ? [
+        'Wide Research worker records:',
+        ...workers.map(
+          (worker, index) =>
+            `${index + 1}. ${worker.id}: ${worker.subtask}. Use browser-grounded retrieval where sources are needed, record URLs/titles/dates/excerpts, and keep this worker independent from the others.`,
+        ),
+        'Retry any failed worker independently before synthesis. Synthesize a report and data artifact when the task asks for deliverables.',
+    ].join('\n')
+  : '';
+
+const runWideResearchWorkerPreflight = async ({
+  run,
+  worker,
+  route,
+  signal,
+}: {
+  run: TaskRunRecord;
+  worker: WideResearchWorkerRecord;
+  route: HermesTaskRoute;
+  signal?: AbortSignal;
+}) => {
+  TaskRunRegistry.updateWideResearchWorker(run.runId, worker.id, {
+    status: 'running',
+    startedAt: Date.now(),
+  });
+  TaskRunRegistry.addProgress(run.runId, {
+    title: `Wide Research worker started: ${worker.id}`,
+    detail: worker.subtask,
+    status: 'done',
+    eventType: 'wide_research.worker.started',
+  });
+  try {
+    await HermesRuntimeService.getInstance().run({
+      prompt: [
+        'Run one independent Wide Research worker for Neura Desktop.',
+        'Use browser-grounded retrieval when needed. Capture URLs in tool output and final answer.',
+        'Return concise findings with URL, title, source name, visible date if present, excerpt, quality notes, and claim IDs.',
+        'Do not synthesize the full final report; this worker only gathers and validates its subtask.',
+        '',
+        `Parent run id: ${run.runId}`,
+        `Original task: ${run.originalGoal}`,
+        `Worker id: ${worker.id}`,
+        `Worker subtask: ${worker.subtask}`,
+      ].join('\n'),
+      sessionId: worker.sessionId,
+      cwd: run.workspacePath,
+      signal,
+      toolsets: route.toolsets,
+      browserBackend: route.browserBackend,
+      dedicatedBrowserSession: true,
+      keepBrowserAlive: false,
+      onEvent: (event) => {
+        maybeRecordHermesEvent(run.runId, event, worker.id);
+      },
+      onProgress: (event) => {
+        TaskRunRegistry.addProgress(run.runId, {
+          title: event.title,
+          detail: event.detail,
+          status: event.status === 'failed' ? 'failed' : event.status || 'done',
+          eventType: 'wide_research.worker.progress',
+        });
+      },
+    });
+    const latestWorker = (
+      TaskRunRegistry.list().find((item) => item.runId === run.runId)
+        ?.wideResearchWorkers || []
+    ).find((item) => item.id === worker.id);
+    TaskRunRegistry.updateWideResearchWorker(run.runId, worker.id, {
+      status: latestWorker?.sourceUrls.length ? 'completed' : 'failed',
+      error: latestWorker?.sourceUrls.length
+        ? undefined
+        : 'Worker completed without recording a browser-grounded source.',
+      completedAt: Date.now(),
+    });
+  } catch (error) {
+    TaskRunRegistry.updateWideResearchWorker(run.runId, worker.id, {
+      status: signal?.aborted ? 'pending' : 'failed',
+      error: error instanceof Error ? error.message : String(error),
+      completedAt: Date.now(),
+    });
+  }
+};
+
 const isAutomationToolEvent = (event: HermesBridgeEvent) => {
   const toolName = event.toolName || '';
   return /browser|page|dom|click|type|navigate|screenshot|computer|desktop|mouse|keyboard/i.test(
@@ -293,6 +419,29 @@ const recordAutomationRecovery = (
     ].join('\n'),
     status: report.status === 'retryable' ? 'in_progress' : 'failed',
     eventType: 'automation.recovery',
+  });
+};
+
+const recordRuntimeFailureRecovery = (runId: string, message: string) => {
+  const report = buildAutomationRecoveryReport({
+    surface: 'computer',
+    toolName: 'runtime',
+    action: 'runtime',
+    message,
+  });
+  TaskRunRegistry.addEvidence(runId, report.evidence);
+  TaskRunRegistry.addProgress(runId, {
+    title: report.label,
+    detail: [
+      report.userFacingMessage,
+      `Next action: ${report.nextAction.replace(/_/g, ' ')}`,
+      `Evidence: ${report.evidence.summary}`,
+    ].join('\n'),
+    status: report.status === 'retryable' ? 'in_progress' : 'failed',
+    eventType: 'runtime.recovery',
+  });
+  TaskRunRegistry.patch(runId, {
+    nextAction: report.nextAction.replace(/_/g, ' '),
   });
 };
 
@@ -369,6 +518,7 @@ const validateRunCompletion = (
 const maybeRecordHermesEvent = (
   runId: string,
   event: HermesBridgeEvent,
+  workerId?: string,
 ) => {
   if (event.type === 'tool.call.started') {
     const toolName = (event.toolName || 'tool')
@@ -410,7 +560,7 @@ const maybeRecordHermesEvent = (
   }
 
   for (const url of extractUrls(event.arguments, event.resultPreview, event.preview)) {
-    TaskRunRegistry.addSource(runId, { url });
+    TaskRunRegistry.addSource(runId, { url, workerId });
   }
 
   if (event.toolName === 'todo' || /todo/i.test(event.toolName || '')) {
@@ -440,7 +590,7 @@ const maybeRecordHermesEvent = (
     event.arguments &&
     typeof event.arguments.url === 'string'
   ) {
-    TaskRunRegistry.addSource(runId, { url: event.arguments.url });
+    TaskRunRegistry.addSource(runId, { url: event.arguments.url, workerId });
   }
 
   if (event.type === 'clarify.requested') {
@@ -525,6 +675,10 @@ export class TaskManager {
     const publicGoal = options.publicGoal || trimmedGoal;
     const previousRuns = TaskRunRegistry.list();
     const baseRun = createTaskRun(publicGoal, runMode);
+    const wideResearchWorkers =
+      runMode === 'wide_research'
+        ? createWideResearchWorkers(trimmedGoal, baseRun.runId)
+        : [];
     const run = prepareTaskRunContext(
       {
         ...baseRun,
@@ -535,7 +689,9 @@ export class TaskManager {
         backgroundTaskId: options.backgroundTaskId,
         retryOfRunId: options.retryOfRunId,
         retryCount: options.retryCount || 0,
+        projectId: options.projectId,
         sessionId: options.sessionId || baseRun.sessionId,
+        wideResearchWorkers,
       },
       previousRuns,
     );
@@ -545,6 +701,16 @@ export class TaskManager {
       status: options.backgroundTaskId ? 'resumed' : 'created',
       summary: `${route.taskMode} task using ${route.browserBackend} browser backend.`,
     });
+    if (wideResearchWorkers.length) {
+      TaskRunRegistry.addProgress(run.runId, {
+        title: 'Wide Research workers created',
+        detail: wideResearchWorkers
+          .map((worker) => `${worker.id}: ${worker.subtask}`)
+          .join('\n'),
+        status: 'done',
+        eventType: 'wide_research.workers.created',
+      });
+    }
     TaskRunRegistry.setActiveRunId(run.runId);
 
     ComputerRuntimeController.start({
@@ -561,8 +727,28 @@ export class TaskManager {
     });
 
     try {
+      if (wideResearchWorkers.length) {
+        this.addProgress(run.runId, {
+          title: 'Wide Research workers starting',
+          detail: 'Running independent browser-grounded worker sessions before synthesis.',
+          status: 'done',
+          eventType: 'wide_research.workers.starting',
+        });
+        await Promise.allSettled(
+          wideResearchWorkers.map((worker) =>
+            runWideResearchWorkerPreflight({
+              run,
+              worker,
+              route,
+              signal: options.signal,
+            }),
+          ),
+        );
+      }
+      const runForPrompt =
+        TaskRunRegistry.list().find((item) => item.runId === run.runId) || run;
       const result = await HermesRuntimeService.getInstance().run({
-        prompt: buildHermesTaskPrompt(trimmedGoal, run, route),
+        prompt: buildHermesTaskPrompt(trimmedGoal, runForPrompt, route),
         sessionId: run.sessionId,
         cwd: run.workspacePath,
         signal: options.signal,
@@ -613,10 +799,41 @@ export class TaskManager {
                   : 'planning',
             activeAgent: event.status === 'done' ? 'executor' : 'planner',
             currentStep: event.title,
+            nextAction:
+              event.status === 'failed'
+                ? 'Review the recovery guidance, then resume or retry after the blocker is fixed.'
+                : event.status === 'done'
+                  ? 'Continue with the next runtime step.'
+                  : event.title,
           });
         },
       });
-      const artifacts = await discoverRunArtifacts(run);
+      const discoveredArtifacts = await discoverRunArtifacts(run);
+      const artifactValidations = await Promise.all(
+        discoveredArtifacts.map((artifact) => validateArtifactFile(artifact)),
+      );
+      const artifacts = discoveredArtifacts.filter(
+        (_artifact, index) => artifactValidations[index]?.ok,
+      );
+      const latestRunBeforeWorkerClose =
+        TaskRunRegistry.list().find((item) => item.runId === run.runId) || run;
+      for (const worker of latestRunBeforeWorkerClose.wideResearchWorkers || []) {
+        TaskRunRegistry.updateWideResearchWorker(run.runId, worker.id, {
+          status: worker.sourceUrls.length > 0 ? 'completed' : 'failed',
+          error:
+            worker.sourceUrls.length > 0
+              ? undefined
+              : 'No browser-grounded source was recorded for this worker.',
+          completedAt: Date.now(),
+        });
+      }
+      for (const validation of artifactValidations.filter((item) => !item.ok)) {
+        TaskRunRegistry.addValidationFailure(
+          run.runId,
+          validation.errors.join(' ') ||
+            `Artifact validation failed for ${validation.path}`,
+        );
+      }
       for (const artifact of artifacts) {
         TaskRunRegistry.addArtifact(run.runId, artifact);
       }
@@ -634,18 +851,29 @@ export class TaskManager {
       }
       if (artifacts.length > 0) {
         this.addProgress(run.runId, {
-          title: 'Captured workspace artifacts',
+          title: 'Validated workspace artifacts',
           detail: artifacts.map((artifact) => artifact.path).join('\n'),
           status: 'done',
           eventType: 'hermes.artifacts',
         });
       }
+      if (artifactValidations.some((item) => !item.ok)) {
+        this.addProgress(run.runId, {
+          title: 'Artifact validation failed',
+          detail: artifactValidations
+            .filter((item) => !item.ok)
+            .flatMap((item) => item.errors)
+            .join('\n'),
+          status: 'failed',
+          eventType: 'hermes.artifacts.validation',
+        });
+      }
       TaskRunRegistry.addCheckpoint(run.runId, {
-        label: 'Artifacts captured',
+        label: 'Artifacts validated',
         status: 'created',
         summary:
           artifacts.length > 0
-            ? `${artifacts.length} workspace artifact(s) registered.`
+            ? `${artifacts.length} validated workspace artifact(s) registered.`
             : 'No workspace files were produced by this task.',
       });
 
@@ -695,11 +923,23 @@ export class TaskManager {
         ],
         taskState: completed || store.getState().taskState,
       });
+      if (completed?.projectId) {
+        DesktopProjectsService.getInstance().recordRun(
+          completed.projectId,
+          completed.runId,
+          completed.finalAnswer
+            ? compact(completed.finalAnswer, 600)
+            : `completed run: ${completed.originalGoal}`,
+        );
+      }
       return completed;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const wasCancelled = options.signal?.aborted;
       logger.warn('[TaskManager] Hermes task failed', error);
+      if (!wasCancelled) {
+        recordRuntimeFailureRecovery(run.runId, message);
+      }
       const failed = this.patch(run.runId, {
         status: wasCancelled ? 'cancelled' : 'failed',
         phase: wasCancelled ? 'cancelled' : 'failed',
@@ -726,6 +966,13 @@ export class TaskManager {
         errorMsg: wasCancelled ? null : message,
         taskState: failed || store.getState().taskState,
       });
+      if (failed?.projectId) {
+        DesktopProjectsService.getInstance().recordRun(
+          failed.projectId,
+          failed.runId,
+          failed.error || `failed run: ${failed.originalGoal}`,
+        );
+      }
       return failed;
     } finally {
       TaskRunRegistry.setActiveRunId(null);
@@ -756,7 +1003,162 @@ export class TaskManager {
       sessionId: run.sessionId,
       retryOfRunId: run.runId,
       retryCount: (run.retryCount || 0) + 1,
+      projectId: run.projectId,
     });
+  }
+
+  async resumeRun(runId: string, signal?: AbortSignal) {
+    const run = this.getRun(runId);
+    if (!run) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    TaskRunRegistry.addCheckpoint(runId, {
+      label: 'Resume requested',
+      status: 'resumed',
+      summary: 'Starting a continuation with the same Hermes session and persisted run context.',
+    });
+    const resumeGoal = [
+      'Resume this Neura Desktop task from its persisted run snapshot.',
+      'Do not repeat completed work unless it is needed for validation. Keep old run history intact and continue in the same session/context.',
+      '',
+      `Original task: ${run.originalGoal}`,
+      `Previous run id: ${run.runId}`,
+      `Session id: ${run.sessionId || 'not recorded'}`,
+      `Current phase: ${run.phase || run.status}`,
+      `Current step: ${run.currentStep || 'not recorded'}`,
+      `Next action: ${run.nextAction || 'inspect the persisted context and continue honestly'}`,
+      `Workspace: ${run.workspacePath || 'default workspace'}`,
+      '',
+      `Browser restore snapshot:\n${compactJson(run.browserRestoreSnapshot, 2400)}`,
+      '',
+      `Todo items:\n${compactJson(run.todoItems || [], 2400)}`,
+      '',
+      `Artifacts:\n${compactJson(
+        (run.artifacts || []).map((artifact) => ({
+          title: artifact.title,
+          kind: artifact.kind,
+          path: artifact.path,
+        })),
+        2400,
+      )}`,
+      '',
+      `Evidence summary:\n${compactJson(
+        {
+          sources: run.sourceRecords?.map((source) => ({
+            url: source.url,
+            title: source.title,
+            quality: source.quality,
+          })),
+          validation: run.evidenceValidation,
+          failures: run.validationFailures,
+        },
+        3200,
+      )}`,
+    ].join('\n');
+
+    return this.startHermesTask(resumeGoal, {
+      signal,
+      publicGoal: run.originalGoal,
+      runMode: run.runMode,
+      sessionId: run.sessionId,
+      retryOfRunId: run.runId,
+      retryCount: run.retryCount || 0,
+      projectId: run.projectId,
+    });
+  }
+
+  async retryWideResearchWorker(
+    runId: string,
+    workerId: string,
+    signal?: AbortSignal,
+  ) {
+    const run = this.getRun(runId);
+    if (!run) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    const worker = (run.wideResearchWorkers || []).find(
+      (item) => item.id === workerId,
+    );
+    if (!worker) {
+      throw new Error(`Wide Research worker not found: ${workerId}`);
+    }
+    const startedAt = Date.now();
+    TaskRunRegistry.updateWideResearchWorker(runId, workerId, {
+      status: 'running',
+      attempts: worker.attempts + 1,
+      error: undefined,
+      startedAt,
+    });
+    this.addProgress(runId, {
+      title: `Retrying Wide Research worker ${worker.id}`,
+      detail: worker.subtask,
+      status: 'done',
+      eventType: 'wide_research.worker.retry',
+    });
+    TaskRunRegistry.setActiveRunId(runId);
+    try {
+      await HermesRuntimeService.getInstance().run({
+        prompt: [
+          'Retry one failed Wide Research subtask for an existing Neura Desktop run.',
+          'Use browser-grounded retrieval when needed. Do not repeat unrelated subtasks.',
+          'Record citations with URL, title, source name, visible date if present, excerpt, and claim IDs in the response.',
+          'Validate numeric or recommendation claims against at least two independent medium-or-better sources when possible.',
+          '',
+          `Parent run id: ${run.runId}`,
+          `Parent session id: ${run.sessionId || 'not recorded'}`,
+          `Original task: ${run.originalGoal}`,
+          `Worker id: ${worker.id}`,
+          `Worker subtask: ${worker.subtask}`,
+          `Existing worker sources: ${worker.sourceUrls.join(', ') || 'none'}`,
+        ].join('\n'),
+        sessionId: worker.sessionId,
+        cwd: run.workspacePath,
+        signal,
+        browserBackend: run.browserBackend,
+        keepBrowserAlive: false,
+        onEvent: (event) => {
+          maybeRecordHermesEvent(runId, event, workerId);
+        },
+        onProgress: (event) => {
+          this.addProgress(runId, {
+            title: event.title,
+            detail: event.detail,
+            status: event.status === 'failed' ? 'failed' : event.status || 'done',
+            eventType: 'wide_research.worker.progress',
+          });
+        },
+      });
+      const updatedRun = this.getRun(runId);
+      const updatedWorker = (updatedRun?.wideResearchWorkers || []).find(
+        (item) => item.id === workerId,
+      );
+      const hasNewSources =
+        (updatedWorker?.sourceUrls.length || 0) > worker.sourceUrls.length;
+      TaskRunRegistry.updateWideResearchWorker(runId, workerId, {
+        status: hasNewSources ? 'completed' : 'failed',
+        error: hasNewSources
+          ? undefined
+          : 'Worker retry finished without recording a new browser-grounded source.',
+        completedAt: Date.now(),
+      });
+      return this.getRun(runId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      TaskRunRegistry.updateWideResearchWorker(runId, workerId, {
+        status: signal?.aborted ? 'pending' : 'failed',
+        error: message,
+        completedAt: Date.now(),
+      });
+      this.addProgress(runId, {
+        title: `Wide Research worker ${worker.id} retry failed`,
+        detail: message,
+        status: 'failed',
+        eventType: 'wide_research.worker.failed',
+      });
+      throw error;
+    } finally {
+      TaskRunRegistry.setActiveRunId(null);
+    }
   }
 
   async startMultiAgentTask(goal: string, options: TaskStartOptions = {}) {

@@ -132,9 +132,70 @@ export type TaskSourceRecord = {
   url: string;
   title?: string;
   sourceName?: string;
+  visibleDate?: string;
+  publishedAt?: number;
   excerpt?: string;
+  claimIds?: string[];
+  workerId?: string;
   quality?: TaskSourceQuality;
   validationNotes?: string[];
+  capturedAt: number;
+};
+
+export type WideResearchWorkerStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed';
+
+export type WideResearchWorkerRecord = {
+  id: string;
+  subtask: string;
+  status: WideResearchWorkerStatus;
+  sessionId: string;
+  attempts: number;
+  sourceUrls: string[];
+  claimIds: string[];
+  error?: string;
+  startedAt?: number;
+  completedAt?: number;
+  updatedAt: number;
+};
+
+export type BrowserProfileHealth = {
+  profilePath?: string;
+  exists: boolean;
+  writable: boolean;
+  lockState: 'unlocked' | 'locked' | 'unknown';
+  issues: string[];
+};
+
+export type BrowserBridgeHealth = {
+  executablePath?: string;
+  executableExists: boolean;
+  port?: number;
+  portReachable: boolean;
+  bridgeStatus:
+    | 'not_started'
+    | 'starting'
+    | 'connected'
+    | 'disconnected'
+    | 'restarting'
+    | 'failed';
+  profile: BrowserProfileHealth;
+  checkedAt: number;
+  issues: string[];
+};
+
+export type BrowserRestoreSnapshot = {
+  url?: string;
+  title?: string;
+  profilePath?: string;
+  backend?: HermesBrowserBackend;
+  cdpUrl?: string;
+  takeoverActive: boolean;
+  bridgeStatus: BrowserBridgeHealth['bridgeStatus'];
+  health: BrowserBridgeHealth;
   capturedAt: number;
 };
 
@@ -180,6 +241,58 @@ export type BackgroundTaskRecord = {
   createdAt: number;
   startedAt?: number;
   completedAt?: number;
+};
+
+export type ScheduledTaskStatus = 'active' | 'paused';
+
+export type ScheduledTaskHistoryItem = {
+  id: string;
+  runId?: string;
+  status: 'queued' | 'completed' | 'failed';
+  message?: string;
+  queuedAt: number;
+};
+
+export type ScheduledTaskRecord = {
+  id: string;
+  name: string;
+  goal: string;
+  kind: BackgroundTaskKind;
+  intervalMinutes: number;
+  status: ScheduledTaskStatus;
+  nextRunAt: number;
+  lastRunAt?: number;
+  history: ScheduledTaskHistoryItem[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type LocalTaskApiSettings = {
+  enabled: boolean;
+  port: number;
+  tokenHash?: string;
+  tokenCreatedAt?: number;
+};
+
+export type DesktopProjectKnowledgeFile = {
+  id: string;
+  path: string;
+  name: string;
+  sizeBytes: number;
+  updatedAt: number;
+  addedAt: number;
+};
+
+export type DesktopProjectRecord = {
+  id: string;
+  name: string;
+  masterInstruction: string;
+  pinned: boolean;
+  knowledgeFiles: DesktopProjectKnowledgeFile[];
+  runIds: string[];
+  memory: string[];
+  createdAt: number;
+  updatedAt: number;
 };
 
 export type ApprovalEvent = {
@@ -279,16 +392,20 @@ export type TaskState = {
   phase?: TaskRunPhase;
   activeAgent?: 'planner' | 'researcher' | 'executor' | 'critic';
   backgroundTaskId?: string;
+  projectId?: string;
   retryOfRunId?: string;
   retryCount?: number;
   workspacePath?: string;
   memoryFilePath?: string;
   memorySummary?: string;
   retrievedRunIds?: string[];
+  browserRestoreSnapshot?: BrowserRestoreSnapshot;
+  wideResearchWorkers?: WideResearchWorkerRecord[];
   checkpoints?: TaskCheckpoint[];
   todoItems: TaskTodoItem[];
   progressItems: TaskProgressItem[];
   currentStep?: string;
+  nextAction?: string;
   factsFound: string[];
   sourcesVisited: string[];
   sourceRecords: TaskSourceRecord[];
@@ -415,6 +532,7 @@ export type ConnectorAuditEvent = {
   toolName: string;
   permission: ConnectorPermissionLevel;
   status: 'completed' | 'failed';
+  approvalStatus?: 'not_required' | 'approved' | 'denied' | 'missing_run';
   error?: string;
   createdAt: number;
 };
