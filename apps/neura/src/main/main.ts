@@ -29,7 +29,6 @@ import { createTray } from './tray';
 import { registerSettingsHandlers } from './services/settings';
 import { sanitizeState } from './utils/sanitizeState';
 import { windowManager } from './services/windowManager';
-import { checkBrowserAvailability } from './services/browserCheck';
 import { TaskRunRegistry } from './services/taskRunRegistry';
 import { MCPService, registerMcpIpcHandlers } from './services/mcp-service';
 import { registerSkillsIpcHandlers } from './services/skills-service';
@@ -106,8 +105,6 @@ const initializeApp = async () => {
     const ensureScreenCapturePermission = ensurePermissions();
     logger.info('ensureScreenCapturePermission', ensureScreenCapturePermission);
   }
-
-  await checkBrowserAvailability();
 
   const staleRuns = TaskRunRegistry.cancelStaleRunningRuns(
     'Interrupted by previous app session.',

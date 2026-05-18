@@ -98,7 +98,7 @@ export function NavHistory({
                   {history.map((item) => (
                     <SidebarMenuSubItem key={item.id} className="group/item">
                       <SidebarMenuSubButton
-                        className={`cursor-pointer rounded-xl py-5 text-[15px] transition-colors hover:bg-white/[0.08] hover:text-white ${item.id === currentSessionId ? 'bg-white/[0.12] text-white' : 'text-white/75'}`}
+                        className={`cursor-pointer rounded-xl py-4 text-[14px] transition-colors hover:bg-white/[0.065] hover:text-white ${item.id === currentSessionId ? 'bg-white/[0.1] text-white' : 'text-white/62'}`}
                         onClick={() => {
                           handleHistory();
                           onSessionClick(item.id);

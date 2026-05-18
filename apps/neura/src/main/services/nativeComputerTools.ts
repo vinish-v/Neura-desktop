@@ -18,6 +18,16 @@ import { promisify } from 'util';
 import { Notification } from 'electron';
 import { type ActionInputs, StatusEnum } from '@neura-desktop/shared/types';
 import type { ExecuteOutput } from '@neura-desktop/sdk/core';
+import {
+  formatMultimodalReadinessReport,
+  getMultimodalToolReadiness,
+  type MultimodalProviderConfig,
+} from '@shared/multimodalReadiness';
+import {
+  type AutomationRecoveryReport,
+  buildAutomationRecoveryReport,
+} from '@shared/browserAutomationRecovery';
+import { redactEvidenceSecrets } from '@shared/taskEvidence';
 
 import * as env from '@main/env';
 import { logger } from '@main/logger';
@@ -79,6 +89,12 @@ type MonitorRecord = {
   lastStatus?: string;
 };
 
+type ReadyMultimodalProvider = MultimodalProviderConfig & {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+};
+
 const processes = new Map<string, StartedProcess>();
 const monitorTimers = new Map<string, NodeJS.Timeout>();
 
@@ -91,6 +107,37 @@ export const writeProcessInput = (processId: string, input: string) => {
     throw new Error(`Process ${processId} is no longer running.`);
   }
   record.child.stdin.write(input);
+};
+
+export const registerExternalTerminalProcess = ({
+  command,
+  cwd,
+  child,
+}: {
+  command: string;
+  cwd: string;
+  child: ChildProcessWithoutNullStreams;
+}) => {
+  const id = randomUUID();
+  const record: StartedProcess = {
+    id,
+    command,
+    cwd,
+    startedAt: Date.now(),
+    child,
+    stdout: '',
+    stderr: '',
+  };
+  processes.set(id, record);
+  child.once('exit', (code) => {
+    record.exitCode = code;
+  });
+  child.once('close', () => {
+    setTimeout(() => {
+      processes.delete(id);
+    }, 30_000);
+  });
+  return id;
 };
 
 const nativeToolNames = new Set(NATIVE_COMPUTER_TOOLS.map((tool) => tool.name));
@@ -137,12 +184,51 @@ export const executeNativeComputerTool = async (
     logger.error('[nativeComputerTool] failed', actionType, error);
     const message = error instanceof Error ? error.message : String(error);
     recordNativeToolOutput(actionType, inputs, message, true);
+    const recovery = recordNativeToolRecovery(actionType, inputs, message);
+    const safeFailureMessage = String(redactEvidenceSecrets(message));
     const wasDenied = /denied by the user/i.test(message);
     return {
       status: wasDenied ? StatusEnum.USER_STOPPED : StatusEnum.ERROR,
-      message: `Native tool failed: ${message}`,
+      message: [
+        `Computer automation failed: ${recovery.label}.`,
+        `Failure: ${safeFailureMessage}.`,
+        recovery.userFacingMessage,
+        `Next action: ${recovery.nextAction.replace(/_/g, ' ')}.`,
+        `Evidence: ${recovery.evidence.summary}.`,
+      ].join(' '),
     };
   }
+};
+
+const recordNativeToolRecovery = (
+  actionType: string,
+  inputs: ActionInputs,
+  message: string,
+): AutomationRecoveryReport => {
+  const report = buildAutomationRecoveryReport({
+    surface: 'computer',
+    toolName: actionType,
+    action: inputs.command || inputs.path || actionType,
+    message,
+    url: inputs.url,
+  });
+  const runId = TaskRunRegistry.getActiveRunId();
+  if (!runId) {
+    return report;
+  }
+
+  TaskRunRegistry.addEvidence(runId, report.evidence);
+  TaskRunRegistry.addProgress(runId, {
+    title: report.label,
+    detail: [
+      report.userFacingMessage,
+      `Next action: ${report.nextAction.replace(/_/g, ' ')}`,
+      `Evidence: ${report.evidence.summary}`,
+    ].join('\n'),
+    status: report.status === 'retryable' ? 'in_progress' : 'failed',
+    eventType: 'automation.recovery',
+  });
+  return report;
 };
 
 const handlers: Record<string, NativeToolHandler> = {
@@ -171,6 +257,7 @@ const handlers: Record<string, NativeToolHandler> = {
   create_website_project: createWebsiteProject,
   start_website_preview: startWebsitePreview,
   export_website_project: exportWebsiteProject,
+  check_multimodal_readiness: checkMultimodalReadiness,
   generate_image: generateImage,
   transcribe_audio: transcribeAudio,
   synthesize_speech: synthesizeSpeech,
@@ -1143,12 +1230,7 @@ async function createWebsiteProject(inputs: ActionInputs) {
 async function generateImage(inputs: ActionInputs) {
   const extra = inputs as ExtendedActionInputs;
   const prompt = requireInput(extra.prompt || inputs.content, 'prompt');
-  const provider = SettingStore.get('multimodalProviders')?.image;
-  if (!provider?.baseUrl || !provider.apiKey || !provider.model) {
-    throw new Error(
-      'Image provider is not configured. Add multimodalProviders.image settings before using generate_image.',
-    );
-  }
+  const provider = requireMultimodalProvider('generate_image');
   if (inputs.path?.trim()) {
     const targetPath = resolveLocalPath(inputs.path);
     const overwrite = asBool(inputs.overwrite);
@@ -1215,12 +1297,7 @@ async function generateImage(inputs: ActionInputs) {
 
 async function transcribeAudio(inputs: ActionInputs) {
   const extra = inputs as ExtendedActionInputs;
-  const provider = SettingStore.get('multimodalProviders')?.speechToText;
-  if (!provider?.baseUrl || !provider.apiKey || !provider.model) {
-    throw new Error(
-      'Speech-to-text provider is not configured. Add multimodalProviders.speechToText settings before using transcribe_audio.',
-    );
-  }
+  const provider = requireMultimodalProvider('transcribe_audio');
   const sourcePath = resolveLocalPath(inputs.path);
   const outputPath = resolveLocalPath(
     inputs.output_path || `${sourcePath}.transcript.md`,
@@ -1284,12 +1361,7 @@ async function transcribeAudio(inputs: ActionInputs) {
 async function synthesizeSpeech(inputs: ActionInputs) {
   const extra = inputs as ExtendedActionInputs;
   const text = requireInput(extra.text || inputs.content, 'text');
-  const provider = SettingStore.get('multimodalProviders')?.textToSpeech;
-  if (!provider?.baseUrl || !provider.apiKey || !provider.model) {
-    throw new Error(
-      'Text-to-speech provider is not configured. Add multimodalProviders.textToSpeech settings before using synthesize_speech.',
-    );
-  }
+  const provider = requireMultimodalProvider('synthesize_speech');
   const outputPath = resolveLocalPath(inputs.path || 'speech-output.mp3');
   const overwrite = asBool(inputs.overwrite);
   await approveOverwrite('synthesize_speech_overwrite', outputPath, overwrite);
@@ -1326,12 +1398,7 @@ async function synthesizeSpeech(inputs: ActionInputs) {
 
 async function analyzeVideo(inputs: ActionInputs) {
   const extra = inputs as ExtendedActionInputs;
-  const provider = SettingStore.get('multimodalProviders')?.video;
-  if (!provider?.baseUrl || !provider.apiKey || !provider.model) {
-    throw new Error(
-      'Video understanding provider is not configured. Add multimodalProviders.video settings before using analyze_video.',
-    );
-  }
+  requireMultimodalProvider('analyze_video');
   const sourcePath = resolveLocalPath(inputs.path);
   const outputPath = resolveLocalPath(
     inputs.output_path || `${sourcePath}.analysis.md`,
@@ -1359,6 +1426,26 @@ async function analyzeVideo(inputs: ActionInputs) {
   });
   return `Created video analysis request artifact: ${outputPath}`;
 }
+
+async function checkMultimodalReadiness() {
+  const providers = SettingStore.get('multimodalProviders') || {};
+  return formatMultimodalReadinessReport(providers);
+}
+
+const requireMultimodalProvider = (toolName: string): ReadyMultimodalProvider => {
+  const providers = SettingStore.get('multimodalProviders') || {};
+  const readiness = getMultimodalToolReadiness(toolName, providers);
+  if (!readiness.configured) {
+    throw new Error(readiness.setupMessage);
+  }
+  const provider = providers[readiness.key];
+  return {
+    ...provider,
+    baseUrl: provider?.baseUrl?.trim() || '',
+    apiKey: provider?.apiKey?.trim() || '',
+    model: provider?.model?.trim() || '',
+  };
+};
 
 async function startWebsitePreview(inputs: ActionInputs) {
   const targetPath = resolveLocalPath(inputs.path);

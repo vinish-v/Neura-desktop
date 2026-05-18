@@ -15,49 +15,231 @@ import {
   TaskToolCallRecord,
   TaskRunStatus,
   TaskTodoItem,
+  TaskCheckpoint,
 } from '@main/store/types';
 import { SettingStore } from '@main/store/setting';
 import { persistTaskRunContext } from './taskContextMemory';
+import { scoreSourceQuality } from './sourceQuality';
+import {
+  TaskEvidence,
+  TaskEvidenceRequirements,
+  sanitizeTaskEvidence,
+  validateTaskEvidence,
+} from '@shared/taskEvidence';
 
 const MAX_STORED_RUNS = 100;
+
+const pathEquals = (left?: string, right?: string) =>
+  (left || '').trim().toLowerCase() === (right || '').trim().toLowerCase();
+
+const toolNameIncludes = (toolCall: TaskToolCallRecord, pattern: RegExp) =>
+  pattern.test(`${toolCall.serverName}.${toolCall.toolName}`);
+
+const toolCallEvidenceKind = (
+  toolCall: TaskToolCallRecord,
+): TaskEvidence['kind'] => {
+  if (
+    toolNameIncludes(
+      toolCall,
+      /command|terminal|shell|powershell|cmd|run\.?command|test|typecheck|build/i,
+    )
+  ) {
+    return 'command_test';
+  }
+  if (
+    toolNameIncludes(
+      toolCall,
+      /browser|web|search|navigate|screenshot|extract|page|url/i,
+    )
+  ) {
+    return 'browser_snapshot';
+  }
+  return 'connector_action';
+};
+
+const summarizeToolCall = (toolCall: TaskToolCallRecord) =>
+  `${toolCall.serverName}.${toolCall.toolName} ${toolCall.status}`;
+
+export const collectTaskEvidenceForRun = (
+  run: TaskRunRecord,
+): TaskEvidence[] => {
+  const sourceEvidence: TaskEvidence[] = (run.sourceRecords || []).map(
+    (source) =>
+      sanitizeTaskEvidence({
+        id: source.id,
+        kind: 'citation_source',
+        summary: source.title || source.sourceName || source.url,
+        status: 'completed',
+        confidence: source.quality ? source.quality.score / 100 : undefined,
+        capturedAt: source.capturedAt,
+        url: source.url,
+        title: source.title,
+        sourceName: source.sourceName,
+        excerpt: source.excerpt,
+        sourceQualityScore: source.quality?.score,
+        sourceQualityTier: source.quality?.tier,
+        metadata: {
+          validationNotes: source.validationNotes,
+          qualityReasons: source.quality?.reasons,
+        },
+      }),
+  );
+
+  const artifactEvidence: TaskEvidence[] = (run.artifacts || []).map(
+    (artifact) =>
+      sanitizeTaskEvidence({
+        id: artifact.id,
+        kind: 'file_artifact',
+        summary: artifact.title,
+        status: 'completed',
+        confidence: 0.86,
+        capturedAt: artifact.createdAt,
+        path: artifact.path,
+        artifactKind: artifact.kind,
+        metadata: {
+          mimeType: artifact.mimeType,
+          previewPath: artifact.previewPath,
+          sourceRunId: artifact.sourceRunId,
+        },
+      }),
+  );
+
+  const toolEvidence: TaskEvidence[] = (run.toolCalls || [])
+    .filter((toolCall) => toolCall.status !== 'pending')
+    .map((toolCall) =>
+      sanitizeTaskEvidence({
+        id: toolCall.id,
+        kind: toolCallEvidenceKind(toolCall),
+        summary: summarizeToolCall(toolCall),
+        status: toolCall.status,
+        confidence: toolCall.status === 'completed' ? 0.78 : 0,
+        capturedAt: toolCall.completedAt || toolCall.startedAt,
+        command:
+          typeof toolCall.arguments?.command === 'string'
+            ? toolCall.arguments.command
+            : undefined,
+        connectorName: toolCall.serverName,
+        toolName: toolCall.toolName,
+        metadata: {
+          arguments: toolCall.arguments,
+          resultPreview: toolCall.resultPreview,
+          externalCallId: toolCall.externalCallId,
+        },
+      }),
+    );
+
+  const explicitEvidence = (run.evidence || []).map(sanitizeTaskEvidence);
+  const evidenceById = new Map<string, TaskEvidence>();
+  for (const item of [
+    ...sourceEvidence,
+    ...artifactEvidence,
+    ...toolEvidence,
+    ...explicitEvidence,
+  ]) {
+    evidenceById.set(item.id, item);
+  }
+  return [...evidenceById.values()];
+};
+
+export const buildTaskRunEvidenceRequirements = (
+  run: TaskRunRecord,
+): TaskEvidenceRequirements => {
+  const isResearch =
+    run.runMode === 'wide_research' ||
+    run.taskMode === 'research' ||
+    run.taskMode === 'scrape';
+  const isArtifactWorkflow = [
+    'website_builder',
+    'artifact_workflow',
+    'multimodal_workflow',
+  ].includes(run.runMode);
+  return {
+    requireEvidence: run.status === 'completed',
+    requireCitationSource: isResearch,
+    minimumCitationSources: isResearch ? 1 : undefined,
+    minimumMediumConfidenceSources: run.taskMode === 'research' ? 1 : undefined,
+    validateResearchClaims: isResearch,
+    requireFileArtifact: isArtifactWorkflow,
+  };
+};
+
+const validateRunEvidence = (run: TaskRunRecord) => {
+  if (run.status === 'pending' || run.status === 'running') {
+    return validateTaskEvidence({
+      claim: run.currentStep || run.originalGoal,
+      evidence: collectTaskEvidenceForRun(run),
+      requirements: buildTaskRunEvidenceRequirements({
+        ...run,
+        status: 'completed',
+      }),
+      knownFailures: [],
+    });
+  }
+  return validateTaskEvidence({
+    claim: run.finalAnswer || run.error || run.currentStep || run.originalGoal,
+    evidence: collectTaskEvidenceForRun(run),
+    requirements: buildTaskRunEvidenceRequirements(run),
+    knownFailures: run.validationFailures,
+  });
+};
 
 export const createRunId = () =>
   `run_${Date.now()}_${randomUUID().slice(0, 8)}`;
 
+export const createSessionId = (runId: string) =>
+  `neura_${runId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+
 export const createTaskRun = (
   originalGoal: string,
   runMode: AgentRunMode,
-): TaskRunRecord => ({
-  runId: createRunId(),
-  originalGoal,
-  runMode,
-  status: 'running',
-  todoItems: [],
-  progressItems: [],
-  factsFound: [],
-  sourcesVisited: [],
-  sourceRecords: [],
-  toolCalls: [],
-  artifacts: [],
-  approvalEvents: [],
-  validationFailures: [],
-  validationStatus: runMode === 'executor_browser' ? 'pending' : undefined,
-  startedAt: Date.now(),
-});
+): TaskRunRecord => {
+  const runId = createRunId();
+  return {
+    runId,
+    sessionId: createSessionId(runId),
+    originalGoal,
+    runMode,
+    status: 'running',
+    checkpoints: [],
+    retryCount: 0,
+    todoItems: [],
+    progressItems: [],
+    factsFound: [],
+    sourcesVisited: [],
+    sourceRecords: [],
+    toolCalls: [],
+    artifacts: [],
+    approvalEvents: [],
+    validationFailures: [],
+    validationStatus: runMode === 'executor_browser' ? 'pending' : undefined,
+    startedAt: Date.now(),
+  };
+};
 
-const normalizeRun = (run: TaskRunRecord): TaskRunRecord => ({
-  ...run,
-  todoItems: run.todoItems || [],
-  progressItems: run.progressItems || [],
-  factsFound: run.factsFound || [],
-  sourcesVisited: run.sourcesVisited || [],
-  sourceRecords: run.sourceRecords || [],
-  toolCalls: run.toolCalls || [],
-  artifacts: run.artifacts || [],
-  approvalEvents: run.approvalEvents || [],
-  validationFailures: run.validationFailures || [],
-  retrievedRunIds: run.retrievedRunIds || [],
-});
+const normalizeRun = (run: TaskRunRecord): TaskRunRecord => {
+  const normalized = {
+    ...run,
+    sessionId: run.sessionId || createSessionId(run.runId),
+    retryCount: run.retryCount || 0,
+    checkpoints: run.checkpoints || [],
+    todoItems: run.todoItems || [],
+    progressItems: run.progressItems || [],
+    factsFound: run.factsFound || [],
+    sourcesVisited: run.sourcesVisited || [],
+    sourceRecords: run.sourceRecords || [],
+    toolCalls: run.toolCalls || [],
+    artifacts: run.artifacts || [],
+    approvalEvents: run.approvalEvents || [],
+    validationFailures: run.validationFailures || [],
+    retrievedRunIds: run.retrievedRunIds || [],
+  };
+  const evidence = collectTaskEvidenceForRun(normalized);
+  return {
+    ...normalized,
+    evidence,
+    evidenceValidation: validateRunEvidence({ ...normalized, evidence }),
+  };
+};
 
 export class TaskRunRegistry {
   private static activeRunId: string | null = null;
@@ -178,6 +360,8 @@ export class TaskRunRegistry {
     const sourceRecord: TaskSourceRecord = {
       ...source,
       url,
+      quality: source.quality || scoreSourceQuality({ ...source, url }),
+      validationNotes: source.validationNotes || [],
       id:
         existingIndex >= 0
           ? run.sourceRecords[existingIndex].id
@@ -222,6 +406,34 @@ export class TaskRunRegistry {
     });
   }
 
+  static updateToolCall(
+    runId: string,
+    callId: string,
+    patch: Partial<Omit<TaskToolCallRecord, 'id' | 'startedAt'>>,
+  ) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run) {
+      return null;
+    }
+    const completedAt =
+      patch.status === 'completed' || patch.status === 'failed'
+        ? Date.now()
+        : patch.completedAt;
+    return TaskRunRegistry.upsert({
+      ...run,
+      toolCalls: run.toolCalls.map((toolCall) =>
+        toolCall.id === callId || toolCall.externalCallId === callId
+          ? {
+              ...toolCall,
+              ...patch,
+              completedAt,
+            }
+          : toolCall,
+      ),
+      phase: 'acting',
+    });
+  }
+
   static addValidationFailure(runId: string, reason: string) {
     const run = TaskRunRegistry.list().find((record) => record.runId === runId);
     if (!run || !reason.trim()) {
@@ -232,6 +444,26 @@ export class TaskRunRegistry {
       validationFailures: [...run.validationFailures, reason.trim()].slice(-20),
       validationStatus: 'invalid',
       phase: 'validating',
+    });
+  }
+
+  static addEvidence(runId: string, evidence: TaskEvidence) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run) {
+      return null;
+    }
+    const safeEvidence = sanitizeTaskEvidence(evidence);
+    const existingIndex = (run.evidence || []).findIndex(
+      (item) => item.id === safeEvidence.id,
+    );
+    return TaskRunRegistry.upsert({
+      ...run,
+      evidence:
+        existingIndex >= 0
+          ? (run.evidence || []).map((item, index) =>
+              index === existingIndex ? safeEvidence : item,
+            )
+          : [...(run.evidence || []), safeEvidence].slice(-120),
     });
   }
 
@@ -246,6 +478,43 @@ export class TaskRunRegistry {
     });
   }
 
+  static upsertTodo(runId: string, item: TaskTodoItem) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run) {
+      return null;
+    }
+    const existingIndex = run.todoItems.findIndex((todo) => todo.id === item.id);
+    const todoItems =
+      existingIndex >= 0
+        ? run.todoItems.map((todo, index) =>
+            index === existingIndex ? { ...todo, ...item } : todo,
+          )
+        : [...run.todoItems, item];
+    return TaskRunRegistry.upsert({
+      ...run,
+      todoItems,
+    });
+  }
+
+  static addCheckpoint(
+    runId: string,
+    checkpoint: Omit<TaskCheckpoint, 'id' | 'createdAt'>,
+  ) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run) {
+      return null;
+    }
+    const record: TaskCheckpoint = {
+      ...checkpoint,
+      id: `checkpoint-${Date.now()}-${run.checkpoints?.length || 0}`,
+      createdAt: Date.now(),
+    };
+    return TaskRunRegistry.upsert({
+      ...run,
+      checkpoints: [...(run.checkpoints || []), record].slice(-50),
+    });
+  }
+
   static addArtifact(
     runId: string,
     artifact: Omit<TaskArtifact, 'sourceRunId'>,
@@ -254,9 +523,18 @@ export class TaskRunRegistry {
     if (!run) {
       return null;
     }
+    const existingIndex = run.artifacts.findIndex(
+      (item) => pathEquals(item.path, artifact.path),
+    );
+    const nextArtifact = { ...artifact, sourceRunId: runId };
     return TaskRunRegistry.upsert({
       ...run,
-      artifacts: [...run.artifacts, { ...artifact, sourceRunId: runId }],
+      artifacts:
+        existingIndex >= 0
+          ? run.artifacts.map((item, index) =>
+              index === existingIndex ? { ...item, ...nextArtifact } : item,
+            )
+          : [...run.artifacts, nextArtifact],
     });
   }
 

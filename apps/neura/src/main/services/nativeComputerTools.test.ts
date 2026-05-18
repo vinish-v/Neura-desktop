@@ -45,6 +45,10 @@ vi.mock('./taskRunRegistry', () => ({
 import { StatusEnum } from '@neura-desktop/shared/types';
 import { executeNativeComputerTool } from './nativeComputerTools';
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe('native GitHub connector tools', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -101,6 +105,57 @@ describe('native GitHub connector tools', () => {
         body: JSON.stringify({ title: 'Test issue', body: 'Body' }),
       }),
     );
+  });
+});
+
+describe('native multimodal provider readiness tools', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('reports multimodal readiness without exposing API keys or making provider calls', async () => {
+    mocks.settingGet.mockReturnValue({
+      image: {
+        baseUrl: 'https://images.example.test/v1',
+        apiKey: 'secret-image-key',
+        model: 'image-model',
+      },
+      textToSpeech: {
+        baseUrl: 'https://audio.example.test/v1',
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await executeNativeComputerTool(
+      'check_multimodal_readiness',
+      {} as never,
+    );
+
+    expect(result.status).toBe(StatusEnum.END);
+    expect(result.message).toContain('Image generation: ready');
+    expect(result.message).toContain('Text to speech: needs setup');
+    expect(result.message).not.toContain('secret-image-key');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks media generation before file writes or provider calls when setup is missing', async () => {
+    mocks.settingGet.mockReturnValue({});
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await executeNativeComputerTool('generate_image', {
+      path: 'image.png',
+      prompt: 'A product mockup',
+    } as never);
+
+    expect(result.status).toBe(StatusEnum.ERROR);
+    expect(result.message).toContain('Settings > Multimodal');
+    expect(result.message).toContain(
+      'Neura will not claim a media artifact was created',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.requestUserApproval).not.toHaveBeenCalled();
   });
 });
 

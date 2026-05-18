@@ -7,8 +7,6 @@ import { screenRoute } from './screen';
 import { windowRoute } from './window';
 import { permissionRoute } from './permission';
 import { agentRoute } from './agent';
-import { browserRoute } from './browser';
-import { remoteResourceRouter } from './remoteResource';
 import { settingRoute } from './setting';
 import { mcpRoute } from './mcp';
 import { skillsRoute } from './skills';
@@ -23,8 +21,6 @@ export const ipcRoutes = t.router({
   ...windowRoute,
   ...permissionRoute,
   ...agentRoute,
-  ...remoteResourceRouter,
-  ...browserRoute,
   ...settingRoute,
   ...mcpRoute,
   ...skillsRoute,

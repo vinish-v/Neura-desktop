@@ -1,0 +1,37 @@
+{
+  "name": "framer-design-scout",
+  "version": "0.1.0",
+  "description": "Research live Framer Marketplace templates, components, and vectors, then adapt the best ideas into original frontend implementation work for the current project.",
+  "author": {
+    "name": "Neura"
+  },
+  "homepage": "https://www.framer.com/marketplace/",
+  "keywords": [
+    "framer",
+    "frontend-design",
+    "templates",
+    "components",
+    "vectors",
+    "design-research"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Framer Design Scout",
+    "shortDescription": "Find Framer inspiration and turn it into original frontend design.",
+    "longDescription": "Scans the current frontend project, researches live Framer Marketplace templates, components, and vectors, then converts the strongest design patterns into original implementation guidance and code changes without copying source assets or layouts verbatim.",
+    "developerName": "Neura",
+    "category": "Design",
+    "capabilities": [
+      "Research",
+      "Design",
+      "Write"
+    ],
+    "websiteURL": "https://www.framer.com/marketplace/",
+    "defaultPrompt": [
+      "Scout Framer ideas for this app and redesign the UI.",
+      "Find Framer components that fit this page, then adapt them.",
+      "Use Framer vectors as inspiration for an original visual system."
+    ],
+    "brandColor": "#111111"
+  }
+}

@@ -27,6 +27,10 @@ import { TaskRunRegistry } from '@main/services/taskRunRegistry';
 import { ComputerRuntimeController } from '@main/services/computerRuntimeController';
 import { writeProcessInput } from '@main/services/nativeComputerTools';
 import { TaskManager } from '@main/services/task-manager';
+import {
+  hasHermesBrowserTakeover,
+  sendHermesBrowserTakeoverInput,
+} from '@main/services/hermesBrowserBridge';
 
 const t = initIpc.create();
 
@@ -102,8 +106,17 @@ const formatRunSummary = (
     '',
     '## Sources',
     '',
-    ...(run.sourcesVisited.length
-      ? run.sourcesVisited.map((source) => `- ${source}`)
+    ...(run.sourceRecords.length
+      ? run.sourceRecords.map(
+          (source) =>
+            `- ${source.title || source.url}: ${source.url}${
+              source.quality
+                ? ` (${source.quality.tier}, ${source.quality.score}/100)`
+                : ''
+            }`,
+        )
+      : run.sourcesVisited.length
+        ? run.sourcesVisited.map((source) => `- ${source}`)
       : ['- No sources recorded.']),
     '',
     '## Approvals',
@@ -130,7 +143,7 @@ export const agentRoute = t.router({
         logger.warn('[runQuickLocalTask] failed:', error);
         return {
           handled: true,
-          message: `Hermes tried to complete that task, but it failed: ${
+          message: `Neura tried to complete that task, but it failed: ${
             error instanceof Error ? error.message : String(error)
           }`,
         };
@@ -157,7 +170,7 @@ export const agentRoute = t.router({
 
         return await TaskManager.getInstance().runDirect(
           [
-            'Answer inside Neura Desktop using the Hermes backend.',
+            'Answer inside Neura Desktop using the configured autonomous runtime.',
             historyText ? `Recent conversation:\n${historyText}` : '',
             `User: ${instructions}`,
           ]
@@ -166,7 +179,7 @@ export const agentRoute = t.router({
         );
       } catch (error) {
         logger.warn('[directChat] failed:', error);
-        return `Hermes had trouble completing that direct answer: ${
+        return `Neura had trouble completing that direct answer: ${
           error instanceof Error ? error.message : String(error)
         }`;
       }
@@ -270,6 +283,15 @@ export const agentRoute = t.router({
         throw new Error('Terminal takeover supports keyboard input only.');
       }
 
+      if (
+        runtime.mode === 'browser' &&
+        runtime.browser?.surfaceId === 'neura-browser' &&
+        hasHermesBrowserTakeover()
+      ) {
+        await sendHermesBrowserTakeoverInput(input);
+        return { ok: true };
+      }
+
       if (input.type === 'click') {
         await mouse.move(straightTo(new Point(input.x, input.y)));
         await mouse.click(MouseButton.LEFT);
@@ -342,6 +364,25 @@ export const agentRoute = t.router({
       activity: 'Resumed',
     });
   }),
+  retryRun: t.procedure
+    .input<{ runId: string }>()
+    .handle(async ({ input }) => {
+      const abortController = new AbortController();
+      store.setState({
+        abortController,
+        thinking: true,
+        errorMsg: null,
+      });
+      const run = await TaskManager.getInstance().retryRun(
+        input.runId,
+        abortController.signal,
+      );
+      store.setState({
+        thinking: false,
+        taskState: run || store.getState().taskState,
+      });
+      return run;
+    }),
   stopRun: t.procedure.input<void>().handle(async () => {
     const { abortController } = store.getState();
     store.setState({

@@ -4,14 +4,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import {
-  CheckCircle2,
-  ChevronRight,
-  Circle,
-  Code2,
-  FileText,
-  Loader2,
-} from 'lucide-react';
+import { Code2, FileText, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@renderer/utils';
 import { Button } from '@renderer/components/ui/button';
@@ -42,11 +35,13 @@ import { StatusEnum } from '@neura-desktop/shared/types';
 const RunMessages = () => {
   const navigate = useNavigate();
   const { messages = [], thinking, errorMsg, taskState, status } = useStore();
-  const containerRef = React.useRef<HTMLDivElement>(null);
+  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+  const bottomRef = React.useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = React.useRef(true);
   const suggestions: string[] = [];
   const { currentSessionId, chatMessages, updateMessages } = useSession();
   const isWelcome = currentSessionId === '';
-  const [isRightPanelOpen, setIsRightPanelOpen] = useState(!isWelcome);
+  const [isComputerOpen, setIsComputerOpen] = useState(!isWelcome);
 
   useEffect(() => {
     if (currentSessionId && messages.length) {
@@ -69,21 +64,41 @@ const RunMessages = () => {
 
   useEffect(() => {
     if (!currentSessionId.length) {
-      setIsRightPanelOpen(false);
+      setIsComputerOpen(false);
     }
   }, [currentSessionId]);
 
   useEffect(() => {
     if (chatMessages.length) {
-      setIsRightPanelOpen(true);
+      setIsComputerOpen(true);
     }
   }, [chatMessages.length]);
 
   useEffect(() => {
     setTimeout(() => {
-      containerRef.current?.scrollIntoView(false);
+      if (!shouldStickToBottomRef.current) {
+        return;
+      }
+      bottomRef.current?.scrollIntoView({ block: 'end' });
     }, 100);
-  }, [messages, thinking, errorMsg]);
+  }, [
+    messages.length,
+    thinking,
+    errorMsg,
+    taskState?.progressItems.length,
+    taskState?.toolCalls.length,
+    taskState?.status,
+  ]);
+
+  const handleChatScroll = () => {
+    const element = scrollContainerRef.current;
+    if (!element) {
+      return;
+    }
+    const distanceFromBottom =
+      element.scrollHeight - element.scrollTop - element.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 140;
+  };
 
   const handleSelect = async (suggestion: string) => {
     await api.setInstructions({ instructions: suggestion });
@@ -116,8 +131,12 @@ const RunMessages = () => {
       );
 
     return (
-      <div className="flex-1 w-full overflow-y-auto px-6 py-0 scrollbar-thin scrollbar-thumb-[#2a2a2a] scrollbar-track-transparent">
-        <div ref={containerRef}>
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleChatScroll}
+        className="min-h-0 flex-1 w-full overflow-y-auto overscroll-contain px-6 py-0 scrollbar-thin scrollbar-thumb-[#2a2a2a] scrollbar-track-transparent"
+      >
+        <div className="pb-8 pt-4">
           {!chatMessages?.length && suggestions?.length > 0 && (
             <Prompts suggestions={suggestions} onSelect={handleSelect} />
           )}
@@ -177,109 +196,73 @@ const RunMessages = () => {
 
           {thinking && <LoadingText text={'Thinking...'} />}
           {errorMsg && <ErrorMessage text={errorMsg} />}
+          <div ref={bottomRef} className="h-1" />
         </div>
       </div>
     );
   };
 
-  const renderPlanPanel = () => (
-    <aside className="hidden min-h-0 w-[260px] shrink-0 border-r border-[#2a2a2a] bg-[#0f0f0f] p-4 xl:block">
-      <div className="mb-4 text-sm font-semibold text-white">Plan</div>
-      <div className="space-y-2">
-        {(taskState?.todoItems || []).map((item, index) => {
-          const Icon =
-            item.status === 'done'
-              ? CheckCircle2
-              : item.status === 'in_progress'
-                ? Loader2
-                : Circle;
-          return (
-            <div
-              key={item.id}
-              className="rounded-lg border border-[#2a2a2a] bg-[#171717] p-3"
-            >
-              <div className="flex items-start gap-2">
-                <Icon
-                  className={cn(
-                    'mt-0.5 h-4 w-4 shrink-0',
-                    item.status === 'done' && 'text-emerald-400',
-                    item.status === 'in_progress' &&
-                      'animate-spin text-blue-400',
-                    item.status === 'pending' && 'text-[#666]',
-                    item.status === 'failed' && 'text-red-400',
-                  )}
-                />
-                <div className="min-w-0">
-                  <div className="text-xs text-muted-foreground">
-                    Step {index + 1}
-                  </div>
-                  <div className="mt-1 break-words text-sm text-white">
-                    {item.text}
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-        {!taskState?.todoItems?.length && (
-          <div className="text-sm text-muted-foreground">
-            The plan appears when Neura starts working.
-          </div>
-        )}
-      </div>
-    </aside>
-  );
-
-  const renderArtifactPanel = () => (
+  const renderComputerPanel = () => (
     <aside
       className={cn(
-        'min-h-0 border-l border-[#2a2a2a] bg-[#0f0f0f] transition-all duration-300 ease-in-out',
-        isRightPanelOpen
-          ? 'w-[340px] opacity-100'
+        'min-h-0 shrink-0 border-l border-white/[0.08] bg-[#080909] transition-[width,opacity] duration-300 ease-out',
+        isComputerOpen
+          ? taskState
+            ? 'w-[min(50vw,920px)] min-w-[520px] opacity-100'
+            : 'w-1/2 opacity-100'
           : 'w-0 overflow-hidden opacity-0',
       )}
     >
       <div className="flex h-full flex-col">
-        <div className="border-b border-[#2a2a2a] p-4 text-sm font-semibold text-white">
-          Artifacts
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 p-4">
           {(taskState?.artifacts || []).length > 0 ? (
-            <div className="space-y-2">
-              {taskState?.artifacts.map((artifact) => (
-                <div
-                  key={artifact.id}
-                  className="rounded-lg border border-[#2a2a2a] bg-[#171717] p-3 transition hover:border-blue-400/40"
-                >
-                  <button
-                    type="button"
-                    className="w-full text-left"
-                    onClick={() => api.openPath({ path: artifact.path })}
-                  >
-                    <div className="flex items-center gap-2 text-sm text-white">
-                      <FileText className="h-4 w-4 text-blue-300" />
-                      <span className="truncate">{artifact.title}</span>
-                    </div>
-                    <div className="mt-1 truncate text-xs text-muted-foreground">
-                      {artifact.path}
-                    </div>
-                  </button>
-                  {isCanvasArtifact(artifact.path) && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-3 w-full justify-center"
-                      onClick={() => openArtifactInCanvas(artifact)}
-                    >
-                      <Code2 className="h-4 w-4" />
-                      Open in Canvas
-                    </Button>
-                  )}
+            <div className="flex h-full min-h-0 flex-col gap-4">
+              <div className="min-h-0 flex-1">
+                <ImageGallery
+                  messages={chatMessages}
+                  onClose={() => setIsComputerOpen(false)}
+                />
+              </div>
+              <div className="max-h-40 shrink-0 overflow-y-auto border-t border-white/[0.08] pt-3">
+                <div className="mb-2 text-[11px] font-medium uppercase text-white/35">
+                  Artifacts
                 </div>
-              ))}
+                <div className="grid gap-2">
+                  {taskState?.artifacts.slice(-4).map((artifact) => (
+                    <div
+                      key={artifact.id}
+                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-white/76 transition hover:bg-white/[0.04]"
+                    >
+                      <FileText className="h-3.5 w-3.5 shrink-0 text-blue-200/75" />
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 truncate text-left"
+                        onClick={() => api.openPath({ path: artifact.path })}
+                        title={artifact.path}
+                      >
+                        {artifact.title}
+                      </button>
+                      {isCanvasArtifact(artifact.path) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 rounded-md px-2 text-xs text-white/55 hover:bg-white/[0.08] hover:text-white"
+                          onClick={() => openArtifactInCanvas(artifact)}
+                        >
+                          <Code2 className="h-3.5 w-3.5" />
+                          Canvas
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : (
-            <ImageGallery messages={chatMessages} />
+            <ImageGallery
+              messages={chatMessages}
+              onClose={() => setIsComputerOpen(false)}
+            />
           )}
         </div>
       </div>
@@ -292,11 +275,10 @@ const RunMessages = () => {
         status={status as StatusEnum}
         messages={chatMessages}
       />
-      {taskState && renderPlanPanel()}
       <div
         className={cn(
           'flex min-w-0 flex-col transition-all duration-300 ease-in-out',
-          taskState ? 'flex-1' : isRightPanelOpen ? 'w-1/2' : 'mx-auto w-2/3',
+          taskState ? 'flex-1' : isComputerOpen ? 'w-1/2' : 'mx-auto w-2/3',
         )}
       >
         <div className="mb-1 flex h-11 w-full items-center border-b border-[#2a2a2a] bg-[#0a0a0a]">
@@ -305,36 +287,26 @@ const RunMessages = () => {
           <ShareOptions />
           <Button
             variant="ghost"
-            size="icon"
-            onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
-            className="mr-4"
+            size="sm"
+            onClick={() => setIsComputerOpen((value) => !value)}
+            className="mr-4 h-8 rounded-lg px-2 text-xs text-white/60 hover:bg-white/[0.07] hover:text-white"
+            aria-label={
+              isComputerOpen ? "Close Neura's Computer" : "Open Neura's Computer"
+            }
           >
-            <ChevronRight
-              className={cn(
-                'h-4 w-4 transition-transform duration-200',
-                isRightPanelOpen ? 'rotate-0' : 'rotate-180',
-              )}
-            />
+            {isComputerOpen ? (
+              <PanelRightClose className="h-4 w-4" />
+            ) : (
+              <PanelRightOpen className="h-4 w-4" />
+            )}
+            <span className="hidden md:inline">Computer</span>
           </Button>
         </div>
         {!isWelcome && renderChatList()}
         {/* <ChatInput /> */}
       </div>
 
-      {taskState ? (
-        renderArtifactPanel()
-      ) : (
-        <div
-          className={cn(
-            'h-full border-l border-[#2a2a2a] bg-[#0f0f0f] transition-all duration-300 ease-in-out',
-            isRightPanelOpen
-              ? 'w-1/2 opacity-100'
-              : 'w-0 overflow-hidden opacity-0',
-          )}
-        >
-          <ImageGallery messages={chatMessages} />
-        </div>
-      )}
+      {renderComputerPanel()}
     </div>
   );
 };

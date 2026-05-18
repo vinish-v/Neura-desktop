@@ -130,13 +130,11 @@ const buildFollowUpAutomationInstructions = (
 };
 
 const ChatInput = ({
-  operator,
   sessionId,
   disabled,
   checkBeforeRun,
   variant = 'default',
 }: {
-  operator: Operator;
   sessionId: string;
   disabled: boolean;
   checkBeforeRun?: () => Promise<boolean>;
@@ -168,26 +166,6 @@ const ChatInput = ({
       return;
     }
   }, [status]);
-
-  useEffect(() => {
-    switch (operator) {
-      case Operator.RemoteComputer:
-        updateSetting({ ...settings, operator: Operator.RemoteComputer });
-        break;
-      case Operator.RemoteBrowser:
-        updateSetting({ ...settings, operator: Operator.RemoteBrowser });
-        break;
-      case Operator.LocalComputer:
-        updateSetting({ ...settings, operator: Operator.LocalComputer });
-        break;
-      case Operator.LocalBrowser:
-        updateSetting({ ...settings, operator: Operator.LocalBrowser });
-        break;
-      default:
-        updateSetting({ ...settings, operator: Operator.LocalComputer });
-        break;
-    }
-  }, [operator]);
 
   const getInstantInstructions = () => {
     if (localInstructions?.trim()) {
@@ -228,18 +206,14 @@ const ChatInput = ({
       selectedSkill && !followUpAutomation.shouldAutomate
         ? `/skill ${selectedSkill} ${followUpAutomation.instructions}`
         : followUpAutomation.instructions;
-    const routedOperator = followUpAutomation.shouldAutomate
-      ? Operator.LocalComputer
-      : operator;
-
-    await updateSetting({ ...settings, operator: routedOperator });
+    await updateSetting({ ...settings, operator: Operator.LocalComputer });
 
     const session = await getSession(sessionId);
     await updateSession(sessionId, {
       name: session?.name === 'New Session' ? instructions : session?.name,
       meta: {
         ...session!.meta,
-        operator: routedOperator,
+        operator: Operator.LocalComputer,
         ...(restUserData || {}),
       },
     });
@@ -386,7 +360,7 @@ const ChatInput = ({
               type="file"
               className="hidden"
               multiple
-              accept="image/*,.pdf,.txt,.md,.csv,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+              accept="image/*,video/*,audio/*,.pdf,.txt,.md,.csv,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
               onChange={handleFileChange}
             />
             <Textarea

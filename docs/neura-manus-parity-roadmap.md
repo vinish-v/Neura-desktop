@@ -94,6 +94,9 @@ Acceptance: users can inspect what happened, what was created, which sources wer
 - [x] Attach browser terminal-page proof for autonomous browser workflows.
 - [x] Add a local computer Planner -> Executor -> Validator actor runner for native file/process/connector tasks.
 - [x] Move visual desktop-app GUI tasks into the same actor graph.
-- [~] Add browser-grounded retrieval/source-quality scoring to Wide Research.
+- [x] Add source-quality scoring and proof metadata to recorded sources.
+- [x] Add shared claim/evidence validation status so runs surface `verified`, `needs_verification`, or `blocked` instead of vague completion.
+- [x] Add claim-level citation validation for Wide Research, including independent support for numeric/recommendation claims and needs-verification for unsupported claims.
+- [~] Add deeper browser-grounded retrieval to Wide Research.
 
-Acceptance: complex workflows can no longer be marked complete without source, artifact, or action evidence. Native and visual local-computer tasks now enter an actor plan; browser-grounded retrieval/source-quality scoring is the remaining Phase 8 gap.
+Acceptance: complex workflows can no longer be marked complete without source, artifact, or action evidence. Native and visual local-computer tasks now enter an actor plan; recorded evidence is surfaced with an explicit validation status, and Wide Research claims now carry claim-level support status before completion is trusted. Deeper browser-grounded retrieval remains the next Phase 8 gap.

@@ -5,10 +5,9 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
+  Github,
   KeyRound,
-  Link2,
   Lock,
-  Mail,
   Plug,
   RefreshCw,
   ShieldCheck,
@@ -42,15 +41,48 @@ type Draft = {
   databaseId?: string;
 };
 
-const iconByConnector: Record<string, typeof Plug> = {
-  gmail: Mail,
-  notion: Link2,
-  slack: Plug,
-  github: KeyRound,
-  generic_rest: Link2,
-};
-
 const permissionOptions = ['read', 'write', 'admin'] as const;
+
+const inputClass =
+  'rounded-full border-[#f6f1e8]/[0.12] bg-black/30 px-4 text-[#f6f1e8] placeholder:text-[#f6f1e8]/28';
+
+const BrandIcon = ({ connectorId }: { connectorId: string }) => {
+  if (connectorId === 'gmail') {
+    return (
+      <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+        <path fill="#EA4335" d="M4 6.4 12 12l8-5.6v11.2a1.6 1.6 0 0 1-1.6 1.6h-2.2V10.8L12 15.8l-4.2-5v8.4H5.6A1.6 1.6 0 0 1 4 17.6V6.4Z" />
+        <path fill="#FBBC04" d="M4 6.4 12 12l8-5.6v2.8l-8 5.6-8-5.6V6.4Z" />
+        <path fill="#34A853" d="M16.2 10.8 20 8.2v9.4a1.6 1.6 0 0 1-1.6 1.6h-2.2v-8.4Z" />
+        <path fill="#4285F4" d="M4 8.2v9.4a1.6 1.6 0 0 0 1.6 1.6h2.2v-8.4L4 8.2Z" />
+      </svg>
+    );
+  }
+
+  if (connectorId === 'slack') {
+    return (
+      <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+        <rect x="10" y="2" width="4" height="9" rx="2" fill="#36C5F0" />
+        <rect x="10" y="13" width="4" height="9" rx="2" fill="#2EB67D" />
+        <rect x="13" y="10" width="9" height="4" rx="2" fill="#ECB22E" />
+        <rect x="2" y="10" width="9" height="4" rx="2" fill="#E01E5A" />
+      </svg>
+    );
+  }
+
+  if (connectorId === 'notion') {
+    return (
+      <div className="flex h-6 w-6 items-center justify-center rounded-md border border-black/15 bg-white text-[15px] font-bold text-black">
+        N
+      </div>
+    );
+  }
+
+  if (connectorId === 'github') {
+    return <Github className="h-6 w-6 text-[#f6f1e8]" />;
+  }
+
+  return <Plug className="h-6 w-6 text-[#f6f1e8]" />;
+};
 
 const ConnectorCard = ({
   connector,
@@ -59,7 +91,6 @@ const ConnectorCard = ({
   connector: ConnectorSummary;
   onRefresh: () => Promise<void>;
 }) => {
-  const Icon = iconByConnector[connector.id] || Plug;
   const [draft, setDraft] = useState<Draft>({});
   const [busy, setBusy] = useState(false);
   const [oauthUrl, setOauthUrl] = useState('');
@@ -155,23 +186,23 @@ const ConnectorCard = ({
   };
 
   return (
-    <article className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
-      <div className="flex items-start gap-3">
-        <div className="rounded-md bg-black/30 p-2">
-          <Icon className="h-4 w-4 text-white/85" />
+    <article className="rounded-[30px] border border-[#f6f1e8]/[0.1] bg-[#11100e]/82 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
+      <div className="flex items-start gap-4">
+        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[22px] border border-[#f6f1e8]/[0.1] bg-[#f6f1e8]/[0.055]">
+          <BrandIcon connectorId={connector.id} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-white">
+              <h2 className="text-[17px] font-semibold text-[#f6f1e8]">
                 {connector.displayName}
               </h2>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-1 max-w-2xl text-sm leading-5 text-[#f6f1e8]/46">
                 {connector.description}
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <span className="rounded-full border border-white/10 bg-black/25 px-2.5 py-1 text-[11px] uppercase text-muted-foreground">
+              <span className="rounded-full border border-[#f6f1e8]/[0.1] bg-[#f6f1e8]/[0.045] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#f6f1e8]/52">
                 {connector.authState}
               </span>
               {connector.configured && (
@@ -180,9 +211,11 @@ const ConnectorCard = ({
             </div>
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_160px_110px]">
+          <div className="mt-5 grid gap-3 md:grid-cols-[1fr_150px_110px]">
             <div>
-              <Label className="text-xs">Permission</Label>
+              <Label className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#f6f1e8]/42">
+                Permission
+              </Label>
               <Select
                 value={connector.permission}
                 onValueChange={(permission: 'read' | 'write' | 'admin') =>
@@ -194,7 +227,7 @@ const ConnectorCard = ({
                     .then(onRefresh)
                 }
               >
-                <SelectTrigger className="mt-1 h-9 border-white/10 bg-black">
+                <SelectTrigger className="mt-2 h-10 rounded-full border-[#f6f1e8]/[0.12] bg-black/30 text-[#f6f1e8]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -207,8 +240,10 @@ const ConnectorCard = ({
               </Select>
             </div>
             <div>
-              <Label className="text-xs">Enabled</Label>
-              <div className="mt-2">
+              <Label className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#f6f1e8]/42">
+                Enabled
+              </Label>
+              <div className="mt-3">
                 <Switch
                   checked={connector.enabled}
                   onCheckedChange={(enabled) =>
@@ -228,6 +263,7 @@ const ConnectorCard = ({
                 size="sm"
                 disabled={busy}
                 onClick={disconnect}
+                className="rounded-full border-[#f6f1e8]/[0.12] bg-transparent text-[#f6f1e8]/70 hover:bg-[#f6f1e8]/[0.08] hover:text-[#f6f1e8]"
               >
                 <Unplug className="h-3.5 w-3.5" />
                 Revoke
@@ -235,7 +271,7 @@ const ConnectorCard = ({
             </div>
           </div>
 
-          <div className="mt-4 text-xs text-muted-foreground">
+          <div className="mt-4 text-xs text-[#f6f1e8]/38">
             Tools: {connector.tools.map((tool) => tool.name).join(', ')}
           </div>
 
@@ -249,6 +285,7 @@ const ConnectorCard = ({
                     </Label>
                     <Input
                       id={`${connector.id}-client-id`}
+                      className={inputClass}
                       value={draft.clientId || ''}
                       onChange={(event) =>
                         updateDraft('clientId', event.target.value)
@@ -262,6 +299,7 @@ const ConnectorCard = ({
                     </Label>
                     <Input
                       id={`${connector.id}-redirect`}
+                      className={inputClass}
                       value={draft.redirectUri || ''}
                       onChange={(event) =>
                         updateDraft('redirectUri', event.target.value)
@@ -276,13 +314,14 @@ const ConnectorCard = ({
                     Start OAuth
                   </Button>
                   {oauthUrl && (
-                    <span className="self-center truncate text-xs text-blue-200">
+                    <span className="self-center truncate text-xs text-[#f6f1e8]/52">
                       OAuth opened in browser
                     </span>
                   )}
                 </div>
                 <div className="grid gap-3 md:grid-cols-[1fr_130px]">
                   <Input
+                    className={inputClass}
                     value={draft.oauthCode || ''}
                     onChange={(event) =>
                       updateDraft('oauthCode', event.target.value)
@@ -303,6 +342,7 @@ const ConnectorCard = ({
                   </Label>
                   <Input
                     id={`${connector.id}-access-token`}
+                    className={inputClass}
                     type="password"
                     value={draft.apiKey || ''}
                     onChange={(event) =>
@@ -317,6 +357,7 @@ const ConnectorCard = ({
             {connector.id === 'notion' && (
               <div className="grid gap-3 md:grid-cols-3">
                 <Input
+                  className={inputClass}
                   type="password"
                   value={draft.apiKey || ''}
                   onChange={(event) =>
@@ -325,6 +366,7 @@ const ConnectorCard = ({
                   placeholder="Notion integration token"
                 />
                 <Input
+                  className={inputClass}
                   value={draft.parentPageId || ''}
                   onChange={(event) =>
                     updateDraft('parentPageId', event.target.value)
@@ -332,6 +374,7 @@ const ConnectorCard = ({
                   placeholder="Parent page ID"
                 />
                 <Input
+                  className={inputClass}
                   value={draft.databaseId || ''}
                   onChange={(event) =>
                     updateDraft('databaseId', event.target.value)
@@ -343,6 +386,7 @@ const ConnectorCard = ({
 
             {connector.id === 'slack' && (
               <Input
+                className={inputClass}
                 type="password"
                 value={draft.webhookUrl || ''}
                 onChange={(event) =>
@@ -355,6 +399,7 @@ const ConnectorCard = ({
             {connector.id === 'github' && (
               <div className="grid gap-3 md:grid-cols-3">
                 <Input
+                  className={inputClass}
                   type="password"
                   value={draft.apiKey || ''}
                   onChange={(event) =>
@@ -363,6 +408,7 @@ const ConnectorCard = ({
                   placeholder="GitHub token"
                 />
                 <Input
+                  className={inputClass}
                   value={draft.repository || ''}
                   onChange={(event) =>
                     updateDraft('repository', event.target.value)
@@ -370,6 +416,7 @@ const ConnectorCard = ({
                   placeholder="owner/repo"
                 />
                 <Input
+                  className={inputClass}
                   value={draft.apiBase || ''}
                   onChange={(event) =>
                     updateDraft('apiBase', event.target.value)
@@ -382,6 +429,7 @@ const ConnectorCard = ({
             {connector.id === 'generic_rest' && (
               <div className="grid gap-3 md:grid-cols-2">
                 <Input
+                  className={inputClass}
                   value={draft.baseUrl || ''}
                   onChange={(event) =>
                     updateDraft('baseUrl', event.target.value)
@@ -389,6 +437,7 @@ const ConnectorCard = ({
                   placeholder="https://api.example.com"
                 />
                 <Input
+                  className={inputClass}
                   type="password"
                   value={draft.apiKey || ''}
                   onChange={(event) =>
@@ -401,7 +450,11 @@ const ConnectorCard = ({
 
             {connector.authType !== 'oauth2' && (
               <div className="flex justify-end">
-                <Button type="submit" disabled={busy}>
+                <Button
+                  type="submit"
+                  disabled={busy}
+                  className="rounded-full bg-[#f6f1e8] text-black hover:bg-white"
+                >
                   <KeyRound className="h-4 w-4" />
                   Save Securely
                 </Button>
@@ -433,27 +486,38 @@ export default function Connectors() {
   );
 
   return (
-    <div className="h-full overflow-y-auto px-8 py-8">
+    <div className="neura-home-page h-full overflow-y-auto px-5 py-8 md:px-8">
       <div className="mx-auto max-w-6xl">
-        <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div className="mb-8 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-white">Connectors</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Secure integrations exposed to Neura agents as MCP tools.
+            <div className="mb-4 flex w-fit items-center gap-2 rounded-full border border-[#f6f1e8]/[0.1] bg-[#f6f1e8]/[0.045] px-4 py-2 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#f6f1e8]/58">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#f6f1e8]" />
+              App connections
+            </div>
+            <h1 className="max-w-3xl text-[54px] font-semibold leading-[0.92] tracking-normal text-[#f6f1e8] md:text-[76px]">
+              Connect your work apps.
+            </h1>
+            <p className="mt-5 max-w-xl text-sm leading-6 text-[#f6f1e8]/48">
+              Add secure credentials for services Neura can read from or write
+              to during a task.
             </p>
           </div>
-          <Button variant="outline" onClick={refresh}>
+          <Button
+            variant="outline"
+            className="rounded-full border-[#f6f1e8]/[0.12] bg-transparent text-[#f6f1e8]/70 hover:bg-[#f6f1e8]/[0.08] hover:text-[#f6f1e8]"
+            onClick={refresh}
+          >
             <RefreshCw className="h-4 w-4" />
             Refresh
           </Button>
         </div>
 
-        <section className="mb-5 rounded-lg border border-white/10 bg-white/[0.04] p-4">
-          <div className="flex items-center gap-2 text-sm font-semibold text-white">
+        <section className="mb-5 rounded-[30px] border border-[#f6f1e8]/[0.1] bg-[#f6f1e8] p-5 text-black">
+          <div className="flex items-center gap-2 text-sm font-semibold">
             <ShieldCheck className="h-4 w-4" />
             Secure Credential Storage
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-black/58">
             Tokens and webhooks are encrypted through Electron safeStorage and
             are not saved in normal app settings.
           </p>
@@ -462,7 +526,7 @@ export default function Connectors() {
               {recommended.map((connector) => (
                 <span
                   key={connector.id}
-                  className="rounded-full border border-blue-400/25 bg-blue-400/10 px-3 py-1 text-xs text-blue-100"
+                  className="rounded-full border border-black/10 bg-black/[0.045] px-3 py-1 text-xs text-black/62"
                 >
                   Recommended: {connector.displayName}
                 </span>
@@ -471,9 +535,9 @@ export default function Connectors() {
           )}
         </section>
 
-        <div className="grid gap-4">
+        <div className="grid gap-4 pb-8">
           {loading ? (
-            <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm text-muted-foreground">
+            <div className="rounded-[28px] border border-[#f6f1e8]/[0.1] bg-[#11100e]/72 p-6 text-sm text-[#f6f1e8]/42">
               Loading connectors...
             </div>
           ) : (

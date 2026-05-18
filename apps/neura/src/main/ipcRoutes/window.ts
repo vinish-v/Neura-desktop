@@ -44,6 +44,8 @@ const IMAGE_ARTIFACT_EXTENSIONS = new Set([
 ]);
 
 const PDF_ARTIFACT_EXTENSIONS = new Set(['.pdf']);
+const AUDIO_ARTIFACT_EXTENSIONS = new Set(['.aac', '.flac', '.m4a', '.mp3', '.ogg', '.wav']);
+const VIDEO_ARTIFACT_EXTENSIONS = new Set(['.mov', '.mp4', '.mpeg', '.mpg', '.webm']);
 
 type ArtifactPreview =
   | {
@@ -96,6 +98,17 @@ const EXTENSION_MIME_OVERRIDES: Record<string, string> = {
   '.csv': 'text/csv',
   '.svg': 'image/svg+xml',
   '.pdf': 'application/pdf',
+  '.aac': 'audio/aac',
+  '.flac': 'audio/flac',
+  '.m4a': 'audio/mp4',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.wav': 'audio/wav',
+  '.mov': 'video/quicktime',
+  '.mp4': 'video/mp4',
+  '.mpeg': 'video/mpeg',
+  '.mpg': 'video/mpeg',
+  '.webm': 'video/webm',
 };
 
 const resolveMimeType = (extension: string) =>
@@ -104,6 +117,10 @@ const resolveMimeType = (extension: string) =>
     ? 'text/plain'
     : IMAGE_ARTIFACT_EXTENSIONS.has(extension)
       ? `image/${extension.replace(/^\./, '')}`
+      : AUDIO_ARTIFACT_EXTENSIONS.has(extension)
+        ? `audio/${extension.replace(/^\./, '')}`
+        : VIDEO_ARTIFACT_EXTENSIONS.has(extension)
+          ? `video/${extension.replace(/^\./, '')}`
       : 'application/octet-stream');
 
 const readArtifactPreview = async (
@@ -132,7 +149,9 @@ const readArtifactPreview = async (
 
   if (
     IMAGE_ARTIFACT_EXTENSIONS.has(extension) ||
-    PDF_ARTIFACT_EXTENSIONS.has(extension)
+    PDF_ARTIFACT_EXTENSIONS.has(extension) ||
+    AUDIO_ARTIFACT_EXTENSIONS.has(extension) ||
+    VIDEO_ARTIFACT_EXTENSIONS.has(extension)
   ) {
     const stat = await fs.stat(artifactPath);
     if (stat.size > MAX_BINARY_PREVIEW_BYTES) {

@@ -64,6 +64,19 @@ Evidence values: `test`, `typecheck`, `build`, `manual`, `commit`, `tag`.
 | P6.4 | Optional scraper backend evaluation | Done        | Obscura is tested behind `SourceExtractor`, not added blindly  |
 | P6.5 | Local-only affordability guardrail  | In Progress | Roadmap and product surfaces avoid requiring paid cloud sandbox infrastructure |
 
+## Phase 7: Enterprise Manus Upgrade Slice
+
+| ID   | Task                                      | Status      | Done When                                                                 |
+| ---- | ----------------------------------------- | ----------- | ------------------------------------------------------------------------- |
+| P7.1 | Manus-style launcher actions              | Done        | Home exposes outcome buttons for slides, websites, apps, design, research, browser, and connectors |
+| P7.2 | Semantic intent contract                  | Done        | Routing returns task type, tools, risk, artifacts, approval, and proof fields |
+| P7.3 | Wide Research source quality proof        | Done        | Source records carry deterministic quality scores and completion proof summary |
+| P7.4 | Artifact refinement and proof affordances | Done        | Run panel exposes proof, preview, export summary, and refine actions |
+| P7.5 | Browser/computer recovery UX              | Done        | Runtime surfaces retry, resume, takeover, and persistent local browser session status |
+| P7.6 | Deep claim-level validation               | Done        | Research claims are mapped to citation records, strong claims require independent support, and gaps become needs-verification |
+| P7.7 | Honest evidence status                    | Done        | Runs expose verified, needs-verification, or blocked status from recorded sources, artifacts, browser, command, and connector evidence |
+| P7.8 | Recovery evidence layer                   | Done        | Browser/computer failures are classified with next-action recovery evidence shown in the run trace |
+
 ## Phase Checkpoint
 
 Before any phase is marked done:

@@ -11,9 +11,11 @@ import { MainLayout } from './layouts/MainLayout';
 import './styles/globals.css';
 
 const LocalOperator = lazy(() => import('./pages/local'));
+const Home = lazy(() => import('./pages/home'));
 const Projects = lazy(() => import('./pages/projects'));
 const Skills = lazy(() => import('./pages/skills'));
 const Dashboard = lazy(() => import('./pages/dashboard'));
+const Scheduled = lazy(() => import('./pages/scheduled'));
 const Connectors = lazy(() => import('./pages/connectors'));
 const Canvas = lazy(() => import('./pages/canvas'));
 
@@ -29,11 +31,12 @@ export default function App() {
       >
         <Routes>
           <Route element={<MainLayout />}>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={<Home />} />
             <Route path="/local" element={<LocalOperator />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/skills" element={<Skills />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/scheduled" element={<Scheduled />} />
             <Route path="/connectors" element={<Connectors />} />
             <Route path="/canvas" element={<Canvas />} />
           </Route>

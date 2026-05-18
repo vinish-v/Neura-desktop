@@ -350,9 +350,10 @@ const STABILIZED_V1_BASELINE: Record<string, RoadmapBaselineEntry> = {
       {
         id: 'hermes-p2-5-smoke',
         kind: 'manual',
-        summary: 'Hermes one-shot execution was smoke-tested from the vendored backend.',
+        summary:
+          'Hermes runs through the Neura structured event bridge instead of the old CLI launch path.',
         command:
-          'uv run --python 3.12 --project third_party/hermes-agent python -m hermes_cli.main -z "Reply exactly: Neura Hermes backend online"',
+          'npm.cmd --prefix apps/neura run typecheck:node',
       },
     ],
   },

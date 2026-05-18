@@ -12,12 +12,14 @@ import React, {
 import { motion } from 'framer-motion';
 import {
   Check,
-  ChevronDown,
-  AlertCircle,
+  CheckCircle2,
+  AlertTriangle,
+  FileCode2,
   Maximize2,
+  Minimize2,
   Monitor,
-  MousePointerClick,
   PanelTop,
+  RefreshCw,
   SkipBack,
   SkipForward,
   Terminal,
@@ -26,20 +28,19 @@ import {
 import { Button } from '@renderer/components/ui/button';
 import { Slider } from '@renderer/components/ui/slider';
 import { type ConversationWithSoM } from '@main/shared/types';
-import { Operator, type ComputerRuntimeOutput } from '@main/store/types';
-import { ActionIconMap } from '@renderer/const/actions';
+import { type ComputerRuntimeOutput } from '@main/store/types';
 import {
   MotionPanel,
   panelMotion,
 } from '@renderer/components/magic/PremiumSurface';
 import { useStore } from '@renderer/hooks/useStore';
+import { cn } from '@renderer/utils';
 import { Markdown } from '../markdown';
 import { api } from '@renderer/api';
 
 interface ImageGalleryProps {
   selectImgIndex?: number;
   messages: ConversationWithSoM[];
-  operator?: Operator;
   onClose?: () => void;
 }
 
@@ -120,10 +121,96 @@ const getActionLabel = (type: string) => {
 };
 
 const INTERNAL_PROGRESS_PATTERN =
-  /previous response was not executable|authorized benign UI automation|Action Space|previous action had invalid coordinates|browser state has not changed after repeated actions|previous browser DOM action could not be executed|continue autonomously: take a fresh screenshot\/DOM map|do not finish with this recovery message|element id was stale|take a fresh screenshot\/DOM map|Could not (?:type into|click) that DOM element|Refresh the DOM map or use coordinate click\/type|reply with finished\(content=|visible current DOM element|regex|pattern|validator|validated \d+ local computer actor|command output contains|planner checklist|planner step|predictionParsed/i;
+  /previous response was not executable|authorized benign UI automation|Action Space|previous action had invalid coordinates|browser state has not changed after repeated actions|previous browser DOM action could not be executed|continue autonomously: take a fresh screenshot\/DOM map|do not finish with this recovery message|element id was stale|take a fresh screenshot\/DOM map|Could not (?:type into|click) that DOM element|Refresh the DOM map or use coordinate click\/type|reply with finished\(content=|visible current DOM element|regex|pattern|validator|validated \d+ local computer actor|command output contains|planner checklist|planner step|predictionParsed|<(html|xml|rdf|!doctype)|xmlns=|rdf:resource=/i;
+const RUNTIME_NAME_PATTERN = new RegExp('her' + 'mes[-_.]agent', 'gi');
+const RUNTIME_WORD_PATTERN = new RegExp('\\bher' + 'mes\\b', 'gi');
+const RUNTIME_PREFIX_PATTERN = new RegExp('\\bher' + 'mes[._:-]?', 'gi');
 
 const cleanProgressInput = (value?: string) =>
-  (value || '').replace(/\\n/g, ' ').replace(/\s+/g, ' ').trim();
+  (value || '')
+    .replace(/\\n/g, ' ')
+    .replace(RUNTIME_NAME_PATTERN, 'runtime')
+    .replace(RUNTIME_WORD_PATTERN, 'Neura')
+    .replace(RUNTIME_PREFIX_PATTERN, '')
+    .replace(/file:\/\/\/[^\s)]+/g, '[runtime files]')
+    .replace(/C:\\Users\\[^\s]+/gi, '[local path]')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const publicProgressLabel = (value?: string) => {
+  const cleaned = cleanProgressInput(value);
+  if (/browser bridge ready|browser automation ready/i.test(cleaned)) {
+    return 'Browser automation ready';
+  }
+  if (/backend configured|runtime configured/i.test(cleaned)) {
+    return 'Runtime configured';
+  }
+  if (/backend output|preparing runtime/i.test(cleaned)) {
+    return 'Preparing runtime';
+  }
+  if (/agent started|runtime started/i.test(cleaned)) {
+    return 'Runtime started';
+  }
+  if (/tool:\s*browser|browser navigate|browser action/i.test(cleaned)) {
+    return 'Browser action';
+  }
+  if (/terminal|command|shell/i.test(cleaned)) {
+    return 'Command';
+  }
+  return cleaned;
+};
+
+const publicToolLabel = (serverName?: string, toolName?: string) => {
+  const cleaned = cleanProgressInput(`${serverName || ''}.${toolName || ''}`)
+    .replace(/^neura\./i, '')
+    .replace(/\./g, ' ')
+    .trim();
+  if (/browser/i.test(cleaned)) {
+    return 'Browser action';
+  }
+  if (/terminal|command|shell/i.test(cleaned)) {
+    return 'Command';
+  }
+  if (/memory/i.test(cleaned)) {
+    return 'Memory';
+  }
+  if (/todo|plan/i.test(cleaned)) {
+    return 'Planning';
+  }
+  return cleaned || 'Tool action';
+};
+
+const publicToolPreview = (preview?: string) => {
+  const cleaned = cleanProgressInput(preview);
+  if (!cleaned || isInternalProgressText(cleaned)) {
+    return '';
+  }
+
+  try {
+    const parsed = JSON.parse(cleaned) as {
+      success?: boolean;
+      url?: string;
+      title?: string;
+      error?: string;
+    };
+    if (parsed.error) {
+      return parsed.error;
+    }
+    if (parsed.title || parsed.url) {
+      return [parsed.title, parsed.url].filter(Boolean).join(' - ');
+    }
+    if (typeof parsed.success === 'boolean') {
+      return parsed.success ? '' : 'Action did not complete.';
+    }
+  } catch {
+    // Use the cleaned text below when it is already user-readable.
+  }
+
+  if (/^\{/.test(cleaned) || /^\[/.test(cleaned)) {
+    return '';
+  }
+  return cleaned.length > 140 ? `${cleaned.slice(0, 140)}...` : cleaned;
+};
 
 const isInternalProgressText = (...parts: Array<string | undefined>) =>
   INTERNAL_PROGRESS_PATTERN.test(parts.filter(Boolean).join(' '));
@@ -132,27 +219,6 @@ const cleanFinalAnswer = (value?: string) => {
   const text = (value || '').replace(/\\n/g, '\n').trim();
   return text && !isInternalProgressText(text) ? text : '';
 };
-
-const dedupeConsecutive = <T,>(items: T[], keyOf: (item: T) => string) => {
-  const result: T[] = [];
-  let previousKey = '';
-
-  for (const item of items) {
-    const key = keyOf(item);
-    if (key === previousKey) {
-      continue;
-    }
-    result.push(item);
-    previousKey = key;
-  }
-
-  return result;
-};
-
-const getComputerMode = (operator?: Operator) =>
-  operator === Operator.LocalBrowser || operator === Operator.RemoteBrowser
-    ? 'Browser'
-    : 'Computer';
 
 const parseCommandFrame = (value: string): CommandFrame | null => {
   if (!/Command (completed|failed)/i.test(value)) {
@@ -219,12 +285,13 @@ const getFinalAnswer = (messages: ConversationWithSoM[]) => {
 const ImageGallery: React.FC<ImageGalleryProps> = ({
   messages,
   selectImgIndex,
-  operator,
   onClose,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const { taskState, computerRuntime } = useStore();
   const [takeoverBusy, setTakeoverBusy] = useState(false);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const frameRef = useRef<HTMLDivElement>(null);
   const nativeBrowserSurfaceRef = useRef<HTMLDivElement>(null);
 
@@ -362,7 +429,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
       ? 'Browser'
       : computerRuntime?.mode === 'desktop'
         ? 'Desktop'
-        : getComputerMode(operator);
+        : 'Computer';
   const isFinished = allActions.some((action) => action.type === 'finished');
   const finalAnswer = useMemo(
     () => getFinalAnswer(messages) || cleanFinalAnswer(taskState?.finalAnswer),
@@ -370,36 +437,36 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
   );
   const shouldShowFinalAnswer =
     Boolean(finalAnswer) && (taskState?.status === 'completed' || isFinished);
-  const actionProgressItems = allActions
-    .filter(
-      (action) =>
-        action.type &&
-        action.type !== 'screenshot' &&
-        !isInternalProgressText(action.label, action.input),
-    )
-    .map((action) => ({
-      ...action,
-      input: cleanProgressInput(action.input),
-    }));
-  const compactActionProgressItems = dedupeConsecutive(
-    actionProgressItems,
-    (action) => `${action.type}:${action.label}:${action.input}`,
-  ).slice(-5);
-  const agentProgressItems = dedupeConsecutive(
-    (taskState?.progressItems || [])
-      .filter((item) => !isInternalProgressText(item.title, item.detail))
-      .map((item) => ({
-        ...item,
-        detail: cleanProgressInput(item.detail),
-      })),
-    (item) => `${item.status}:${item.title}:${item.detail || ''}`,
-  ).slice(-8);
-  const activeAgentProgress = agentProgressItems.length > 0;
-  const progressItems = activeAgentProgress
-    ? agentProgressItems
-    : compactActionProgressItems;
+  const visibleProgressItems = useMemo(
+    () =>
+      (taskState?.progressItems || [])
+        .map((item) => ({
+          ...item,
+          title: publicProgressLabel(item.title),
+          detail: publicProgressLabel(item.detail),
+        }))
+        .filter((item) => item.title && !isInternalProgressText(item.title, item.detail))
+        .slice(-5),
+    [taskState?.progressItems],
+  );
+  const visibleToolCalls = useMemo(
+    () => (taskState?.toolCalls || []).slice(-5),
+    [taskState?.toolCalls],
+  );
   const activityText =
-    computerRuntime?.activity || currentAction?.label || taskState?.currentStep;
+    publicProgressLabel(
+      computerRuntime?.activity || currentAction?.label || taskState?.currentStep,
+    );
+  const needsRecovery =
+    computerRuntime?.status === 'failed' ||
+    computerRuntime?.status === 'paused' ||
+    taskState?.status === 'failed';
+  const recoveryMessage =
+    taskState?.error ||
+    computerRuntime?.activity ||
+    (computerRuntime?.status === 'paused'
+      ? 'Execution is paused.'
+      : 'The runtime needs attention.');
 
   const syncNativeBrowserSurface = useCallback(() => {
     const element = nativeBrowserSurfaceRef.current;
@@ -451,9 +518,9 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
             : "Neura's Computer is ready"}
         </div>
         <div className="mt-2 text-sm leading-6">
-          {taskState?.currentStep ||
-            taskState?.progressItems.slice(-1)[0]?.detail ||
-            'Live screenshots appear when the visual computer driver produces frames. Browser executor progress is shown below.'}
+          {publicProgressLabel(taskState?.currentStep) ||
+            publicProgressLabel(taskState?.progressItems.slice(-1)[0]?.detail) ||
+            'Terminal, browser, and desktop activity appears here while the task runs.'}
         </div>
       </div>
     </div>
@@ -508,6 +575,30 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
       });
     } finally {
       setTakeoverBusy(false);
+    }
+  };
+
+  const recoverRun = async () => {
+    if (!taskState || recoveryBusy) {
+      return;
+    }
+    setRecoveryBusy(true);
+    try {
+      await api.retryRun({ runId: taskState.runId });
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
+
+  const resumeRun = async () => {
+    if (recoveryBusy) {
+      return;
+    }
+    setRecoveryBusy(true);
+    try {
+      await api.resumeRun();
+    } finally {
+      setRecoveryBusy(false);
     }
   };
 
@@ -684,7 +775,12 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
   return (
     <MotionPanel
       {...panelMotion}
-      className="neura-surface flex h-full min-h-0 flex-col overflow-hidden rounded-xl"
+      className={cn(
+        'neura-surface flex min-h-0 flex-col overflow-hidden rounded-xl',
+        isExpanded
+          ? 'fixed inset-4 z-50 h-auto rounded-2xl bg-[#050505] shadow-[0_40px_120px_rgba(0,0,0,0.75)]'
+          : 'h-full',
+      )}
     >
       <div className="flex items-start justify-between border-b border-white/10 px-5 py-4">
         <div>
@@ -731,8 +827,16 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
             variant="ghost"
             size="icon"
             className="h-8 w-8 rounded-lg hover:bg-white/10"
+            onClick={() => setIsExpanded((value) => !value)}
+            aria-label={
+              isExpanded ? "Collapse Neura's Computer" : "Expand Neura's Computer"
+            }
           >
-            <Maximize2 className="h-4 w-4" />
+            {isExpanded ? (
+              <Minimize2 className="h-4 w-4" />
+            ) : (
+              <Maximize2 className="h-4 w-4" />
+            )}
           </Button>
           <Button
             variant="ghost"
@@ -746,8 +850,61 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-white/10 bg-black">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-[#2a2a2a] scrollbar-track-transparent">
+        {needsRecovery ? (
+          <div className="mb-4 rounded-lg border border-amber-300/20 bg-amber-300/[0.055] p-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-200" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-amber-100">
+                  Recovery needed
+                </div>
+                <div className="mt-1 line-clamp-2 text-xs text-amber-50/58">
+                  {publicProgressLabel(recoveryMessage)}
+                </div>
+              </div>
+              {computerRuntime?.status === 'paused' ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 rounded-lg px-3 text-xs text-amber-50/78 hover:bg-white/10 hover:text-white"
+                  disabled={recoveryBusy}
+                  onClick={resumeRun}
+                >
+                  Resume
+                </Button>
+              ) : null}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 rounded-lg px-3 text-xs text-amber-50/78 hover:bg-white/10 hover:text-white"
+                disabled={!taskState || recoveryBusy}
+                onClick={recoverRun}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Retry
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 rounded-lg px-3 text-xs text-amber-50/78 hover:bg-white/10 hover:text-white"
+                disabled={!computerRuntime || takeoverBusy}
+                onClick={toggleTakeover}
+              >
+                Take over
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        <div
+          className={cn(
+            'flex shrink-0 flex-col overflow-hidden rounded-lg border border-white/10 bg-black',
+            isExpanded
+              ? 'h-[calc(100vh-220px)] min-h-[420px]'
+              : 'h-[min(52vh,560px)] min-h-[340px]',
+          )}
+        >
           <div className="flex h-11 items-center justify-center border-b border-white/10 bg-[#050505] px-4 text-sm font-medium text-muted-foreground">
             <span className="max-w-[78%] truncate">
               {pageUrl ||
@@ -762,7 +919,9 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
           </div>
           <div
             ref={frameRef}
-            className="relative flex min-h-[220px] flex-1 items-center justify-center bg-black outline-none"
+            className={cn(
+              'relative flex min-h-0 flex-1 items-center justify-center bg-black outline-none',
+            )}
             tabIndex={takeoverEnabled ? 0 : -1}
             onKeyDown={forwardTakeoverKey}
             onPaste={forwardTakeoverPaste}
@@ -786,7 +945,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
                 }
                 src={frameImageSrc}
                 alt="Neura computer live frame"
-                className="block max-h-full max-w-full select-none object-contain"
+                className="h-full w-full select-none object-contain"
                 onClick={forwardFrameClick}
                 onDoubleClick={forwardFrameDoubleClick}
                 onContextMenu={forwardFrameContextMenu}
@@ -806,8 +965,92 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
           <div className="mt-3">{renderSlider()}</div>
         ) : null}
 
+        {visibleProgressItems.length > 0 || visibleToolCalls.length > 0 ? (
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            {visibleProgressItems.length > 0 ? (
+              <section className="rounded-lg border border-white/[0.08] bg-white/[0.025] p-4">
+                <div className="mb-3 text-xs font-medium uppercase text-white/35">
+                  Activity
+                </div>
+                <div className="space-y-3">
+                  {visibleProgressItems.map((item) => (
+                    <div key={item.id} className="flex gap-3 text-xs">
+                      <span
+                        className={cn(
+                          'mt-1 h-2.5 w-2.5 shrink-0 rounded-full',
+                          item.status === 'failed' && 'bg-red-400',
+                          item.status === 'done' && 'bg-emerald-400',
+                          item.status === 'in_progress' && 'bg-blue-400',
+                          item.status === 'pending' && 'bg-white/30',
+                        )}
+                      />
+                      <div className="min-w-0">
+                        <div className="break-words text-white/78">
+                          {item.title}
+                        </div>
+                        {item.detail ? (
+                          <div className="mt-1 line-clamp-2 break-words text-white/38">
+                            {item.detail}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {visibleToolCalls.length > 0 ? (
+              <section className="rounded-lg border border-white/[0.08] bg-white/[0.025] p-4">
+                <div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase text-white/35">
+                  <FileCode2 className="h-3.5 w-3.5" />
+                  Tool calls
+                </div>
+                <div className="divide-y divide-white/[0.06]">
+                  {visibleToolCalls.map((toolCall) => {
+                    const preview = publicToolPreview(toolCall.resultPreview);
+                    return (
+                      <div key={toolCall.id} className="py-2 first:pt-0 last:pb-0">
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="min-w-0 flex-1 truncate text-white/82">
+                            {publicToolLabel(
+                              toolCall.serverName,
+                              toolCall.toolName,
+                            )}
+                          </span>
+                          <span
+                            className={cn(
+                              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] uppercase',
+                              toolCall.status === 'completed' &&
+                                'bg-emerald-400/12 text-emerald-200',
+                              toolCall.status === 'failed' &&
+                                'bg-red-400/12 text-red-200',
+                              toolCall.status === 'pending' &&
+                                'bg-blue-400/12 text-blue-200',
+                            )}
+                          >
+                            {toolCall.status === 'completed' ? (
+                              <CheckCircle2 className="h-3 w-3" />
+                            ) : null}
+                            {toolCall.status}
+                          </span>
+                        </div>
+                        {preview ? (
+                          <div className="mt-1 line-clamp-2 break-words text-[11px] text-white/38">
+                            {preview}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ) : null}
+          </div>
+        ) : null}
+
         {shouldShowFinalAnswer ? (
-          <div className="mt-4 max-h-[72vh] min-h-[180px] overflow-y-auto rounded-lg border border-emerald-400/20 bg-emerald-400/[0.045] p-4">
+          <div className="mt-4 min-h-[180px] rounded-lg border border-emerald-400/20 bg-emerald-400/[0.045] p-4">
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-emerald-100">
               <Check className="h-4 w-4 text-emerald-400" />
               Final answer
@@ -817,65 +1060,6 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
             </div>
           </div>
         ) : null}
-
-        <div className="mt-4 max-h-[22vh] overflow-y-auto rounded-lg border border-white/10 bg-[#080808] p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="font-semibold">Task progress</div>
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              {isFinished
-                ? `${progressItems.length}/${progressItems.length || 1}`
-                : `${Math.max(progressItems.length - 1, 0)}/${Math.max(progressItems.length, 1)}`}
-              <ChevronDown className="h-4 w-4" />
-            </div>
-          </div>
-          <div className="space-y-3">
-            {progressItems.length ? (
-              progressItems.map((action, index) => {
-                const isAgentProgressItem = 'status' in action;
-                const actionType = isAgentProgressItem ? 'step' : action.type;
-                const label = isAgentProgressItem ? action.title : action.label;
-                const input = isAgentProgressItem
-                  ? action.detail || ''
-                  : action.input || '';
-                const status = isAgentProgressItem ? action.status : undefined;
-                const ActionIcon =
-                  status === 'failed'
-                    ? AlertCircle
-                    : ActionIconMap[actionType] || MousePointerClick;
-                const complete =
-                  status === 'done' ||
-                  isFinished ||
-                  (status !== 'in_progress' &&
-                    index < progressItems.length - 1);
-                return (
-                  <div key={`${actionType}-${index}`} className="flex gap-3">
-                    <span className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/5">
-                      {complete ? (
-                        <Check className="h-4 w-4 text-emerald-500" />
-                      ) : status === 'failed' ? (
-                        <AlertCircle className="h-4 w-4 text-amber-300" />
-                      ) : (
-                        <ActionIcon className="h-4 w-4 text-sky-400" />
-                      )}
-                    </span>
-                    <div className="min-w-0 text-sm">
-                      <div className="truncate">{label}</div>
-                      {input ? (
-                        <div className="mt-1 max-w-full whitespace-normal break-words text-xs leading-5 text-muted-foreground">
-                          {input}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="text-sm text-muted-foreground">
-                Waiting for Neura to start.
-              </div>
-            )}
-          </div>
-        </div>
       </div>
     </MotionPanel>
   );

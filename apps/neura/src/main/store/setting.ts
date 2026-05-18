@@ -37,13 +37,12 @@ export const DEFAULT_SETTING: LocalStore = {
   maxLoopCount: 100,
   loopIntervalInMs: 1000,
   searchEngineForBrowser: SearchEngineForSettings.GOOGLE,
+  hermesBrowserBackend: 'local',
+  hermesWebBackend: 'auto',
+  hermesUseGateway: false,
   operator: Operator.LocalComputer,
   reportStorageBaseUrl: '',
   utioBaseUrl: '',
-  agentMemory: {
-    preferences: {},
-    updatedAt: Date.now(),
-  },
   taskRuns: [],
   backgroundTasks: [],
   neuraRoadmap: createStabilizedV1Roadmap(),
@@ -251,10 +250,15 @@ const normalizeSettingStore = (state: Partial<LocalStore>): LocalStore => {
     merged.loopIntervalInMs ?? DEFAULT_SETTING.loopIntervalInMs;
   merged.searchEngineForBrowser =
     merged.searchEngineForBrowser || DEFAULT_SETTING.searchEngineForBrowser;
+  merged.hermesBrowserBackend =
+    merged.hermesBrowserBackend || DEFAULT_SETTING.hermesBrowserBackend;
+  merged.hermesWebBackend =
+    merged.hermesWebBackend || DEFAULT_SETTING.hermesWebBackend;
+  merged.hermesUseGateway =
+    merged.hermesUseGateway ?? DEFAULT_SETTING.hermesUseGateway;
   merged.operator = merged.operator || DEFAULT_SETTING.operator;
   merged.reportStorageBaseUrl = merged.reportStorageBaseUrl || '';
   merged.utioBaseUrl = merged.utioBaseUrl || '';
-  merged.agentMemory = merged.agentMemory || DEFAULT_SETTING.agentMemory;
   merged.taskRuns = Array.isArray(merged.taskRuns) ? merged.taskRuns : [];
   merged.backgroundTasks = Array.isArray(merged.backgroundTasks)
     ? merged.backgroundTasks

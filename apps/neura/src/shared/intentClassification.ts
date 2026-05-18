@@ -17,7 +17,55 @@ export type IntentKind =
   | 'artifact'
   | 'website'
   | 'multimodal'
+  | 'connector'
+  | 'automation'
   | 'mixed';
+
+export type SemanticTaskType =
+  | 'conversation'
+  | 'answer'
+  | 'browser_operator'
+  | 'wide_research'
+  | 'local_computer'
+  | 'shell_or_process'
+  | 'artifact_creation'
+  | 'slide_creation'
+  | 'website_build'
+  | 'app_development'
+  | 'design_creation'
+  | 'multimodal_creation'
+  | 'connector_workflow'
+  | 'automation'
+  | 'mixed_workflow';
+
+export type IntentRiskLevel = 'low' | 'medium' | 'high';
+
+export type SemanticIntentContract = {
+  taskType: SemanticTaskType;
+  requiredTools: Array<
+    | 'browser'
+    | 'shell'
+    | 'files'
+    | 'local_app'
+    | 'documents'
+    | 'website'
+    | 'multimodal'
+    | 'connectors'
+    | 'scheduler'
+  >;
+  riskLevel: IntentRiskLevel;
+  expectedArtifacts: string[];
+  needsApproval: boolean;
+  verificationRequired: boolean;
+  completionProof:
+    | 'none'
+    | 'final_answer'
+    | 'sources'
+    | 'artifacts'
+    | 'local_action'
+    | 'connector_audit'
+    | 'mixed';
+};
 
 export type SharedIntentDecision = {
   surface: IntentSurface;
@@ -25,6 +73,7 @@ export type SharedIntentDecision = {
   kind: IntentKind;
   confidence: number;
   reason: string;
+  contract: SemanticIntentContract;
   signals: {
     direct: boolean;
     browser: boolean;
@@ -36,6 +85,10 @@ export type SharedIntentDecision = {
     artifact: boolean;
     websiteBuild: boolean;
     multimodal: boolean;
+    connector: boolean;
+    wideResearch: boolean;
+    slides: boolean;
+    design: boolean;
   };
 };
 
@@ -93,14 +146,32 @@ const GENERIC_LOCAL_APP_CONTROL_PATTERN =
 const WEBSITE_BUILD_PATTERN =
   /\b(build|create|generate|make|develop|implement)\b.*\b(website|web app|landing page|vite app|react app|next app|full-stack app|frontend app|dashboard)\b/i;
 
+const APP_DEVELOPMENT_PATTERN =
+  /\b(develop|build|create|implement|code|fix|debug)\b.*\b(app|application|feature|repo|project|component|backend|frontend|api)\b/i;
+
 const WIDE_RESEARCH_PATTERN =
   /\b(wide research|parallel research|research\s+\d+|analy[sz]e\s+(all|these|\d+)|compare\s+(all|these|\d+)|batch research|lead generation|prospects|competitors list)\b/i;
 
 const ARTIFACT_PATTERN =
   /\b(create|generate|make|build|export)\b.*\b(deck|slides?|pptx|presentation|report|pdf|docx|spreadsheet|xlsx|dashboard|csv)\b/i;
 
+const SLIDES_PATTERN =
+  /\b(create|generate|make|build|design|prepare)\b.*\b(deck|slides?|pptx|presentation)\b/i;
+
+const DESIGN_PATTERN =
+  /\b(design|mockup|wireframe|visual direction|brand|logo|poster|banner|asset|image concept)\b/i;
+
 const MULTIMODAL_PATTERN =
   /\b(generate image|create image|image generation|edit image|transcribe|speech to text|text to speech|voiceover|analy[sz]e video|video understanding)\b/i;
+
+const CONNECTOR_PATTERN =
+  /\b(connector|connectors|github|slack|drive|google drive|gmail|notion|mcp|webhook|oauth|automation|automations|zapier|workflow)\b/i;
+
+const SCHEDULER_PATTERN =
+  /\b(schedule|scheduled|every|daily|weekly|cron|remind|automation|automations)\b/i;
+
+const WRITE_OR_EXTERNAL_PATTERN =
+  /\b(write|send|post|publish|commit|push|upload|delete|remove|move|rename|approve|external|github|slack|drive|gmail|notion|webhook)\b/i;
 
 const EXPLICIT_CONTROL_PATTERN =
   /\b(open|launch|click|type|write|paste|press|scroll|select|fill|submit|send|message|text|dm|download|upload|attach|install|run|execute|start|stop|restart|close|move|copy|delete|remove|rename|create|save|navigate|go to|visit|search|look up|find|check|get|show|list|inspect|read|edit)\b/i;
@@ -110,6 +181,105 @@ const LOCAL_ARTIFACT_TARGET_PATTERN =
 
 const tokenCount = (text: string) => text.split(/\s+/).filter(Boolean).length;
 
+const unique = <T>(items: T[]) => [...new Set(items)];
+
+const buildContract = (input: {
+  taskType: SemanticTaskType;
+  browser?: boolean;
+  shell?: boolean;
+  localFile?: boolean;
+  localApp?: boolean;
+  websiteBuild?: boolean;
+  multimodal?: boolean;
+  connector?: boolean;
+  scheduler?: boolean;
+  artifact?: boolean;
+  slides?: boolean;
+  currentWeb?: boolean;
+  mixed?: boolean;
+  text: string;
+}): SemanticIntentContract => {
+  const requiredTools = unique(
+    [
+      input.browser || input.currentWeb ? 'browser' : undefined,
+      input.shell ? 'shell' : undefined,
+      input.localFile ? 'files' : undefined,
+      input.localApp ? 'local_app' : undefined,
+      input.artifact || input.slides ? 'documents' : undefined,
+      input.websiteBuild ? 'website' : undefined,
+      input.multimodal ? 'multimodal' : undefined,
+      input.connector ? 'connectors' : undefined,
+      input.scheduler ? 'scheduler' : undefined,
+    ].filter(Boolean) as SemanticIntentContract['requiredTools'],
+  );
+  const expectedArtifacts = unique(
+    [
+      input.slides ? 'presentation' : undefined,
+      input.websiteBuild ? 'website_project' : undefined,
+      input.artifact ? 'document_or_data_file' : undefined,
+      input.multimodal ? 'media_file' : undefined,
+      input.localFile ? 'local_file' : undefined,
+      input.connector ? 'connector_audit' : undefined,
+      input.currentWeb || input.browser ? 'citation_records' : undefined,
+    ].filter(Boolean) as string[],
+  );
+  const needsApproval =
+    input.connector ||
+    input.scheduler ||
+    (input.localFile && /delete|remove|move|rename|overwrite/i.test(input.text)) ||
+    WRITE_OR_EXTERNAL_PATTERN.test(input.text);
+  const highRisk =
+    /delete|remove|overwrite|payment|credential|password|secret|admin|production|push|publish/i.test(
+      input.text,
+    );
+  const mediumRisk =
+    needsApproval ||
+    input.shell ||
+    input.localApp ||
+    input.connector ||
+    input.scheduler;
+  const riskLevel: IntentRiskLevel = highRisk
+    ? 'high'
+    : mediumRisk
+      ? 'medium'
+      : 'low';
+  const verificationRequired = Boolean(
+    input.mixed ||
+    input.browser ||
+    input.currentWeb ||
+    input.localFile ||
+    input.shell ||
+    input.localApp ||
+    input.artifact ||
+    input.slides ||
+    input.websiteBuild ||
+    input.multimodal ||
+    input.connector,
+  );
+
+  return {
+    taskType: input.taskType,
+    requiredTools,
+    riskLevel,
+    expectedArtifacts,
+    needsApproval,
+    verificationRequired,
+    completionProof: input.mixed
+      ? 'mixed'
+      : input.connector
+        ? 'connector_audit'
+        : input.artifact || input.slides || input.websiteBuild || input.multimodal
+          ? 'artifacts'
+          : input.browser || input.currentWeb
+            ? 'sources'
+            : input.localFile || input.shell || input.localApp
+              ? 'local_action'
+              : verificationRequired
+                ? 'final_answer'
+                : 'none',
+  };
+};
+
 export function classifyUserIntent(instructions: string): SharedIntentDecision {
   const text = instructions.trim();
   const lower = text.toLowerCase();
@@ -117,8 +287,13 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
   const simpleChat = !text || SIMPLE_CHAT_PATTERN.test(text);
   const wideResearch = WIDE_RESEARCH_PATTERN.test(text);
   const websiteBuild = WEBSITE_BUILD_PATTERN.test(text);
+  const appDevelopment = APP_DEVELOPMENT_PATTERN.test(text) && !websiteBuild;
   const artifact = ARTIFACT_PATTERN.test(text);
+  const slides = SLIDES_PATTERN.test(text);
+  const design = DESIGN_PATTERN.test(text);
   const multimodal = MULTIMODAL_PATTERN.test(text);
+  const connector = CONNECTOR_PATTERN.test(text);
+  const scheduler = SCHEDULER_PATTERN.test(text);
   const shell = SHELL_PATTERN.test(text);
   const process = PROCESS_PATTERN.test(text) && shell;
   const localFile = LOCAL_FILE_PATTERN.test(text);
@@ -145,9 +320,13 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
   const browser = browserCandidate;
   const computer =
     websiteBuild ||
+    appDevelopment ||
     wideResearch ||
     artifact ||
+    design ||
     multimodal ||
+    connector ||
+    scheduler ||
     shell ||
     process ||
     localFile ||
@@ -178,7 +357,29 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
     artifact,
     websiteBuild,
     multimodal,
+    connector,
+    wideResearch,
+    slides,
+    design,
   };
+
+  const contractFor = (taskType: SemanticTaskType) =>
+    buildContract({
+      taskType,
+      browser,
+      shell,
+      localFile,
+      localApp,
+      websiteBuild,
+      multimodal,
+      connector,
+      scheduler,
+      artifact,
+      slides,
+      currentWeb,
+      mixed,
+      text,
+    });
 
   if (
     INFORMATIONAL_QUESTION_PATTERN.test(text) &&
@@ -193,6 +394,7 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
       kind: 'direct_answer',
       confidence: 0.9,
       reason: 'informational question answerable without operating tools',
+      contract: contractFor('answer'),
       signals,
     };
   }
@@ -204,6 +406,7 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
       kind: 'chat',
       confidence: 0.98,
       reason: 'plain conversational message',
+      contract: contractFor('conversation'),
       signals,
     };
   }
@@ -215,17 +418,7 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
       kind: 'browser_research',
       confidence: 0.92,
       reason: 'wide or batch research belongs to local workflow tools',
-      signals,
-    };
-  }
-
-  if (mixed) {
-    return {
-      surface: 'mixed',
-      firstOperator: browser ? 'browser' : 'computer',
-      kind: 'mixed',
-      confidence: 0.9,
-      reason: 'task needs both web context and local output or OS action',
+      contract: contractFor('wide_research'),
       signals,
     };
   }
@@ -237,6 +430,31 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
       kind: 'website',
       confidence: 0.92,
       reason: 'website/app build belongs to local workflow tools',
+      contract: contractFor('website_build'),
+      signals,
+    };
+  }
+
+  if (appDevelopment) {
+    return {
+      surface: 'computer',
+      firstOperator: 'computer',
+      kind: shell ? 'shell' : 'local_file',
+      confidence: 0.9,
+      reason: 'app development belongs to local workflow tools',
+      contract: contractFor('app_development'),
+      signals,
+    };
+  }
+
+  if (connector || scheduler) {
+    return {
+      surface: 'computer',
+      firstOperator: 'computer',
+      kind: scheduler ? 'automation' : 'connector',
+      confidence: 0.88,
+      reason: 'connector or automation workflow needs configured tools and approvals',
+      contract: contractFor(scheduler ? 'automation' : 'connector_workflow'),
       signals,
     };
   }
@@ -248,6 +466,19 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
       kind: 'artifact',
       confidence: 0.9,
       reason: 'artifact generation belongs to local workflow tools',
+      contract: contractFor(slides ? 'slide_creation' : 'artifact_creation'),
+      signals,
+    };
+  }
+
+  if (design && !browser) {
+    return {
+      surface: 'computer',
+      firstOperator: 'computer',
+      kind: multimodal ? 'multimodal' : 'artifact',
+      confidence: 0.86,
+      reason: 'design work should create or refine local artifacts',
+      contract: contractFor('design_creation'),
       signals,
     };
   }
@@ -259,6 +490,19 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
       kind: 'multimodal',
       confidence: 0.9,
       reason: 'multimodal generation or analysis workflow requested',
+      contract: contractFor('multimodal_creation'),
+      signals,
+    };
+  }
+
+  if (mixed) {
+    return {
+      surface: 'mixed',
+      firstOperator: browser ? 'browser' : 'computer',
+      kind: 'mixed',
+      confidence: 0.9,
+      reason: 'task needs both web context and local output or OS action',
+      contract: contractFor('mixed_workflow'),
       signals,
     };
   }
@@ -270,6 +514,7 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
       kind: process ? 'process' : 'shell',
       confidence: 0.91,
       reason: 'shell, process, build, or runtime task requires computer tools',
+      contract: contractFor('shell_or_process'),
       signals,
     };
   }
@@ -282,6 +527,7 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
       confidence: 0.88,
       reason:
         'local file, app, window, or desktop task requires computer tools',
+      contract: contractFor('local_computer'),
       signals,
     };
   }
@@ -292,12 +538,13 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
       firstOperator: 'browser',
       kind:
         currentWeb || WEB_EXTRACTION_PATTERN.test(text)
-          ? 'browser_research'
-          : 'browser_navigation',
+        ? 'browser_research'
+        : 'browser_navigation',
       confidence: currentWeb || urlOrDomain ? 0.9 : 0.84,
       reason: currentWeb
         ? 'current or source-backed web information requires browser tools'
         : 'web navigation or browser automation requested',
+      contract: contractFor('browser_operator'),
       signals,
     };
   }
@@ -309,6 +556,7 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
       kind: direct ? 'direct_answer' : 'chat',
       confidence: direct ? 0.86 : 0.72,
       reason: 'answerable without operating browser, shell, files, or desktop',
+      contract: contractFor(direct ? 'answer' : 'conversation'),
       signals,
     };
   }
@@ -319,6 +567,7 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
     kind: 'direct_answer',
     confidence: 0.6,
     reason: 'no reliable automation signal detected',
+    contract: contractFor('answer'),
     signals,
   };
 }

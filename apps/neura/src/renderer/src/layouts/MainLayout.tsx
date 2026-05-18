@@ -6,7 +6,7 @@ import { SidebarInset, SidebarProvider } from '@renderer/components/ui/sidebar';
 
 export function MainLayout() {
   const sidebarStyle = {
-    '--sidebar-width': '23.5rem',
+    '--sidebar-width': '20rem',
     '--sidebar-width-icon': '64px',
   } as CSSProperties;
 
@@ -17,7 +17,7 @@ export function MainLayout() {
     >
       <AppSidebar />
       <SidebarInset className="relative z-10 flex min-w-0 flex-1 flex-col bg-transparent">
-        <header className="h-16 shrink-0 border-b border-white/10 bg-[#1a1a1a]" />
+        <header className="neura-topbar h-11 shrink-0 border-b border-white/[0.07]" />
         <div className="min-h-0 flex-1">
           <Outlet />
         </div>

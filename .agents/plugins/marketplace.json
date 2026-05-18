@@ -1,0 +1,20 @@
+{
+  "name": "neura-local",
+  "interface": {
+    "displayName": "Neura Local Plugins"
+  },
+  "plugins": [
+    {
+      "name": "framer-design-scout",
+      "source": {
+        "source": "local",
+        "path": "./plugins/framer-design-scout"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Design"
+    }
+  ]
+}

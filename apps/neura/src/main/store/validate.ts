@@ -28,11 +28,6 @@ const WebMonitorSchema = z.object({
   lastStatus: z.string().optional(),
 });
 
-const AgentMemorySchema = z.object({
-  preferences: z.record(z.string()).optional(),
-  updatedAt: z.number().optional(),
-});
-
 const TaskArtifactSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -78,6 +73,7 @@ const TaskSourceRecordSchema = z.object({
 
 const TaskToolCallRecordSchema = z.object({
   id: z.string(),
+  externalCallId: z.string().optional(),
   serverName: z.string(),
   toolName: z.string(),
   arguments: z.record(z.unknown()).optional(),
@@ -161,6 +157,7 @@ const RoadmapProgressSchema = z.object({
 
 const TaskRunSchema = z.object({
   runId: z.string(),
+  sessionId: z.string().optional(),
   originalGoal: z.string(),
   runMode: z.enum([
     'direct',
@@ -175,6 +172,20 @@ const TaskRunSchema = z.object({
     'skill',
     'multi_agent',
   ]),
+  taskMode: z
+    .enum([
+      'research',
+      'scrape',
+      'code',
+      'spreadsheet',
+      'browser_login',
+      'scheduled_job',
+      'general',
+    ])
+    .optional(),
+  browserBackend: z
+    .enum(['local', 'browser-use', 'browserbase', 'camofox', 'firecrawl'])
+    .optional(),
   status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled']),
   phase: z
     .enum([
@@ -192,10 +203,23 @@ const TaskRunSchema = z.object({
     .enum(['planner', 'researcher', 'executor', 'critic'])
     .optional(),
   backgroundTaskId: z.string().optional(),
+  retryOfRunId: z.string().optional(),
+  retryCount: z.number().optional(),
   workspacePath: z.string().optional(),
   memoryFilePath: z.string().optional(),
   memorySummary: z.string().optional(),
   retrievedRunIds: z.array(z.string()).optional(),
+  checkpoints: z
+    .array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        status: z.enum(['created', 'resumed', 'retrying', 'validated', 'failed']),
+        summary: z.string().optional(),
+        createdAt: z.number(),
+      }),
+    )
+    .optional(),
   todoItems: z
     .array(
       z.object({
@@ -212,6 +236,7 @@ const TaskRunSchema = z.object({
   sourceRecords: z.array(TaskSourceRecordSchema).optional(),
   toolCalls: z.array(TaskToolCallRecordSchema).optional(),
   artifacts: z.array(TaskArtifactSchema).optional(),
+  artifactManifestPath: z.string().optional(),
   approvalEvents: z.array(ApprovalEventSchema).optional(),
   completionProof: CompletionProofSchema.optional(),
   roadmapProgress: RoadmapProgressSchema.optional(),
@@ -300,13 +325,19 @@ export const PresetSchema = z.object({
   maxLoopCount: z.number().min(25).max(200).optional(),
   loopIntervalInMs: z.number().min(0).max(3000).optional(),
   searchEngineForBrowser: z.nativeEnum(SearchEngineForSettings).optional(),
+  hermesBrowserBackend: z
+    .enum(['local', 'browser-use', 'browserbase', 'camofox', 'firecrawl'])
+    .optional(),
+  hermesWebBackend: z
+    .enum(['auto', 'firecrawl', 'tavily', 'parallel', 'exa', 'searxng'])
+    .optional(),
+  hermesUseGateway: z.boolean().optional(),
 
   // Report Settings
   reportStorageBaseUrl: z.string().url().optional(),
   utioBaseUrl: z.string().url().optional(),
   presetSource: PresetSourceSchema.optional(),
   monitors: z.array(WebMonitorSchema).optional(),
-  agentMemory: AgentMemorySchema.optional(),
   taskRuns: z.array(TaskRunSchema).optional(),
   backgroundTasks: z.array(BackgroundTaskSchema).optional(),
   neuraRoadmap: RoadmapProgressSchema.optional(),

@@ -78,13 +78,13 @@ const syncLiveMirror = (mode?: ComputerRuntimeMode, status?: ComputerRuntimeStat
     localDesktopMirror.stop();
   }
 
-  if (mode && mode !== 'browser') {
+  if (mode && mode !== 'browser' && mode !== 'terminal') {
     embeddedBrowserRuntime.destroy();
   }
 
   if (status === 'completed' || status === 'failed' || status === 'idle') {
     localDesktopMirror.stop();
-    if (mode && mode !== 'browser') {
+    if (mode && mode !== 'browser' && mode !== 'terminal') {
       embeddedBrowserRuntime.destroy();
     }
   }
@@ -239,53 +239,72 @@ export class ComputerRuntimeController {
 
   static output(output: Omit<ComputerRuntimeOutput, 'kind' | 'updatedAt'>) {
     return patchRuntime(
-      (runtime) =>
-        appendEvent(
+      (runtime) => {
+        const terminalOutput = {
+          kind: 'terminal' as const,
+          ...output,
+          updatedAt: Date.now(),
+        };
+        const keepVisualSurface =
+          runtime.mode === 'browser' && runtime.surface === 'frame_stream';
+
+        return appendEvent(
           {
             ...runtime,
-            mode: 'terminal',
-            surface: 'terminal',
-            subtitle: 'Terminal',
-            display: output.command || runtime.display,
+            mode: keepVisualSurface ? runtime.mode : 'terminal',
+            surface: keepVisualSurface ? runtime.surface : 'terminal',
+            subtitle: keepVisualSurface ? runtime.subtitle : 'Terminal',
+            display: keepVisualSurface
+              ? runtime.display
+              : output.command || runtime.display,
             cwd: output.cwd || runtime.cwd,
             status: output.failed ? 'failed' : 'running',
-            terminal: {
-              kind: 'terminal',
-              ...output,
-              updatedAt: Date.now(),
-            },
-            latestOutput: {
-              kind: 'terminal',
-              ...output,
-              updatedAt: Date.now(),
-            },
+            terminal: terminalOutput,
+            latestOutput: terminalOutput,
             updatedAt: Date.now(),
           },
           'runtime.output',
           output.failed ? 'Command failed' : 'Command output updated',
-        ),
+        );
+      },
     );
   }
 
   static complete(activity = 'Task completed') {
-    return this.update({
-      status: 'completed',
+    return patchRuntime(
+      (runtime) => ({
+        ...runtime,
+        status: 'completed',
+        activity,
+        frame: undefined,
+        latestFrame: undefined,
+        takeoverEnabled: false,
+        updatedAt: Date.now(),
+      }),
+      'runtime.completed',
       activity,
-      takeoverEnabled: false,
-    });
+    );
   }
 
   static fail(activity = 'Task failed') {
-    return this.update({
-      status: 'failed',
+    return patchRuntime(
+      (runtime) => ({
+        ...runtime,
+        status: 'failed',
+        activity,
+        frame: undefined,
+        latestFrame: undefined,
+        takeoverEnabled: false,
+        updatedAt: Date.now(),
+      }),
+      'runtime.failed',
       activity,
-      takeoverEnabled: false,
-    });
+    );
   }
 
   static setTakeover(enabled: boolean) {
     const updated = this.update({ takeoverEnabled: enabled });
-    if (updated?.mode === 'browser') {
+    if (updated?.mode === 'browser' && updated.surface === 'native_browser') {
       void embeddedBrowserRuntime.setInteractionBlocked(!enabled);
       if (enabled) {
         embeddedBrowserRuntime.focus();
@@ -297,10 +316,13 @@ export class ComputerRuntimeController {
   static updateBrowserState(
     browser: NonNullable<ComputerRuntimeState['browser']>,
   ) {
+    const isFrameStream =
+      browser.surfaceId === 'neura-browser' ||
+      browser.surfaceId === 'hermes-cdp-browser';
     return patchRuntime((runtime) => ({
       ...runtime,
       mode: 'browser',
-      surface: 'native_browser',
+      surface: isFrameStream ? 'frame_stream' : 'native_browser',
       subtitle: 'Browser',
       display: browser.url || runtime.display,
       currentUrl: browser.url || runtime.currentUrl,

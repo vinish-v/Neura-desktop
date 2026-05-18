@@ -138,6 +138,10 @@ describe('TaskRunRegistry', () => {
         url: 'https://example.com/report',
         title: 'Report',
         sourceName: 'Example',
+        quality: expect.objectContaining({
+          score: expect.any(Number),
+          tier: expect.any(String),
+        }),
       }),
     );
   });
@@ -170,5 +174,135 @@ describe('TaskRunRegistry', () => {
       'Need another source.',
     ]);
     expect(persistedRuns[0].validationStatus).toBe('invalid');
+  });
+
+  it('derives verified evidence status for completed source-backed runs', () => {
+    let persistedRuns: TaskRunRecord[] = [];
+    mocks.settingGet.mockImplementation(() => persistedRuns);
+    mocks.settingSet.mockImplementation((_key, value) => {
+      persistedRuns = value as TaskRunRecord[];
+    });
+
+    TaskRunRegistry.upsert({
+      ...buildRun('run_verified', 'completed'),
+      runMode: 'wide_research',
+      taskMode: 'research',
+      finalAnswer: 'The claim is grounded in a recorded source.',
+      sourceRecords: [
+        {
+          id: 'source-1',
+          url: 'https://www.sec.gov/report',
+          title: 'SEC Report',
+          sourceName: 'SEC',
+          excerpt: 'The claim is grounded in a recorded source.',
+          quality: {
+            score: 91,
+            tier: 'high',
+            reasons: ['institutional or developer source'],
+            domain: 'sec.gov',
+          },
+          capturedAt: 2,
+        },
+      ],
+      completedAt: 3,
+    });
+
+    expect(persistedRuns[0].evidenceValidation).toEqual(
+      expect.objectContaining({
+        completionStatus: 'verified',
+        confidence: expect.any(Number),
+      }),
+    );
+    expect(persistedRuns[0].evidence?.[0]).toEqual(
+      expect.objectContaining({
+        kind: 'citation_source',
+        url: 'https://www.sec.gov/report',
+      }),
+    );
+  });
+
+  it('marks completed runs as needing verification when evidence is missing', () => {
+    let persistedRuns: TaskRunRecord[] = [];
+    mocks.settingGet.mockImplementation(() => persistedRuns);
+    mocks.settingSet.mockImplementation((_key, value) => {
+      persistedRuns = value as TaskRunRecord[];
+    });
+
+    TaskRunRegistry.upsert({
+      ...buildRun('run_missing', 'completed'),
+      finalAnswer: 'Done.',
+      completedAt: 4,
+    });
+
+    expect(persistedRuns[0].evidenceValidation).toEqual(
+      expect.objectContaining({
+        completionStatus: 'needs_verification',
+      }),
+    );
+    expect(persistedRuns[0].evidenceValidation?.missingEvidence).toContain(
+      'Attach at least one source, artifact, browser, command, or connector evidence record.',
+    );
+  });
+
+  it('redacts secrets from derived tool-call evidence', () => {
+    let persistedRuns: TaskRunRecord[] = [buildRun('run_secret', 'running')];
+    mocks.settingGet.mockImplementation(() => persistedRuns);
+    mocks.settingSet.mockImplementation((_key, value) => {
+      persistedRuns = value as TaskRunRecord[];
+    });
+
+    TaskRunRegistry.addToolCall('run_secret', {
+      serverName: 'github',
+      toolName: 'create_issue',
+      arguments: {
+        token: 'ghp_secret',
+        payload: 'apiKey=sk-secret',
+      },
+      status: 'completed',
+      resultPreview: 'Authorization: Bearer abc123',
+    });
+
+    const serialized = JSON.stringify(persistedRuns[0].evidence);
+    expect(serialized).not.toContain('ghp_secret');
+    expect(serialized).not.toContain('sk-secret');
+    expect(serialized).not.toContain('abc123');
+    expect(serialized).toContain('[REDACTED]');
+  });
+
+  it('stores explicit recovery evidence as panel-safe data', () => {
+    let persistedRuns: TaskRunRecord[] = [buildRun('run_recovery', 'running')];
+    mocks.settingGet.mockImplementation(() => persistedRuns);
+    mocks.settingSet.mockImplementation((_key, value) => {
+      persistedRuns = value as TaskRunRecord[];
+    });
+
+    TaskRunRegistry.addEvidence('run_recovery', {
+      id: 'recovery-1',
+      kind: 'browser_snapshot',
+      summary: 'Browser recovery evidence: Login required',
+      status: 'completed',
+      metadata: {
+        recovery: {
+          kind: 'blocked_or_login_required',
+          nextAction: 'ask_user_for_login_or_captcha',
+          failureMessage: 'Authorization: Bearer abc123',
+        },
+      },
+    });
+
+    const serialized = JSON.stringify(persistedRuns[0].evidence);
+    expect(persistedRuns[0].evidence?.[0]).toEqual(
+      expect.objectContaining({
+        kind: 'browser_snapshot',
+        summary: 'Browser recovery evidence: Login required',
+        metadata: expect.objectContaining({
+          recovery: expect.objectContaining({
+            nextAction: 'ask_user_for_login_or_captcha',
+          }),
+        }),
+      }),
+    );
+    expect(serialized).not.toContain('abc123');
+    expect(serialized).toContain('[REDACTED]');
   });
 });

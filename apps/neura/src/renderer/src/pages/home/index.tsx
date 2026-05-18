@@ -6,15 +6,20 @@ import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Code2,
+  Command,
   FileText,
-  FolderOpen,
   Globe2,
   Image,
   Loader2,
+  MemoryStick,
+  MonitorCog,
+  Palette,
+  Plug,
   Plus,
+  Presentation,
   Search,
   Send,
-  Sparkles,
+  Terminal,
   X,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -24,11 +29,10 @@ import { Textarea } from '@renderer/components/ui/textarea';
 import { toast } from 'sonner';
 
 import { useSession } from '../../hooks/useSession';
-import { classifyInteractionForInstructions } from '../../utils/operatorRouting';
 
 import { DragArea } from '../../components/Common/drag';
-import { useSetting } from '@renderer/hooks/useSetting';
-import { TaskRunRecord } from '@main/store/types';
+import { Operator } from '@main/store/types';
+import { MANUS_STYLE_LAUNCHER_TASKS } from '@shared/taskLauncherCatalog';
 
 type LocalAttachment = File & { path?: string };
 
@@ -50,39 +54,46 @@ const attachmentSummary = (attachments: LocalAttachment[]) =>
     })
     .join('\n');
 
-const quickActions = [
+const launcherIcon = {
+  slides: Presentation,
+  website: Globe2,
+  code: Code2,
+  design: Palette,
+  research: Search,
+  browser: MonitorCog,
+  connectors: Plug,
+};
+
+const executionLayers = [
   {
-    title: 'Build Website',
-    prompt: 'Build a modern SaaS landing page for AI tools.',
+    step: '01',
+    title: 'Browser',
+    detail: 'Clicks, navigation, scraping',
     icon: Globe2,
   },
   {
-    title: 'Deep Research',
-    prompt: '/multi-agent Research the market for electric vehicles in India.',
-    icon: Search,
+    step: '02',
+    title: 'Shell',
+    detail: 'Commands and project work',
+    icon: Terminal,
   },
   {
-    title: 'Organize Files',
-    prompt: 'Organize files in my Downloads folder by type and date.',
-    icon: FolderOpen,
+    step: '03',
+    title: 'Memory',
+    detail: 'Context and learning',
+    icon: MemoryStick,
   },
   {
-    title: 'Code Project',
-    prompt:
-      'Inspect this project and suggest the next high-impact improvements.',
-    icon: Code2,
-  },
-  {
-    title: 'Use Skill',
-    prompt: 'Use market-research skill for AI desktop agents.',
-    icon: Sparkles,
+    step: '04',
+    title: 'Files',
+    detail: 'Reports, sheets, artifacts',
+    icon: FileText,
   },
 ];
 
 const Home = () => {
   const navigate = useNavigate();
   const { createSession } = useSession();
-  const { settings } = useSetting();
   const [prompt, setPrompt] = useState('');
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   const [starting, setStarting] = useState(false);
@@ -101,10 +112,8 @@ const Home = () => {
 
     try {
       setStarting(true);
-      const route = classifyInteractionForInstructions(instructions);
-      const operator = route.operator;
       const session = await createSession(instructions, {
-        operator,
+        operator: Operator.LocalComputer,
       });
 
       if (!session?.id) {
@@ -114,11 +123,9 @@ const Home = () => {
 
       navigate('/local', {
         state: {
-          operator,
           sessionId: session.id,
           from: 'home',
           initialPrompt: instructions,
-          initialMode: route.mode,
         },
       });
     } catch (error) {
@@ -144,199 +151,222 @@ const Home = () => {
   };
 
   const hasInput = !!prompt.trim() || attachments.length > 0;
-  const runs = ([...(settings.taskRuns || [])] as TaskRunRecord[]).sort(
-    (a, b) => b.startedAt - a.startedAt,
-  );
-  const activeRuns = runs.filter((run) => run.status === 'running').slice(0, 3);
-  const recentRuns = runs.filter((run) => run.status !== 'running').slice(0, 5);
 
   return (
-    <div className="relative h-full w-full overflow-y-auto bg-[#0a0a0a]">
+    <div className="neura-home-page relative h-full w-full overflow-y-auto">
       <DragArea></DragArea>
-      <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-8 py-12">
-        <section className="flex flex-1 flex-col items-center justify-center py-8">
-          <div className="mb-8 text-center">
-            <h1 className="text-[34px] font-semibold leading-tight tracking-normal text-white">
-              What would you like to do today?
-            </h1>
-            <p className="mt-3 text-sm leading-6 text-[#a3a3a3]">
-              Research, build, automate, organize, and ship with Neura.
-            </p>
+      <div className="mx-auto flex min-h-full w-full max-w-[1320px] flex-col px-5 py-8 md:px-8">
+        <section className="grid min-h-[calc(100vh-108px)] items-center gap-10 py-6 xl:grid-cols-[minmax(0,1fr)_430px]">
+          <div className="mx-auto flex w-full max-w-[910px] flex-col items-center xl:items-start">
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
+              className="mb-7 flex items-center gap-2 rounded-full border border-white/[0.1] bg-[#f5f1e8]/[0.045] px-4 py-2 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#f5f1e8]/58"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-[#f5f1e8] shadow-[0_0_18px_rgba(245,241,232,0.45)]" />
+              Neura desktop
+            </motion.div>
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.04, duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
+              className="text-center xl:text-left"
+            >
+              <h1 className="max-w-[860px] text-[54px] font-semibold leading-[0.9] tracking-normal text-[#f6f1e8] md:text-[86px]">
+                Tell Neura.
+                <br />
+                Watch it work.
+              </h1>
+              <p className="mt-6 max-w-[620px] text-[15px] leading-6 text-[#f6f1e8]/48 xl:text-[16px]">
+                One plain-language task becomes browser movement, terminal
+                work, files, artifacts, and a visible computer session.
+              </p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1, duration: 0.44, ease: [0.22, 1, 0.36, 1] }}
+              className="mt-10 w-full overflow-hidden rounded-[34px] border border-[#f6f1e8]/[0.12] bg-[#11100e]/95 shadow-[0_34px_110px_rgba(0,0,0,0.48),inset_0_1px_0_rgba(255,255,255,0.06)]"
+            >
+              <div className="relative min-h-[178px]">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  multiple
+                  accept="image/*,video/*,audio/*,.pdf,.txt,.md,.csv,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                  onChange={handleFileChange}
+                />
+                <Textarea
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === 'Enter' &&
+                      !event.shiftKey &&
+                      !event.nativeEvent.isComposing
+                    ) {
+                      event.preventDefault();
+                      startUnifiedNeura();
+                    }
+                  }}
+                  placeholder="Scrape 50 jobs into Excel, research competitors, edit my project, control the browser..."
+                  className="min-h-[176px] resize-none border-0 bg-transparent px-6 py-5 pb-20 pr-16 text-[17px] leading-7 text-[#f6f1e8] shadow-none placeholder:text-[#f6f1e8]/32 focus-visible:ring-0"
+                />
+                {attachments.length > 0 && (
+                  <div className="absolute bottom-[4.75rem] left-5 right-5 flex flex-wrap gap-2">
+                    {attachments.map((file, index) => {
+                      const AttachmentIcon = file.type?.startsWith('image/')
+                        ? Image
+                        : FileText;
+
+                      return (
+                        <div
+                          key={`${file.name}-${file.size}-${index}`}
+                          className="flex max-w-[240px] items-center gap-2 rounded-full border border-[#f6f1e8]/[0.12] bg-[#f6f1e8]/[0.055] px-3 py-1.5 text-xs text-[#f6f1e8]/82"
+                          title={file.path || file.name}
+                        >
+                          <AttachmentIcon className="h-3.5 w-3.5 shrink-0 text-[#f6f1e8]/72" />
+                          <span className="truncate">{file.name}</span>
+                          <span className="shrink-0 text-white/42">
+                            {formatBytes(file.size)}
+                          </span>
+                          <button
+                            type="button"
+                            className="ml-1 rounded-full text-[#f6f1e8]/42 transition hover:text-[#f6f1e8]"
+                            onClick={() => removeAttachment(index)}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between border-t border-[#f6f1e8]/[0.09] bg-black/24 px-4 py-4">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="icon"
+                    aria-label="Upload photos or files"
+                    className="h-11 w-11 rounded-full border border-[#f6f1e8]/[0.12] bg-[#f6f1e8]/[0.055] text-[#f6f1e8]/78 hover:bg-[#f6f1e8]/[0.1] hover:text-[#f6f1e8]"
+                    disabled={starting}
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Upload photos or files"
+                  >
+                    <Plus className="h-5 w-5 stroke-[2.3]" />
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    className="h-11 w-11 rounded-full bg-[#f6f1e8] text-black shadow-[0_12px_34px_rgba(246,241,232,0.14)] hover:bg-white disabled:bg-[#f6f1e8]/[0.08] disabled:text-[#f6f1e8]/28"
+                    disabled={!hasInput || starting}
+                    onClick={() => startUnifiedNeura()}
+                    aria-label="Start Neura task"
+                  >
+                    {starting ? (
+                      <Loader2 className="size-5 animate-spin" />
+                    ) : (
+                      <Send className="size-5" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+
+            <div className="mt-5 grid w-full gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {MANUS_STYLE_LAUNCHER_TASKS.map((action) => {
+                const Icon = launcherIcon[action.iconKey];
+                return (
+                  <button
+                    key={action.title}
+                    type="button"
+                    className="group flex min-h-[76px] items-center justify-between gap-3 rounded-2xl border border-[#f6f1e8]/[0.11] bg-[#f6f1e8]/[0.045] px-4 py-3 text-left transition hover:border-[#f6f1e8]/25 hover:bg-[#f6f1e8]/[0.075]"
+                    onClick={() => setPrompt(action.prompt)}
+                    title={action.expectedOutcome}
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Icon className="h-4 w-4 shrink-0 text-[#f6f1e8]/70" />
+                      <div className="min-w-0">
+                        <span className="block truncate text-sm font-semibold text-[#f6f1e8]/86">
+                          {action.title}
+                        </span>
+                        <span className="mt-1 block truncate text-xs text-[#f6f1e8]/42">
+                          {action.detail}
+                        </span>
+                      </div>
+                    </div>
+                    <Command className="h-3.5 w-3.5 shrink-0 text-[#f6f1e8]/24 transition group-hover:text-[#f6f1e8]/48" />
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          <div className="w-full max-w-3xl rounded-xl border border-[#2a2a2a] bg-[#171717]">
-            <div className="relative min-h-[156px]">
-              <input
-                ref={fileInputRef}
-                type="file"
-                className="hidden"
-                multiple
-                accept="image/*,.pdf,.txt,.md,.csv,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
-                onChange={handleFileChange}
-              />
-              <Textarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                onKeyDown={(event) => {
-                  if (
-                    event.key === 'Enter' &&
-                    !event.shiftKey &&
-                    !event.nativeEvent.isComposing
-                  ) {
-                    event.preventDefault();
-                    startUnifiedNeura();
-                  }
-                }}
-                placeholder="Ask Neura to build, research, automate, or organize..."
-                className="min-h-[154px] resize-none border-0 bg-transparent px-6 py-5 pb-16 pr-16 text-base leading-7 text-white shadow-none placeholder:text-[#666] focus-visible:ring-0"
-              />
-              {attachments.length > 0 && (
-                <div className="absolute bottom-16 left-6 right-6 flex flex-wrap gap-2">
-                  {attachments.map((file, index) => {
-                    const AttachmentIcon = file.type?.startsWith('image/')
-                      ? Image
-                      : FileText;
-
+          <motion.aside
+            initial={{ opacity: 0, x: 18 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.16, duration: 0.48, ease: [0.22, 1, 0.36, 1] }}
+            className="hidden xl:block"
+          >
+            <div className="relative overflow-hidden rounded-[36px] border border-[#f6f1e8]/[0.12] bg-[#f6f1e8] p-5 text-[#11100e] shadow-[0_34px_110px_rgba(0,0,0,0.42)]">
+              <div className="neura-portfolio-mark" aria-hidden="true">
+                <span>AI</span>
+              </div>
+              <div className="relative">
+                <div className="mb-12 flex items-center justify-between">
+                  <div>
+                    <div className="text-[13px] font-semibold uppercase tracking-[0.16em] text-black/48">
+                      Neura process
+                    </div>
+                    <div className="mt-3 max-w-[250px] text-[30px] font-semibold leading-[0.95] tracking-normal">
+                      Prompt to finished work.
+                    </div>
+                  </div>
+                  <span className="rounded-full border border-black/10 bg-black/[0.04] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-black/52">
+                    Runtime
+                  </span>
+                </div>
+                <div className="grid gap-2.5">
+                  {executionLayers.map((layer) => {
+                    const Icon = layer.icon;
                     return (
                       <div
-                        key={`${file.name}-${file.size}-${index}`}
-                        className="flex max-w-[220px] items-center gap-2 rounded-md border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-1 text-xs text-white"
-                        title={file.path || file.name}
+                        key={layer.title}
+                        className="flex items-center gap-3 rounded-[22px] border border-black/[0.08] bg-black/[0.035] p-3"
                       >
-                        <AttachmentIcon className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{file.name}</span>
-                        <span className="shrink-0 text-muted-foreground">
-                          {formatBytes(file.size)}
+                        <div className="flex h-11 w-11 items-center justify-center rounded-[18px] border border-black/[0.08] bg-white/45">
+                          <Icon className="h-4 w-4 text-black/58" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[15px] font-semibold text-black/82">
+                            {layer.title}
+                          </div>
+                          <div className="mt-0.5 truncate text-xs text-black/46">
+                            {layer.detail}
+                          </div>
+                        </div>
+                        <span className="text-[12px] font-semibold text-black/32">
+                          {layer.step}
                         </span>
-                        <button
-                          type="button"
-                          className="ml-1 rounded-full text-muted-foreground hover:text-foreground"
-                          onClick={() => removeAttachment(index)}
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
                       </div>
                     );
                   })}
                 </div>
-              )}
-              <motion.div
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.97 }}
-                className="absolute bottom-5 left-5"
-              >
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="icon"
-                  aria-label="Upload photos or files"
-                  className="size-9 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white hover:bg-[#252526]"
-                  disabled={starting}
-                  onClick={() => fileInputRef.current?.click()}
-                  title="Upload photos or files"
-                >
-                  <Plus className="size-5 stroke-[2.5]" />
-                </Button>
-              </motion.div>
-              <motion.div
-                whileHover={{ scale: hasInput ? 1.04 : 1 }}
-                whileTap={{ scale: hasInput ? 0.97 : 1 }}
-                className="absolute bottom-5 right-5"
-              >
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  className="size-9 rounded-lg bg-blue-500 text-white hover:bg-blue-400 disabled:bg-white/10 disabled:text-white/35"
-                  disabled={!hasInput || starting}
-                  onClick={() => startUnifiedNeura()}
-                >
-                  {starting ? (
-                    <Loader2 className="size-5 animate-spin" />
-                  ) : (
-                    <Send className="size-5" />
-                  )}
-                </Button>
-              </motion.div>
+                <div className="mt-8 rounded-[24px] border border-black/[0.08] bg-black/[0.035] p-4">
+                  <div className="text-[12px] font-semibold uppercase tracking-[0.16em] text-black/42">
+                    Live cockpit
+                  </div>
+                  <div className="mt-2 text-sm leading-5 text-black/58">
+                    When work starts, Neura switches from this launch page to
+                    the computer, browser, terminal, and artifact view.
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-
-          <div className="mt-5 grid w-full max-w-3xl grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
-            {quickActions.map((action) => {
-              const Icon = action.icon;
-              return (
-                <button
-                  key={action.title}
-                  type="button"
-                  className="neura-panel neura-panel-hover flex items-center gap-2 rounded-lg px-3 py-3 text-left text-sm text-white"
-                  onClick={() => setPrompt(action.prompt)}
-                >
-                  <Icon className="h-4 w-4 shrink-0 text-blue-300" />
-                  <span className="truncate">{action.title}</span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="grid gap-4 pb-8 lg:grid-cols-2">
-          <div className="neura-panel rounded-lg p-4">
-            <h2 className="mb-3 text-sm font-semibold text-white">
-              Active Tasks
-            </h2>
-            {activeRuns.length ? (
-              <div className="space-y-2">
-                {activeRuns.map((run) => (
-                  <div
-                    key={run.runId}
-                    className="rounded-md border border-[#2a2a2a] bg-[#0f0f0f] p-3"
-                  >
-                    <div className="truncate text-sm text-white">
-                      {run.originalGoal}
-                    </div>
-                    <div className="mt-2 h-1.5 rounded-full bg-white/10">
-                      <div className="h-full w-1/2 rounded-full bg-blue-400" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                No active tasks right now.
-              </p>
-            )}
-          </div>
-
-          <div className="neura-panel rounded-lg p-4">
-            <h2 className="mb-3 text-sm font-semibold text-white">
-              Recent Activity
-            </h2>
-            {recentRuns.length ? (
-              <div className="space-y-2">
-                {recentRuns.map((run) => (
-                  <div
-                    key={run.runId}
-                    className="flex items-center justify-between gap-3 rounded-md border border-[#2a2a2a] bg-[#0f0f0f] p-3"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate text-sm text-white">
-                        {run.originalGoal}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {run.runMode.replace(/_/g, ' ')}
-                      </div>
-                    </div>
-                    <span className="rounded-full border border-[#2a2a2a] px-2 py-1 text-[11px] text-muted-foreground">
-                      {run.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Finished tasks will appear here.
-              </p>
-            )}
-          </div>
+          </motion.aside>
         </section>
       </div>
       <DragArea></DragArea>

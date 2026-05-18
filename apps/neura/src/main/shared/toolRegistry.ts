@@ -203,6 +203,14 @@ export const NATIVE_COMPUTER_TOOLS: NativeToolDefinition[] = [
     description: 'Zip a local website project for static handoff.',
   },
   {
+    name: 'check_multimodal_readiness',
+    label: 'Check Multimodal Readiness',
+    domain: 'multimodal',
+    actionSpace: 'check_multimodal_readiness()',
+    description:
+      'Report which optional media providers are configured before trying image, audio, or video tools.',
+  },
+  {
     name: 'generate_image',
     label: 'Generate Image',
     domain: 'multimodal',

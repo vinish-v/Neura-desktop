@@ -3,6 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { GUIAgentData, Message } from '@neura-desktop/shared/types';
+import type {
+  EvidenceCompletionStatus,
+  TaskEvidence,
+  TaskEvidenceValidationResult,
+} from '@shared/taskEvidence';
 
 import { LocalStore, PresetSource } from './validate';
 import { ConversationWithSoM } from '@main/shared/types';
@@ -33,6 +38,22 @@ export type AgentRunMode =
   | 'mcp_autonomous'
   | 'skill'
   | 'multi_agent';
+
+export type HermesTaskMode =
+  | 'research'
+  | 'scrape'
+  | 'code'
+  | 'spreadsheet'
+  | 'browser_login'
+  | 'scheduled_job'
+  | 'general';
+
+export type HermesBrowserBackend =
+  | 'local'
+  | 'browser-use'
+  | 'browserbase'
+  | 'camofox'
+  | 'firecrawl';
 
 export type TaskComplexity = 'simple' | 'multi_step' | 'research';
 
@@ -88,6 +109,13 @@ export type TaskArtifact = {
   createdAt: number;
 };
 
+export type TaskSourceQuality = {
+  score: number;
+  tier: 'high' | 'medium' | 'low';
+  reasons: string[];
+  domain?: string;
+};
+
 export type TaskProgressItem = {
   id: string;
   title: string;
@@ -105,11 +133,14 @@ export type TaskSourceRecord = {
   title?: string;
   sourceName?: string;
   excerpt?: string;
+  quality?: TaskSourceQuality;
+  validationNotes?: string[];
   capturedAt: number;
 };
 
 export type TaskToolCallRecord = {
   id: string;
+  externalCallId?: string;
   serverName: string;
   toolName: string;
   arguments?: Record<string, unknown>;
@@ -117,6 +148,14 @@ export type TaskToolCallRecord = {
   resultPreview?: string;
   startedAt: number;
   completedAt?: number;
+};
+
+export type TaskCheckpoint = {
+  id: string;
+  label: string;
+  status: 'created' | 'resumed' | 'retrying' | 'validated' | 'failed';
+  summary?: string;
+  createdAt: number;
 };
 
 export type BackgroundTaskKind = 'mcp_autonomous' | 'skill' | 'multi_agent';
@@ -161,6 +200,16 @@ export type CompletionProof = {
     | 'connector_action';
   summary: string;
   evidence: string[];
+  completionStatus?: EvidenceCompletionStatus;
+  confidence?: number;
+  missingEvidence?: string[];
+  sourceQuality?: {
+    sourceCount: number;
+    highQualityCount: number;
+    mediumOrBetterCount: number;
+    averageScore: number;
+    domains: string[];
+  };
   verifiedAt: number;
 };
 
@@ -221,16 +270,22 @@ export type TaskTodoItem = {
 
 export type TaskState = {
   runId: string;
+  sessionId?: string;
   originalGoal: string;
   runMode: AgentRunMode;
+  taskMode?: HermesTaskMode;
+  browserBackend?: HermesBrowserBackend;
   status: TaskRunStatus;
   phase?: TaskRunPhase;
   activeAgent?: 'planner' | 'researcher' | 'executor' | 'critic';
   backgroundTaskId?: string;
+  retryOfRunId?: string;
+  retryCount?: number;
   workspacePath?: string;
   memoryFilePath?: string;
   memorySummary?: string;
   retrievedRunIds?: string[];
+  checkpoints?: TaskCheckpoint[];
   todoItems: TaskTodoItem[];
   progressItems: TaskProgressItem[];
   currentStep?: string;
@@ -239,7 +294,10 @@ export type TaskState = {
   sourceRecords: TaskSourceRecord[];
   toolCalls: TaskToolCallRecord[];
   artifacts: TaskArtifact[];
+  artifactManifestPath?: string;
   approvalEvents: ApprovalEvent[];
+  evidence?: TaskEvidence[];
+  evidenceValidation?: TaskEvidenceValidationResult;
   completionProof?: CompletionProof;
   roadmapProgress?: RoadmapProgress;
   finalAnswer?: string;

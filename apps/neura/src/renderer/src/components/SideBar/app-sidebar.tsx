@@ -59,6 +59,7 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
     | 'projects'
     | 'skills'
     | 'dashboard'
+    | 'scheduled'
     | 'connectors'
     | 'canvas'
     | { type: 'session'; id: string }
@@ -141,6 +142,19 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
     }
   }, [needsConfirm, goDashboard]);
 
+  const goScheduled = useCallback(async () => {
+    await navigate('/scheduled');
+  }, [navigate]);
+
+  const handleScheduledClick = useCallback(() => {
+    if (needsConfirm) {
+      setPendingAction('scheduled');
+      setNavDialogOpen(true);
+    } else {
+      goScheduled();
+    }
+  }, [needsConfirm, goScheduled]);
+
   const goConnectors = useCallback(async () => {
     await navigate('/connectors');
   }, [navigate]);
@@ -191,6 +205,8 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
       await goSkills();
     } else if (pendingAction === 'dashboard') {
       await goDashboard();
+    } else if (pendingAction === 'scheduled') {
+      await goScheduled();
     } else if (pendingAction === 'connectors') {
       await goConnectors();
     } else if (pendingAction === 'canvas') {
@@ -200,7 +216,17 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
     }
     setPendingAction(null);
     setNavDialogOpen(false);
-  }, [pendingAction, goHome, onSessionClick]);
+  }, [
+    pendingAction,
+    goHome,
+    goProjects,
+    goSkills,
+    goDashboard,
+    goScheduled,
+    goConnectors,
+    goCanvas,
+    onSessionClick,
+  ]);
 
   const onCancel = useCallback(() => {
     setPendingAction(null);
@@ -221,46 +247,46 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
     <>
       <Sidebar
         collapsible="icon"
-        className="select-none border-r border-white/10 bg-[#202020]"
+        className="select-none border-r border-white/[0.075] bg-[#050607]/96"
         {...props}
       >
         <DragArea></DragArea>
         <SidebarHeader className="px-3 py-4">
           <NeuraHeader showTrigger={location.pathname === '/'} />
-          <SidebarMenu className="items-center gap-2">
+          <SidebarMenu className="items-center gap-1.5">
             <SidebarMenuButton
-              className="h-11 rounded-xl bg-white/[0.08] text-base font-medium text-white hover:bg-white/[0.12] hover:text-white"
+              className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.065] text-[15px] font-medium text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] hover:bg-white/[0.1] hover:text-white"
               onClick={handleHomeClick}
             >
               <PencilLine />
               New task
             </SidebarMenuButton>
             <SidebarMenuButton
-              className="h-11 rounded-xl text-base font-medium text-white/90 hover:bg-white/[0.08] hover:text-white"
+              className="h-10 rounded-xl text-[15px] font-medium text-white/76 hover:bg-white/[0.065] hover:text-white"
               onClick={handleDashboardClick}
             >
               <Bot />
               Agent
-              <span className="ml-1 rounded-md bg-blue-500/20 px-1.5 py-0.5 text-xs text-blue-300">
+              <span className="ml-1 rounded-md border border-cyan-300/15 bg-cyan-300/10 px-1.5 py-0.5 text-xs text-cyan-200">
                 New
               </span>
             </SidebarMenuButton>
             <SidebarMenuButton
-              className="h-11 rounded-xl text-base font-medium text-white/90 hover:bg-white/[0.08] hover:text-white"
-              onClick={handleDashboardClick}
+              className="h-10 rounded-xl text-[15px] font-medium text-white/76 hover:bg-white/[0.065] hover:text-white"
+              onClick={handleScheduledClick}
             >
               <Clock3 />
               Scheduled
             </SidebarMenuButton>
             <SidebarMenuButton
-              className="h-11 rounded-xl text-base font-medium text-white/90 hover:bg-white/[0.08] hover:text-white"
+              className="h-10 rounded-xl text-[15px] font-medium text-white/76 hover:bg-white/[0.065] hover:text-white"
               onClick={handleDashboardClick}
             >
               <Search />
               Search
             </SidebarMenuButton>
             <SidebarMenuButton
-              className="h-11 rounded-xl text-base font-medium text-white/90 hover:bg-white/[0.08] hover:text-white"
+              className="h-10 rounded-xl text-[15px] font-medium text-white/76 hover:bg-white/[0.065] hover:text-white"
               onClick={handleSkillsClick}
             >
               <Library />
@@ -268,7 +294,7 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
             </SidebarMenuButton>
           </SidebarMenu>
           <SidebarGroup className="mt-7 p-0">
-            <SidebarGroupLabel className="px-2 text-sm text-muted-foreground">
+            <SidebarGroupLabel className="px-2 text-[12px] uppercase tracking-[0.14em] text-white/36">
               Projects
             </SidebarGroupLabel>
             <SidebarGroupAction
@@ -279,7 +305,7 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
             </SidebarGroupAction>
             <SidebarMenu className="mt-2">
             <SidebarMenuButton
-              className="h-10 rounded-xl text-base font-medium text-white/90 hover:bg-white/[0.08] hover:text-white"
+              className="h-10 rounded-xl text-[15px] font-medium text-white/76 hover:bg-white/[0.065] hover:text-white"
               onClick={handleProjectsClick}
             >
               <FolderPlus />
@@ -288,19 +314,19 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
             </SidebarMenu>
           </SidebarGroup>
           <SidebarGroup className="mt-5 p-0">
-            <SidebarGroupLabel className="px-2 text-sm text-muted-foreground">
+            <SidebarGroupLabel className="px-2 text-[12px] uppercase tracking-[0.14em] text-white/36">
               Tools
             </SidebarGroupLabel>
             <SidebarMenu className="mt-2">
             <SidebarMenuButton
-              className="h-10 rounded-xl text-base font-medium text-white/90 hover:bg-white/[0.08] hover:text-white"
+              className="h-10 rounded-xl text-[15px] font-medium text-white/76 hover:bg-white/[0.065] hover:text-white"
               onClick={handleCanvasClick}
             >
               <BookOpen />
               Canvas
             </SidebarMenuButton>
             <SidebarMenuButton
-              className="h-10 rounded-xl text-base font-medium text-white/90 hover:bg-white/[0.08] hover:text-white"
+              className="h-10 rounded-xl text-[15px] font-medium text-white/76 hover:bg-white/[0.065] hover:text-white"
               onClick={handleConnectorsClick}
             >
               <Cable />
@@ -311,7 +337,7 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
         </SidebarHeader>
         <SidebarContent className="px-1">
           <SidebarGroup className="px-2 pb-0 pt-1">
-            <SidebarGroupLabel className="px-0 text-sm text-muted-foreground">
+            <SidebarGroupLabel className="px-0 text-[12px] uppercase tracking-[0.14em] text-white/36">
               All tasks
             </SidebarGroupLabel>
             <SidebarGroupAction className="right-2 top-2 text-muted-foreground hover:text-white">
