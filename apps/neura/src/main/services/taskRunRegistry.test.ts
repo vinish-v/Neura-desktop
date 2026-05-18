@@ -14,7 +14,10 @@ vi.mock('@main/store/setting', () => ({
   },
 }));
 
-import { TaskRunRegistry } from './taskRunRegistry';
+import {
+  buildTaskRunEvidenceRequirements,
+  TaskRunRegistry,
+} from './taskRunRegistry';
 
 const buildRun = (
   runId: string,
@@ -241,6 +244,85 @@ describe('TaskRunRegistry', () => {
     expect(persistedRuns[0].validationStatus).toBe('invalid');
   });
 
+  it('stores a resumable state digest on every checkpoint', () => {
+    let persistedRuns: TaskRunRecord[] = [
+      {
+        ...buildRun('run_checkpoint', 'running'),
+        phase: 'acting',
+        currentStep: 'Use browser',
+        nextAction: 'Validate output',
+        workspacePath: 'D:\\workspaces\\run_checkpoint',
+        sessionId: 'neura_run_checkpoint',
+        todoItems: [
+          { id: 'todo-1', text: 'Find source', status: 'done' },
+          { id: 'todo-2', text: 'Validate output', status: 'pending' },
+        ],
+        browserRestoreSnapshot: {
+          url: 'https://example.com',
+          title: 'Example',
+          profilePath: 'C:\\Users\\HP\\AppData\\Roaming\\Neura\\browser',
+          backend: 'local',
+          cdpUrl: 'http://127.0.0.1:9222',
+          takeoverActive: false,
+          bridgeStatus: 'connected',
+          capturedAt: 12,
+          health: {
+            executableExists: true,
+            portReachable: true,
+            bridgeStatus: 'connected',
+            checkedAt: 12,
+            issues: [],
+            profile: {
+              exists: true,
+              writable: true,
+              lockState: 'unlocked',
+              issues: [],
+            },
+          },
+        },
+      },
+    ];
+    mocks.settingGet.mockImplementation(() => persistedRuns);
+    mocks.settingSet.mockImplementation((_key, value) => {
+      persistedRuns = value as TaskRunRecord[];
+    });
+
+    TaskRunRegistry.addCheckpoint('run_checkpoint', {
+      label: 'Observed browser state',
+      status: 'validated',
+      summary: 'Captured current state before validation.',
+    });
+
+    expect(persistedRuns[0].checkpoints?.[0]).toEqual(
+      expect.objectContaining({
+        label: 'Observed browser state',
+        snapshot: expect.objectContaining({
+          phase: 'acting',
+          status: 'running',
+          currentStep: 'Use browser',
+          nextAction: 'Validate output',
+          workspacePath: 'D:\\workspaces\\run_checkpoint',
+          sessionId: 'neura_run_checkpoint',
+          browser: expect.objectContaining({
+            url: 'https://example.com',
+            bridgeStatus: 'connected',
+            takeoverActive: false,
+          }),
+          counts: expect.objectContaining({
+            evidence: expect.any(Number),
+            validationFailures: 0,
+          }),
+          todos: {
+            pending: 1,
+            inProgress: 0,
+            done: 1,
+            failed: 0,
+          },
+        }),
+      }),
+    );
+  });
+
   it('derives verified evidence status for completed source-backed runs', () => {
     let persistedRuns: TaskRunRecord[] = [];
     mocks.settingGet.mockImplementation(() => persistedRuns);
@@ -306,6 +388,46 @@ describe('TaskRunRegistry', () => {
     );
     expect(persistedRuns[0].evidenceValidation?.missingEvidence).toContain(
       'Attach at least one source, artifact, browser, command, or connector evidence record.',
+    );
+  });
+
+  it('builds task-type-specific completion proof requirements', () => {
+    expect(
+      buildTaskRunEvidenceRequirements({
+        ...buildRun('website', 'completed'),
+        runMode: 'website_builder',
+        taskMode: 'code',
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        requireFileArtifact: true,
+        requireCommandTest: true,
+        acceptedArtifactKinds: ['website', 'archive', 'report', 'other'],
+      }),
+    );
+
+    expect(
+      buildTaskRunEvidenceRequirements({
+        ...buildRun('browser', 'completed'),
+        runMode: 'executor_browser',
+        taskMode: 'browser_login',
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        requireBrowserSnapshot: true,
+      }),
+    );
+
+    expect(
+      buildTaskRunEvidenceRequirements({
+        ...buildRun('media', 'completed'),
+        runMode: 'multimodal_workflow',
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        requireFileArtifact: true,
+        acceptedArtifactKinds: ['image', 'audio', 'video'],
+      }),
     );
   });
 

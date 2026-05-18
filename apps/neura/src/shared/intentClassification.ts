@@ -195,6 +195,7 @@ const buildContract = (input: {
   scheduler?: boolean;
   artifact?: boolean;
   slides?: boolean;
+  design?: boolean;
   currentWeb?: boolean;
   mixed?: boolean;
   text: string;
@@ -205,7 +206,7 @@ const buildContract = (input: {
       input.shell ? 'shell' : undefined,
       input.localFile ? 'files' : undefined,
       input.localApp ? 'local_app' : undefined,
-      input.artifact || input.slides ? 'documents' : undefined,
+      input.artifact || input.slides || input.design ? 'documents' : undefined,
       input.websiteBuild ? 'website' : undefined,
       input.multimodal ? 'multimodal' : undefined,
       input.connector ? 'connectors' : undefined,
@@ -217,6 +218,7 @@ const buildContract = (input: {
       input.slides ? 'presentation' : undefined,
       input.websiteBuild ? 'website_project' : undefined,
       input.artifact ? 'document_or_data_file' : undefined,
+      input.design ? 'design_asset' : undefined,
       input.multimodal ? 'media_file' : undefined,
       input.localFile ? 'local_file' : undefined,
       input.connector ? 'connector_audit' : undefined,
@@ -252,6 +254,7 @@ const buildContract = (input: {
     input.localApp ||
     input.artifact ||
     input.slides ||
+    input.design ||
     input.websiteBuild ||
     input.multimodal ||
     input.connector,
@@ -268,7 +271,11 @@ const buildContract = (input: {
       ? 'mixed'
       : input.connector
         ? 'connector_audit'
-        : input.artifact || input.slides || input.websiteBuild || input.multimodal
+        : input.artifact ||
+            input.slides ||
+            input.design ||
+            input.websiteBuild ||
+            input.multimodal
           ? 'artifacts'
           : input.browser || input.currentWeb
             ? 'sources'
@@ -376,6 +383,7 @@ export function classifyUserIntent(instructions: string): SharedIntentDecision {
       scheduler,
       artifact,
       slides,
+      design,
       currentWeb,
       mixed,
       text,

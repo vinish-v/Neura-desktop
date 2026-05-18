@@ -50,6 +50,13 @@ export const DEFAULT_SETTING: LocalStore = {
     enabled: false,
     port: 47837,
   },
+  mailTaskIntake: {
+    enabled: false,
+    connectorId: 'gmail',
+    subjectPrefix: '[Neura Task]',
+    maxResults: 10,
+    processedMessageIds: [],
+  },
   desktopProjects: [],
   neuraRoadmap: createStabilizedV1Roadmap(),
   connectors: [
@@ -280,6 +287,23 @@ const normalizeSettingStore = (state: Partial<LocalStore>): LocalStore => {
         : 47837,
     tokenHash: merged.localTaskApi?.tokenHash,
     tokenCreatedAt: merged.localTaskApi?.tokenCreatedAt,
+  };
+  merged.mailTaskIntake = {
+    enabled: Boolean(merged.mailTaskIntake?.enabled),
+    connectorId: 'gmail',
+    subjectPrefix:
+      typeof merged.mailTaskIntake?.subjectPrefix === 'string' &&
+      merged.mailTaskIntake.subjectPrefix.trim()
+        ? merged.mailTaskIntake.subjectPrefix.trim()
+        : DEFAULT_SETTING.mailTaskIntake?.subjectPrefix || '[Neura Task]',
+    maxResults:
+      typeof merged.mailTaskIntake?.maxResults === 'number'
+        ? Math.min(25, Math.max(1, Math.round(merged.mailTaskIntake.maxResults)))
+        : DEFAULT_SETTING.mailTaskIntake?.maxResults || 10,
+    processedMessageIds: Array.isArray(merged.mailTaskIntake?.processedMessageIds)
+      ? merged.mailTaskIntake.processedMessageIds.slice(-500)
+      : [],
+    updatedAt: merged.mailTaskIntake?.updatedAt,
   };
   merged.desktopProjects = Array.isArray(merged.desktopProjects)
     ? merged.desktopProjects

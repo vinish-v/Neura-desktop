@@ -27,6 +27,18 @@ export type HermesTaskRoute = {
   riskLevel: IntentRiskLevel;
   validationHint: string;
   promptDirectives: string[];
+  intentArbitration?: {
+    status:
+      | 'disabled'
+      | 'not_configured'
+      | 'skipped'
+      | 'accepted'
+      | 'rejected'
+      | 'failed';
+    usedModel: boolean;
+    reason: string;
+    proposedTaskType?: SemanticIntentContract['taskType'];
+  };
 };
 
 const includesAny = (value: string, patterns: RegExp[]) =>

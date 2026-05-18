@@ -9,6 +9,7 @@ import {
   Clock3,
   KeyRound,
   Loader2,
+  Mail,
   Pause,
   Play,
   RefreshCw,
@@ -55,18 +56,24 @@ export default function Scheduled() {
   const [localApiStatus, setLocalApiStatus] = useState<Awaited<
     ReturnType<typeof api.getLocalTaskApiStatus>
   > | null>(null);
+  const [mailStatus, setMailStatus] = useState<Awaited<
+    ReturnType<typeof api.getMailTaskIntakeStatus>
+  > | null>(null);
+  const [mailNotice, setMailNotice] = useState('');
   const [localApiToken, setLocalApiToken] = useState('');
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [background, scheduled, apiStatus] = await Promise.all([
+    const [background, scheduled, apiStatus, mailIntake] = await Promise.all([
       api.listBackgroundTasks(),
       api.listScheduledTasks(),
       api.getLocalTaskApiStatus(),
+      api.getMailTaskIntakeStatus(),
     ]);
     setTasks(background);
     setScheduledTasks(scheduled);
     setLocalApiStatus(apiStatus);
+    setMailStatus(mailIntake);
   }, []);
 
   useEffect(() => {
@@ -172,6 +179,17 @@ export default function Scheduled() {
     const result = await api.regenerateLocalTaskApiToken();
     setLocalApiStatus(result);
     setLocalApiToken(result.token);
+  };
+
+  const updateMailIntake = async (enabled: boolean) => {
+    await api.updateMailTaskIntake({ enabled });
+    await refresh();
+  };
+
+  const runMailIntakeNow = async () => {
+    const result = await api.runMailTaskIntakeNow();
+    setMailNotice(result.message || 'Mail task intake finished.');
+    await refresh();
   };
 
   const renderTask = (task: BackgroundTaskRecord) => {
@@ -484,6 +502,74 @@ export default function Scheduled() {
                   Enable API
                 </Button>
               )}
+            </div>
+          </section>
+
+          <section className="mt-4 rounded-[32px] border border-[#f6f1e8]/[0.12] bg-[#11100e]/95 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-semibold text-[#f6f1e8]">
+                  <Mail className="h-4 w-4" />
+                  Gmail task intake
+                </div>
+                <p className="mt-1 max-w-[420px] text-xs leading-5 text-[#f6f1e8]/42">
+                  Queues unread Gmail subjects that start with the configured
+                  prefix. Requires the real Gmail connector and never reads
+                  arbitrary mail as a task.
+                </p>
+              </div>
+              <span
+                className={cn(
+                  'rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em]',
+                  mailStatus?.settings.enabled
+                    ? 'border-emerald-300/25 bg-emerald-300/10 text-emerald-100'
+                    : 'border-[#f6f1e8]/[0.12] bg-[#f6f1e8]/[0.045] text-[#f6f1e8]/58',
+                )}
+              >
+                {mailStatus?.settings.enabled ? 'enabled' : 'disabled'}
+              </span>
+            </div>
+            {mailStatus ? (
+              <div className="mt-3 rounded-2xl border border-[#f6f1e8]/[0.08] bg-black/20 p-3 text-xs text-[#f6f1e8]/48">
+                <div>Prefix: {mailStatus.settings.subjectPrefix}</div>
+                <div className="mt-1">
+                  Processed locally: {mailStatus.settings.processedMessageIds.length}
+                </div>
+                {mailStatus.setupGap ? (
+                  <div className="mt-2 rounded-xl border border-amber-300/20 bg-amber-300/10 p-2 text-amber-100">
+                    {mailStatus.setupGap}
+                  </div>
+                ) : null}
+                {mailNotice ? (
+                  <div className="mt-2 rounded-xl border border-[#f6f1e8]/[0.08] bg-[#f6f1e8]/[0.045] p-2 text-[#f6f1e8]/62">
+                    {mailNotice}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="mt-3 flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="rounded-full border-[#f6f1e8]/[0.12] bg-transparent text-[#f6f1e8]/70"
+                onClick={runMailIntakeNow}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Run now
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className={cn(
+                  'rounded-full border-[#f6f1e8]/[0.12] bg-transparent text-[#f6f1e8]/70',
+                  mailStatus?.settings.enabled && 'border-red-300/20 text-red-100/80',
+                )}
+                onClick={() => updateMailIntake(!mailStatus?.settings.enabled)}
+              >
+                {mailStatus?.settings.enabled ? 'Disable' : 'Enable'}
+              </Button>
             </div>
           </section>
         </section>

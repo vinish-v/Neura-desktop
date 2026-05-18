@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   stat: vi.fn(),
   readFile: vi.fn(),
   readdir: vi.fn(),
+  rm: vi.fn(),
+  renderOfficeThumbnail: vi.fn(),
 }));
 
 // Mock window module
@@ -32,7 +34,12 @@ vi.mock('fs/promises', () => ({
     stat: mocks.stat,
     readFile: mocks.readFile,
     readdir: mocks.readdir,
+    rm: mocks.rm,
   },
+}));
+
+vi.mock('@main/services/artifactThumbnail', () => ({
+  renderOfficeArtifactThumbnail: mocks.renderOfficeThumbnail,
 }));
 
 describe('windowRoute.showMainWindow', () => {
@@ -82,6 +89,14 @@ describe('windowRoute.showMainWindow', () => {
 });
 
 describe('windowRoute.readArtifactPreview', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.renderOfficeThumbnail.mockResolvedValue({
+      ok: false,
+      reason: 'LibreOffice soffice was not found on PATH.',
+    });
+  });
+
   it('returns text preview for markdown files', async () => {
     mocks.stat.mockResolvedValue({ size: 120 });
     mocks.readFile.mockResolvedValue('# Report');
@@ -125,6 +140,10 @@ describe('windowRoute.readArtifactPreview', () => {
     );
     mocks.stat.mockResolvedValue({ size: 1024 });
     mocks.readFile.mockResolvedValue(await zip.generateAsync({ type: 'nodebuffer' }));
+    mocks.renderOfficeThumbnail.mockResolvedValue({
+      ok: false,
+      reason: 'LibreOffice soffice was not found on PATH.',
+    });
 
     const result = await windowRoute.readArtifactPreview.handle({
       input: { path: 'D:\\tmp\\report.docx' },
@@ -136,8 +155,35 @@ describe('windowRoute.readArtifactPreview', () => {
       expect(result.mimeType).toBe(
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       );
+      expect(result.text).toContain('Visual thumbnail unavailable');
       expect(result.text).toContain('Quarterly report summary');
     }
+  });
+
+  it('returns visual thumbnail previews for office artifacts when local tooling renders one', async () => {
+    mocks.stat.mockResolvedValue({ size: 1024 });
+    mocks.renderOfficeThumbnail.mockResolvedValue({
+      ok: true,
+      path: 'D:\\tmp\\thumbnail.png',
+      mimeType: 'image/png',
+      reason: '',
+    });
+    mocks.readFile.mockResolvedValue(Buffer.from('thumbnail-png'));
+
+    const result = await windowRoute.readArtifactPreview.handle({
+      input: { path: 'D:\\tmp\\slides.pptx' },
+      context: {} as any,
+    });
+
+    expect(result.kind).toBe('binary');
+    if (result.kind === 'binary') {
+      expect(result.mimeType).toBe('image/png');
+      expect(result.dataUrl).toContain(Buffer.from('thumbnail-png').toString('base64'));
+    }
+    expect(mocks.rm).toHaveBeenCalledWith('D:\\tmp', {
+      recursive: true,
+      force: true,
+    });
   });
 
   it('returns unsupported for unknown extension', async () => {

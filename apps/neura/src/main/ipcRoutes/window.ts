@@ -10,6 +10,7 @@ import { initIpc } from '@neura-desktop/electron-ipc/main';
 import { appUpdater } from '@main/window/createWindow';
 import { logger } from '../logger';
 import { showWindow } from '@main/window/index';
+import { renderOfficeArtifactThumbnail } from '@main/services/artifactThumbnail';
 
 const t = initIpc.create();
 
@@ -229,6 +230,32 @@ const readArtifactPreview = async (
         kind: 'unsupported',
         readable: false,
         reason: 'Preview is limited to 16 MB office/archive artifacts.',
+      };
+    }
+
+    if (OFFICE_ARTIFACT_EXTENSIONS.has(extension)) {
+      const thumbnail = await renderOfficeArtifactThumbnail(artifactPath);
+      if (thumbnail.ok) {
+        const binary = await fs.readFile(thumbnail.path);
+        await fs.rm(path.dirname(thumbnail.path), {
+          recursive: true,
+          force: true,
+        });
+        return {
+          kind: 'binary',
+          readable: true,
+          dataUrl: `data:${thumbnail.mimeType};base64,${binary.toString('base64')}`,
+          mimeType: thumbnail.mimeType,
+          reason: '',
+        };
+      }
+      const textPreview = await readZipTextPreview(artifactPath, extension);
+      return {
+        kind: 'text',
+        readable: true,
+        text: `Visual thumbnail unavailable: ${thumbnail.reason}\n\n${textPreview}`,
+        mimeType: resolveMimeType(extension),
+        reason: '',
       };
     }
 

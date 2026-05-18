@@ -38,6 +38,7 @@ import {
   createWebsiteProjectArtifact,
   createWebsiteZipArtifact,
 } from './artifactStudio';
+import { validateArtifactFile } from './artifactValidation';
 import { createRunId, TaskRunRegistry } from './taskRunRegistry';
 import { requestUserApproval } from './approvalGate';
 import { ComputerRuntimeController } from './computerRuntimeController';
@@ -706,6 +707,27 @@ const addActiveArtifact = ({
   });
 };
 
+const addValidatedActiveArtifact = async (artifact: {
+  title: string;
+  kind: ArtifactKind;
+  filePath: string;
+  mimeType?: string;
+  previewPath?: string;
+}) => {
+  const validation = await validateArtifactFile({
+    title: artifact.title,
+    kind: artifact.kind,
+    path: artifact.filePath,
+    mimeType: artifact.mimeType,
+  });
+  if (!validation.ok) {
+    throw new Error(
+      `Generated artifact failed local validation: ${validation.errors.join(' ')}`,
+    );
+  }
+  addActiveArtifact(artifact);
+};
+
 const mimeTypeForPath = (filePath: string) => {
   const ext = path.extname(filePath).toLowerCase();
   const map: Record<string, string> = {
@@ -1260,7 +1282,7 @@ async function generateImage(inputs: ActionInputs) {
     const image = result.data?.[0];
     if (image?.b64_json) {
       await fs.writeFile(targetPath, Buffer.from(image.b64_json, 'base64'));
-      addActiveArtifact({
+      await addValidatedActiveArtifact({
         title: extra.title?.trim() || path.basename(targetPath),
         kind: 'image',
         filePath: targetPath,
@@ -1280,7 +1302,7 @@ async function generateImage(inputs: ActionInputs) {
         targetPath,
         Buffer.from(await imageResponse.arrayBuffer()),
       );
-      addActiveArtifact({
+      await addValidatedActiveArtifact({
         title: extra.title?.trim() || path.basename(targetPath),
         kind: 'image',
         filePath: targetPath,
@@ -1387,7 +1409,7 @@ async function synthesizeSpeech(inputs: ActionInputs) {
     );
   }
   await fs.writeFile(outputPath, Buffer.from(await response.arrayBuffer()));
-  addActiveArtifact({
+  await addValidatedActiveArtifact({
     title: path.basename(outputPath),
     kind: 'audio',
     filePath: outputPath,

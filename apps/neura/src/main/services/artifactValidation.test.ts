@@ -9,7 +9,19 @@ import { validateArtifactFile } from './artifactValidation';
 
 let tempDir = '';
 
-const artifact = (filePath: string, kind: 'document' | 'presentation' | 'spreadsheet' | 'website' | 'archive' | 'image' | 'report') => ({
+const artifact = (
+  filePath: string,
+  kind:
+    | 'document'
+    | 'presentation'
+    | 'spreadsheet'
+    | 'website'
+    | 'archive'
+    | 'image'
+    | 'audio'
+    | 'video'
+    | 'report',
+) => ({
   path: filePath,
   kind,
   title: path.basename(filePath),
@@ -68,6 +80,29 @@ describe('artifact validation', () => {
     await expect(validateArtifactFile(artifact(siteDir, 'website'))).resolves.toEqual(
       expect.objectContaining({ ok: true, expectedFormat: 'website project directory' }),
     );
+  });
+
+  it('validates generated audio and video artifacts by container signatures', async () => {
+    const mp3Path = path.join(tempDir, 'speech.mp3');
+    await fs.writeFile(mp3Path, Buffer.from('ID3\u0003\u0000audio payload'));
+    await expect(validateArtifactFile(artifact(mp3Path, 'audio'))).resolves.toEqual(
+      expect.objectContaining({ ok: true, expectedFormat: 'audio' }),
+    );
+
+    const mp4Path = path.join(tempDir, 'clip.mp4');
+    await fs.writeFile(
+      mp4Path,
+      Buffer.from([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]),
+    );
+    await expect(validateArtifactFile(artifact(mp4Path, 'video'))).resolves.toEqual(
+      expect.objectContaining({ ok: true, expectedFormat: 'video' }),
+    );
+
+    const badAudio = path.join(tempDir, 'bad.mp3');
+    await fs.writeFile(badAudio, 'not audio');
+    const result = await validateArtifactFile(artifact(badAudio, 'audio'));
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toContain('not readable as audio');
   });
 
   it('rejects files with the wrong bytes for their claimed format', async () => {

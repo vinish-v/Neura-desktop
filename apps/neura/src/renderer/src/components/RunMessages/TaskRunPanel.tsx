@@ -198,7 +198,32 @@ const artifactRefinementInstruction = (
   kind: string,
   path: string,
   originalGoal: string,
+  action: 'refine' | 'reuse' | 'qa' | 'polish' = 'refine',
 ) => {
+  if (action === 'reuse') {
+    return [
+      'Reuse this existing media artifact as source material for the next iteration. Inspect the file first, preserve attribution/path context, and only create a new real output when a configured local/provider tool can do it.',
+      `Artifact path: ${path}`,
+      `Original task: ${originalGoal}`,
+      'Validate file existence, nonzero size, readable preview, and expected media format before saying it is complete.',
+    ].join('\n');
+  }
+  if (action === 'qa') {
+    return [
+      'Run website QA on this generated artifact: inspect layout, responsiveness, accessibility, console/build errors, linked media reuse, and export a validated website project/archive only after checks pass.',
+      `Artifact path: ${path}`,
+      `Original task: ${originalGoal}`,
+      'Validate file existence, nonzero size, readable preview, and expected format before saying it is complete.',
+    ].join('\n');
+  }
+  if (action === 'polish') {
+    return [
+      'Polish this slide artifact with a stronger narrative, slide hierarchy, speaker notes, citations, visual consistency, and export a validated PPTX.',
+      `Artifact path: ${path}`,
+      `Original task: ${originalGoal}`,
+      'Validate file existence, nonzero size, readable preview, and expected format before saying it is complete.',
+    ].join('\n');
+  }
   const templates: Record<string, string> = {
     presentation:
       'Polish the deck narrative, slide hierarchy, speaker notes, citations, visual consistency, and export a validated PPTX.',
@@ -220,6 +245,19 @@ const artifactRefinementInstruction = (
     `Original task: ${originalGoal}`,
     'Validate file existence, nonzero size, readable preview, and expected format before saying it is complete.',
   ].join('\n');
+};
+
+const artifactPrimaryAction = (kind: string) => {
+  if (kind === 'presentation') {
+    return { key: 'polish' as const, label: 'Polish' };
+  }
+  if (kind === 'website') {
+    return { key: 'qa' as const, label: 'QA' };
+  }
+  if (kind === 'image' || kind === 'audio' || kind === 'video') {
+    return { key: 'reuse' as const, label: 'Reuse' };
+  }
+  return { key: 'refine' as const, label: 'Refine' };
 };
 
 export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
@@ -394,7 +432,10 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
     }
   };
 
-  const refineArtifact = async (artifact: (typeof artifacts)[number]) => {
+  const refineArtifact = async (
+    artifact: (typeof artifacts)[number],
+    action: 'refine' | 'reuse' | 'qa' | 'polish' = 'refine',
+  ) => {
     if (!taskState) {
       return;
     }
@@ -402,8 +443,9 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
       artifact.kind,
       artifact.path,
       taskState.originalGoal,
+      action,
     );
-    setActionBusy(`refine-${artifact.id}`);
+    setActionBusy(`${action}-${artifact.id}`);
     try {
       await api.setInstructions({ instructions: prompt });
       await api.runAgent();
@@ -969,63 +1011,81 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
             </Button>
           </div>
           <div className="divide-y divide-white/[0.06]">
-            {artifacts.map((artifact) => (
-              <div
-                key={artifact.id}
-                className="py-2.5"
-                title={artifact.path}
-              >
-                <div className="flex items-center gap-2">
-                  <FileText className="h-3.5 w-3.5 shrink-0 text-blue-200/75" />
-                  <span className="truncate text-xs text-white">
-                    {artifact.title}
-                  </span>
-                  <span className="ml-auto shrink-0 text-[10px] uppercase text-white/35">
-                    {artifact.kind}
-                  </span>
+            {artifacts.map((artifact) => {
+              const primaryAction = artifactPrimaryAction(artifact.kind);
+              return (
+                <div
+                  key={artifact.id}
+                  className="py-2.5"
+                  title={artifact.path}
+                >
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-3.5 w-3.5 shrink-0 text-blue-200/75" />
+                    <span className="truncate text-xs text-white">
+                      {artifact.title}
+                    </span>
+                    <span className="ml-auto shrink-0 text-[10px] uppercase text-white/35">
+                      {artifact.kind}
+                    </span>
+                  </div>
+                  <div className="mt-1 truncate pl-5 text-[11px] text-white/35">
+                    {artifact.path}
+                  </div>
+                  <div className="mt-2 flex justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 rounded-lg px-2 text-xs text-white/55 hover:bg-white/[0.05] hover:text-white"
+                      disabled={
+                        actionBusy === `${primaryAction.key}-${artifact.id}`
+                      }
+                      onClick={() =>
+                        void refineArtifact(artifact, primaryAction.key)
+                      }
+                    >
+                      <Wand2 className="h-3.5 w-3.5" />
+                      {primaryAction.label}
+                    </Button>
+                    {primaryAction.key !== 'refine' ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 rounded-lg px-2 text-xs text-white/55 hover:bg-white/[0.05] hover:text-white"
+                        disabled={actionBusy === `refine-${artifact.id}`}
+                        onClick={() => void refineArtifact(artifact)}
+                      >
+                        Refine
+                      </Button>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 rounded-lg px-2 text-xs text-white/55 hover:bg-white/[0.05] hover:text-white"
+                      onClick={() => void previewArtifact(artifact)}
+                    >
+                      <MonitorPlay className="h-3.5 w-3.5" />
+                      Preview
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 rounded-lg px-2 text-xs text-white/55 hover:bg-white/[0.05] hover:text-white"
+                      onClick={() => api.revealPath({ path: artifact.path })}
+                    >
+                      Reveal
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 rounded-lg px-2 text-xs text-white/55 hover:bg-white/[0.05] hover:text-white"
+                      onClick={() => api.openPath({ path: artifact.path })}
+                    >
+                      Open
+                    </Button>
+                  </div>
                 </div>
-                <div className="mt-1 truncate pl-5 text-[11px] text-white/35">
-                  {artifact.path}
-                </div>
-                <div className="mt-2 flex justify-end gap-2">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 rounded-lg px-2 text-xs text-white/55 hover:bg-white/[0.05] hover:text-white"
-                    disabled={actionBusy === `refine-${artifact.id}`}
-                    onClick={() => void refineArtifact(artifact)}
-                  >
-                    <Wand2 className="h-3.5 w-3.5" />
-                    Refine
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 rounded-lg px-2 text-xs text-white/55 hover:bg-white/[0.05] hover:text-white"
-                    onClick={() => void previewArtifact(artifact)}
-                  >
-                    <MonitorPlay className="h-3.5 w-3.5" />
-                    Preview
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 rounded-lg px-2 text-xs text-white/55 hover:bg-white/[0.05] hover:text-white"
-                    onClick={() => api.revealPath({ path: artifact.path })}
-                  >
-                    Reveal
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 rounded-lg px-2 text-xs text-white/55 hover:bg-white/[0.05] hover:text-white"
-                    onClick={() => api.openPath({ path: artifact.path })}
-                  >
-                    Open
-                  </Button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

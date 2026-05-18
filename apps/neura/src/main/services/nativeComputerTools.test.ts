@@ -209,6 +209,68 @@ describe('native multimodal provider readiness tools', () => {
     expect(mocks.requestUserApproval).not.toHaveBeenCalled();
     await fs.rm(tempDir, { recursive: true, force: true });
   });
+
+  it('validates generated speech files before reporting success', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neura-speech-test-'));
+    const outputPath = path.join(tempDir, 'speech.mp3');
+    mocks.settingGet.mockReturnValue({
+      textToSpeech: {
+        baseUrl: 'https://audio.example.test/v1',
+        apiKey: 'secret-audio-key',
+        model: 'tts-model',
+      },
+    });
+    const bytes = Buffer.from('ID3\u0003\u0000audio payload');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        arrayBuffer: async () =>
+          bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      })),
+    );
+
+    const result = await executeNativeComputerTool('synthesize_speech', {
+      path: outputPath,
+      text: 'Hello from Neura',
+    } as never);
+
+    expect(result.status).toBe(StatusEnum.END);
+    expect(result.message).toContain('Synthesized speech');
+    await expect(fs.readFile(outputPath)).resolves.toEqual(bytes);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('rejects generated speech when provider output is not readable audio', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neura-speech-test-'));
+    const outputPath = path.join(tempDir, 'speech.mp3');
+    mocks.settingGet.mockReturnValue({
+      textToSpeech: {
+        baseUrl: 'https://audio.example.test/v1',
+        apiKey: 'secret-audio-key',
+        model: 'tts-model',
+      },
+    });
+    const bytes = Buffer.from('not audio');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        arrayBuffer: async () =>
+          bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      })),
+    );
+
+    const result = await executeNativeComputerTool('synthesize_speech', {
+      path: outputPath,
+      text: 'Hello from Neura',
+    } as never);
+
+    expect(result.status).toBe(StatusEnum.ERROR);
+    expect(result.message).toContain('Generated artifact failed local validation');
+    expect(result.message).toContain('not readable as audio');
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
 });
 
 describe('native local file tools', () => {

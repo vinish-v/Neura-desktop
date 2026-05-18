@@ -29,6 +29,11 @@ export const connectorsRoute = t.router({
     .handle(async ({ input }) => {
       return ConnectorsService.getInstance().refresh(input.connectorId);
     }),
+  revokeConnectorProviderToken: t.procedure
+    .input<{ connectorId: string }>()
+    .handle(async ({ input }) => {
+      return ConnectorsService.getInstance().revokeProvider(input.connectorId);
+    }),
   connectConnector: t.procedure
     .input<{
       connectorId: string;

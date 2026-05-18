@@ -91,6 +91,14 @@ Evidence values: `test`, `typecheck`, `build`, `manual`, `commit`, `tag`.
 | P7.21 | Connector lifecycle audit               | Done        | Connector connect, settings update, OAuth start/complete, and local revoke actions now write audit-log entries, not only connector tool calls |
 | P7.22 | Local API token integrity               | Done        | Local task API refuses to listen when settings lack a usable token hash and surfaces a regenerate-token setup gap instead of inventing an unknowable token |
 | P7.23 | Local API port recovery                 | Done        | Local task API reports an unavailable port as a setup gap instead of throwing through Desktop startup |
+| P7.24 | Model-assisted intent arbitration       | Done        | Optional planner-model arbitration can upgrade routing behind deterministic safety rules and reports setup gaps when no planner provider is configured |
+| P7.25 | Office visual thumbnails                | Done        | DOCX/PPTX/XLSX previews render a first-page PNG when LibreOffice and Poppler are available, otherwise show an honest tooling gap |
+| P7.26 | Provider revoke coverage                | Done        | Gmail OAuth tokens can be revoked through the real provider endpoint before local credentials are removed; unsupported connectors report the gap |
+| P7.27 | Generated media export checks           | Done        | Generated image/audio/video artifacts are validated for existence, nonzero size, readable preview, and expected signatures before being registered |
+| P7.28 | Task-type proof validators              | Done        | Research, browser, website, artifact, media, code, spreadsheet, and connector runs now require matching completion evidence before verified proof |
+| P7.29 | Launcher routing regression coverage    | Done        | Launcher prompts are tested against semantic task types and proof expectations, including design artifact proof |
+| P7.30 | Gmail mail task intake                  | Done        | Disabled-by-default Gmail intake reads explicit `[Neura Task]` unread subjects through the real read-only connector and queues background Hermes tasks |
+| P7.31 | Checkpoint state digests                | Done        | Checkpoints persist compact phase, next-action, workspace, session, browser, evidence, artifact, and todo digests for resume continuity |
 
 ## Phase Checkpoint
 
@@ -104,6 +112,7 @@ Before any phase is marked done:
 
 Latest local proof:
 
+- `npm.cmd --prefix apps/neura run test -- --run src/main/services/intentArbitration.test.ts src/main/services/task-manager.test.ts src/main/services/artifactThumbnail.test.ts src/main/ipcRoutes/window.test.ts src/main/services/connectors-service.test.ts src/main/services/artifactValidation.test.ts src/main/services/nativeComputerTools.test.ts src/main/services/taskRunRegistry.test.ts src/shared/taskEvidence.test.ts src/shared/intentClassification.test.ts src/shared/taskLauncherCatalog.test.ts src/main/services/mail-task-intake-service.test.ts` passed (12 files, 61 tests).
 - `npm.cmd --prefix apps/neura run test -- --run src/shared/browserAutomationRecovery.test.ts src/main/services/hermesBrowserBridge.test.ts src/main/services/taskRunRegistry.test.ts src/main/services/artifactValidation.test.ts src/main/services/nativeComputerTools.test.ts` passed.
 - `npm.cmd --prefix apps/neura run test -- --run src/main/services/scheduled-task-service.test.ts src/main/services/desktop-projects-service.test.ts` passed.
 - `npm.cmd --prefix apps/neura run test -- --run src/main/services/connectors-service.test.ts src/main/services/mcp-service.test.ts` passed.
@@ -112,3 +121,5 @@ Latest local proof:
 - `npm.cmd --prefix apps/neura run test -- --run src/main/services/local-task-api-service.test.ts` passed.
 - `npm.cmd --prefix apps/neura run typecheck:node` passed.
 - `npm.cmd --prefix apps/neura run typecheck:web` passed.
+- `npm.cmd --prefix apps/neura run build:dist` passed.
+- `npm.cmd --prefix apps/neura run package` passed and produced `apps/neura/out/Neura-win32-x64/Neura.exe`.

@@ -211,11 +211,43 @@ export type TaskToolCallRecord = {
   completedAt?: number;
 };
 
+export type TaskCheckpointSnapshot = {
+  phase?: TaskRunPhase;
+  status: TaskRunStatus;
+  currentStep?: string;
+  nextAction?: string;
+  workspacePath?: string;
+  sessionId?: string;
+  browser?: {
+    url?: string;
+    title?: string;
+    backend?: HermesBrowserBackend;
+    bridgeStatus?: BrowserBridgeHealth['bridgeStatus'];
+    takeoverActive?: boolean;
+    profilePath?: string;
+  };
+  counts: {
+    artifacts: number;
+    sources: number;
+    evidence: number;
+    toolCalls: number;
+    validationFailures: number;
+  };
+  todos: {
+    pending: number;
+    inProgress: number;
+    done: number;
+    failed: number;
+  };
+  capturedAt: number;
+};
+
 export type TaskCheckpoint = {
   id: string;
   label: string;
   status: 'created' | 'resumed' | 'retrying' | 'validated' | 'failed';
   summary?: string;
+  snapshot?: TaskCheckpointSnapshot;
   createdAt: number;
 };
 
@@ -272,6 +304,15 @@ export type LocalTaskApiSettings = {
   port: number;
   tokenHash?: string;
   tokenCreatedAt?: number;
+};
+
+export type MailTaskIntakeSettings = {
+  enabled: boolean;
+  connectorId: 'gmail';
+  subjectPrefix: string;
+  maxResults: number;
+  processedMessageIds: string[];
+  updatedAt?: number;
 };
 
 export type DesktopProjectKnowledgeFile = {

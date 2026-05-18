@@ -5,6 +5,7 @@
 import { initIpc } from '@neura-desktop/electron-ipc/main';
 
 import { BackgroundTaskService } from '@main/services/background-task-service';
+import { MailTaskIntakeService } from '@main/services/mail-task-intake-service';
 import { ScheduledTaskService } from '@main/services/scheduled-task-service';
 import { TaskManager } from '@main/services/task-manager';
 import type { BackgroundTaskKind } from '@main/store/types';
@@ -86,4 +87,19 @@ export const tasksRoute = t.router({
     .handle(async ({ input }) => {
       return ScheduledTaskService.getInstance().runNow(input.id);
     }),
+  getMailTaskIntakeStatus: t.procedure.input<void>().handle(async () => {
+    return MailTaskIntakeService.getInstance().getStatus();
+  }),
+  updateMailTaskIntake: t.procedure
+    .input<{
+      enabled?: boolean;
+      subjectPrefix?: string;
+      maxResults?: number;
+    }>()
+    .handle(async ({ input }) => {
+      return MailTaskIntakeService.getInstance().update(input);
+    }),
+  runMailTaskIntakeNow: t.procedure.input<void>().handle(async () => {
+    return MailTaskIntakeService.getInstance().runOnce();
+  }),
 });

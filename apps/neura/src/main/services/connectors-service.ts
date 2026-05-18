@@ -40,6 +40,7 @@ export type ConnectorHealthRecord = {
   missingConfig: string[];
   setupGap?: string;
   writeToolsRequireApproval: boolean;
+  providerRevokeSupported: boolean;
   checkedAt: number;
 };
 
@@ -282,6 +283,71 @@ export class ConnectorsService {
       approvalStatus: 'not_required',
     });
     return this.testConnector(connectorId);
+  }
+
+  async revokeProvider(connectorId: string) {
+    const connector = this.getConnector(connectorId);
+    const credential = await this.credentialStore.get(connectorId);
+    const endpoint = this.getProviderRevokeEndpoint(connectorId, connector?.config || {});
+    if (!endpoint) {
+      const message = `${connector?.displayName || connectorId} has no supported provider-level revoke endpoint in this build. Use local revoke to remove Neura's stored credential.`;
+      this.audit({
+        connectorId,
+        toolName: 'connector_provider_revoke',
+        permission: 'read',
+        status: 'failed',
+        approvalStatus: 'not_required',
+        error: message,
+      });
+      throw new Error(message);
+    }
+    const token = credential?.refreshToken || credential?.accessToken;
+    if (!token) {
+      const message = `${connector?.displayName || connectorId} has no OAuth token to revoke.`;
+      this.audit({
+        connectorId,
+        toolName: 'connector_provider_revoke',
+        permission: 'read',
+        status: 'failed',
+        approvalStatus: 'not_required',
+        error: message,
+      });
+      throw new Error(message);
+    }
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token }),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      const message = `${connector?.displayName || connectorId} provider revoke failed (${response.status}).`;
+      this.audit({
+        connectorId,
+        toolName: 'connector_provider_revoke',
+        permission: 'read',
+        status: 'failed',
+        approvalStatus: 'not_required',
+        error: text ? `${message} ${text.slice(0, 300)}` : message,
+      });
+      throw new Error(message);
+    }
+    await this.credentialStore.delete(connectorId);
+    this.updateConnector(connectorId, {
+      enabled: false,
+      authState: 'not_configured',
+    });
+    this.audit({
+      connectorId,
+      toolName: 'connector_provider_revoke',
+      permission: toPermission(connector?.permissionLevel),
+      status: 'completed',
+      approvalStatus: 'not_required',
+    });
+    return {
+      ok: true,
+      message: `${connector?.displayName || connectorId} token was revoked with the provider and removed locally.`,
+    };
   }
 
   async connect(input: {
@@ -546,8 +612,25 @@ export class ConnectorsService {
       missingConfig,
       setupGap,
       writeToolsRequireApproval: input.writeToolsRequireApproval,
+      providerRevokeSupported: Boolean(
+        this.getProviderRevokeEndpoint(input.connectorId, config),
+      ),
       checkedAt: Date.now(),
     };
+  }
+
+  private getProviderRevokeEndpoint(
+    connectorId: string,
+    config: Record<string, string>,
+  ) {
+    const configured = config.revokeUrl?.trim();
+    if (configured) {
+      return configured;
+    }
+    if (connectorId === 'gmail') {
+      return 'https://oauth2.googleapis.com/revoke';
+    }
+    return '';
   }
 
   private getMissingConfig(

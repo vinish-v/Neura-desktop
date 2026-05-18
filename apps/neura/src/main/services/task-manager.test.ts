@@ -117,6 +117,30 @@ vi.mock('./hermesTaskRouter', () => ({
   }),
 }));
 
+vi.mock('./intentArbitration', () => ({
+  classifyHermesTaskWithArbitration: () => ({
+    runMode: 'wide_research',
+    taskMode: 'research',
+    browserBackend: 'local',
+    toolsets: ['browser', 'memory'],
+    requiredArtifactKinds: [],
+    requiresSource: true,
+    requiresBrowser: true,
+    riskLevel: 'low',
+    semanticContract: {
+      taskType: 'wide_research',
+      requiredTools: ['browser'],
+      riskLevel: 'low',
+      expectedArtifacts: ['citation_records'],
+      needsApproval: false,
+      verificationRequired: true,
+      completionProof: 'sources',
+    },
+    validationHint: 'Validate research.',
+    promptDirectives: [],
+  }),
+}));
+
 vi.mock('./artifactValidation', () => ({
   validateArtifactFile: vi.fn(),
 }));

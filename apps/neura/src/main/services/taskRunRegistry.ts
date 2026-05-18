@@ -16,6 +16,7 @@ import {
   TaskRunStatus,
   TaskTodoItem,
   TaskCheckpoint,
+  TaskCheckpointSnapshot,
 } from '@main/store/types';
 import { SettingStore } from '@main/store/setting';
 import { persistTaskRunContext } from './taskContextMemory';
@@ -214,18 +215,45 @@ export const buildTaskRunEvidenceRequirements = (
     run.runMode === 'wide_research' ||
     run.taskMode === 'research' ||
     run.taskMode === 'scrape';
+  const isBrowserTask =
+    run.runMode === 'gui_browser' ||
+    run.runMode === 'executor_browser' ||
+    run.taskMode === 'browser_login';
+  const isConnectorTask =
+    run.runMode === 'mcp_autonomous' ||
+    run.toolCalls.some((toolCall) =>
+      /connector|github|slack|notion|gmail|drive|mcp/i.test(
+        `${toolCall.serverName}.${toolCall.toolName}`,
+      ),
+    );
   const isArtifactWorkflow = [
     'website_builder',
     'artifact_workflow',
     'multimodal_workflow',
   ].includes(run.runMode);
+  const acceptedArtifactKinds =
+    run.runMode === 'website_builder'
+      ? ['website', 'archive', 'report', 'other']
+      : run.runMode === 'multimodal_workflow'
+        ? ['image', 'audio', 'video']
+        : run.runMode === 'artifact_workflow'
+          ? ['document', 'presentation', 'spreadsheet', 'data', 'report', 'archive']
+          : undefined;
   return {
     requireEvidence: run.status === 'completed',
     requireCitationSource: isResearch,
     minimumCitationSources: isResearch ? 1 : undefined,
-    minimumMediumConfidenceSources: run.taskMode === 'research' ? 1 : undefined,
+    minimumMediumConfidenceSources:
+      run.taskMode === 'research' || run.runMode === 'wide_research'
+        ? 1
+        : undefined,
     validateResearchClaims: isResearch,
     requireFileArtifact: isArtifactWorkflow,
+    acceptedArtifactKinds,
+    requireBrowserSnapshot: isBrowserTask,
+    requireCommandTest:
+      run.taskMode === 'code' || run.taskMode === 'spreadsheet',
+    requireConnectorEvidence: isConnectorTask,
   };
 };
 
@@ -248,6 +276,44 @@ const validateRunEvidence = (run: TaskRunRecord) => {
     knownFailures: run.validationFailures,
   });
 };
+
+const countTodos = (run: TaskRunRecord): TaskCheckpointSnapshot['todos'] => ({
+  pending: run.todoItems.filter((todo) => todo.status === 'pending').length,
+  inProgress: run.todoItems.filter((todo) => todo.status === 'in_progress')
+    .length,
+  done: run.todoItems.filter((todo) => todo.status === 'done').length,
+  failed: run.todoItems.filter((todo) => todo.status === 'failed').length,
+});
+
+const buildCheckpointSnapshot = (
+  run: TaskRunRecord,
+): TaskCheckpointSnapshot => ({
+  phase: run.phase,
+  status: run.status,
+  currentStep: run.currentStep,
+  nextAction: run.nextAction,
+  workspacePath: run.workspacePath,
+  sessionId: run.sessionId,
+  browser: run.browserRestoreSnapshot
+    ? {
+        url: run.browserRestoreSnapshot.url,
+        title: run.browserRestoreSnapshot.title,
+        backend: run.browserRestoreSnapshot.backend,
+        bridgeStatus: run.browserRestoreSnapshot.bridgeStatus,
+        takeoverActive: run.browserRestoreSnapshot.takeoverActive,
+        profilePath: run.browserRestoreSnapshot.profilePath,
+      }
+    : undefined,
+  counts: {
+    artifacts: run.artifacts.length,
+    sources: run.sourceRecords.length,
+    evidence: collectTaskEvidenceForRun(run).length,
+    toolCalls: run.toolCalls.length,
+    validationFailures: run.validationFailures.length,
+  },
+  todos: countTodos(run),
+  capturedAt: Date.now(),
+});
 
 export const createRunId = () =>
   `run_${Date.now()}_${randomUUID().slice(0, 8)}`;
@@ -683,6 +749,7 @@ export class TaskRunRegistry {
     const record: TaskCheckpoint = {
       ...checkpoint,
       id: `checkpoint-${Date.now()}-${run.checkpoints?.length || 0}`,
+      snapshot: buildCheckpointSnapshot(run),
       createdAt: Date.now(),
     };
     return TaskRunRegistry.upsert({

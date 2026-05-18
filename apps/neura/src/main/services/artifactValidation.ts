@@ -67,6 +67,47 @@ const isImagePrefix = (extension: string, prefix: Buffer) => {
   return false;
 };
 
+const isAudioPrefix = (extension: string, prefix: Buffer) => {
+  if (extension === '.mp3') {
+    return (
+      prefix.toString('ascii', 0, 3) === 'ID3' ||
+      (prefix[0] === 0xff && (prefix[1] & 0xe0) === 0xe0)
+    );
+  }
+  if (extension === '.wav') {
+    return (
+      prefix.toString('ascii', 0, 4) === 'RIFF' &&
+      prefix.toString('ascii', 8, 12) === 'WAVE'
+    );
+  }
+  if (extension === '.ogg') {
+    return prefix.toString('ascii', 0, 4) === 'OggS';
+  }
+  if (extension === '.flac') {
+    return prefix.toString('ascii', 0, 4) === 'fLaC';
+  }
+  if (extension === '.m4a') {
+    return prefix.toString('ascii', 4, 8) === 'ftyp';
+  }
+  if (extension === '.aac') {
+    return prefix[0] === 0xff && (prefix[1] === 0xf1 || prefix[1] === 0xf9);
+  }
+  return false;
+};
+
+const isVideoPrefix = (extension: string, prefix: Buffer) => {
+  if (['.mp4', '.mov', '.m4v'].includes(extension)) {
+    return prefix.toString('ascii', 4, 8) === 'ftyp';
+  }
+  if (extension === '.webm') {
+    return prefix.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+  }
+  if (['.mpg', '.mpeg'].includes(extension)) {
+    return prefix[0] === 0x00 && prefix[1] === 0x00 && prefix[2] === 0x01;
+  }
+  return false;
+};
+
 const validateDirectoryArtifact = async (
   artifact: ArtifactLike,
 ): Promise<ArtifactValidationResult> => {
@@ -164,6 +205,12 @@ export const validateArtifactFile = async (
     } else if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(extension)) {
       expectedFormat = 'image';
       readablePreview = isImagePrefix(extension, await readPrefix(artifact.path));
+    } else if (['.aac', '.flac', '.m4a', '.mp3', '.ogg', '.wav'].includes(extension)) {
+      expectedFormat = 'audio';
+      readablePreview = isAudioPrefix(extension, await readPrefix(artifact.path, 16));
+    } else if (['.mov', '.mp4', '.mpeg', '.mpg', '.webm'].includes(extension)) {
+      expectedFormat = 'video';
+      readablePreview = isVideoPrefix(extension, await readPrefix(artifact.path, 16));
     } else if (['.html', '.htm'].includes(extension)) {
       expectedFormat = 'HTML website';
       readablePreview = await textIncludesHtml(artifact.path);

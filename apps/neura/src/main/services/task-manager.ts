@@ -34,7 +34,8 @@ import {
   createTaskRun,
   TaskRunRegistry,
 } from './taskRunRegistry';
-import { classifyHermesTask, HermesTaskRoute } from './hermesTaskRouter';
+import { HermesTaskRoute } from './hermesTaskRouter';
+import { classifyHermesTaskWithArbitration } from './intentArbitration';
 import { summarizeSourceQuality } from './sourceQuality';
 import { validateArtifactFile } from './artifactValidation';
 import { DesktopProjectsService } from './desktop-projects-service';
@@ -665,7 +666,7 @@ export class TaskManager {
       throw new Error('Task goal is required.');
     }
 
-    const route = classifyHermesTask(
+    const route = await classifyHermesTaskWithArbitration(
       trimmedGoal,
       SettingStore.getStore(),
       options.runMode,
@@ -696,6 +697,18 @@ export class TaskManager {
       previousRuns,
     );
     this.upsert(run);
+    if (route.intentArbitration) {
+      TaskRunRegistry.addCheckpoint(run.runId, {
+        label: 'Intent arbitration',
+        status:
+          route.intentArbitration.status === 'accepted'
+            ? 'validated'
+            : route.intentArbitration.status === 'failed'
+              ? 'failed'
+              : 'created',
+        summary: `${route.intentArbitration.status}: ${route.intentArbitration.reason}`,
+      });
+    }
     TaskRunRegistry.addCheckpoint(run.runId, {
       label: 'Task session created',
       status: options.backgroundTaskId ? 'resumed' : 'created',
@@ -1017,6 +1030,9 @@ export class TaskManager {
       status: 'resumed',
       summary: 'Starting a continuation with the same Hermes session and persisted run context.',
     });
+    const checkpointedRun = this.getRun(runId) || run;
+    const latestCheckpoint =
+      checkpointedRun.checkpoints?.[checkpointedRun.checkpoints.length - 1];
     const resumeGoal = [
       'Resume this Neura Desktop task from its persisted run snapshot.',
       'Do not repeat completed work unless it is needed for validation. Keep old run history intact and continue in the same session/context.',
@@ -1028,6 +1044,8 @@ export class TaskManager {
       `Current step: ${run.currentStep || 'not recorded'}`,
       `Next action: ${run.nextAction || 'inspect the persisted context and continue honestly'}`,
       `Workspace: ${run.workspacePath || 'default workspace'}`,
+      '',
+      `Latest checkpoint digest:\n${compactJson(latestCheckpoint?.snapshot, 2400)}`,
       '',
       `Browser restore snapshot:\n${compactJson(run.browserRestoreSnapshot, 2400)}`,
       '',

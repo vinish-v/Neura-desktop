@@ -103,9 +103,23 @@ const driveConnector = (): ConnectorDefinition => ({
   config: {},
 });
 
+const gmailConnector = (): ConnectorDefinition => ({
+  id: 'gmail',
+  displayName: 'Gmail',
+  type: 'oauth',
+  enabled: true,
+  authState: 'configured',
+  permissionLevel: 'read',
+  tools: ['gmail_list_unread'],
+  config: {
+    clientId: 'google-client-id',
+    redirectUri: 'http://127.0.0.1:54887/oauth/callback',
+  },
+});
+
 describe('ConnectorsService', () => {
   beforeEach(() => {
-    mocks.connectors = [slackConnector(), driveConnector()];
+    mocks.connectors = [slackConnector(), driveConnector(), gmailConnector()];
     mocks.auditLog = [];
     mocks.secrets = {};
     mocks.approval.mockReset();
@@ -181,6 +195,77 @@ describe('ConnectorsService', () => {
       expect.objectContaining({
         enabled: false,
         authState: 'not_configured',
+      }),
+    );
+  });
+
+  it('revokes supported provider OAuth tokens before removing local credentials', async () => {
+    const service = new ConnectorsService();
+    await service.connect({
+      connectorId: 'gmail',
+      credential: {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+      },
+    });
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => '',
+      json: async () => ({}),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await service.revokeProvider('gmail');
+
+    expect(result.message).toContain('revoked with the provider');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://oauth2.googleapis.com/revoke',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.any(URLSearchParams),
+      }),
+    );
+    const [, requestInit] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    const body = requestInit.body as URLSearchParams;
+    expect(body.get('token')).toBe('refresh-token');
+    expect(mocks.secrets.gmail).toBeUndefined();
+    expect(mocks.connectors.find((connector) => connector.id === 'gmail')).toEqual(
+      expect.objectContaining({
+        enabled: false,
+        authState: 'not_configured',
+      }),
+    );
+    expect(mocks.auditLog[0]).toEqual(
+      expect.objectContaining({
+        connectorId: 'gmail',
+        toolName: 'connector_provider_revoke',
+        status: 'completed',
+      }),
+    );
+  });
+
+  it('reports unsupported provider revoke without deleting local credentials', async () => {
+    const service = new ConnectorsService();
+    await service.connect({
+      connectorId: 'slack',
+      credential: {
+        webhookUrl: 'https://hooks.slack.test/example',
+      },
+    });
+
+    await expect(service.revokeProvider('slack')).rejects.toThrow(
+      'no supported provider-level revoke endpoint',
+    );
+
+    expect(mocks.secrets.slack).toBeTruthy();
+    expect(mocks.auditLog[0]).toEqual(
+      expect.objectContaining({
+        connectorId: 'slack',
+        toolName: 'connector_provider_revoke',
+        status: 'failed',
       }),
     );
   });

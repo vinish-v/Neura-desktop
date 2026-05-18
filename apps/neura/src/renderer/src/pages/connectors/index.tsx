@@ -94,12 +94,14 @@ const ConnectorCard = ({
   onRefresh,
   onTest,
   onRefreshCredential,
+  onRevokeProvider,
 }: {
   connector: ConnectorSummary;
   health?: ConnectorHealthRecord;
   onRefresh: () => Promise<void>;
   onTest: (connectorId: string) => Promise<void>;
   onRefreshCredential: (connectorId: string) => Promise<void>;
+  onRevokeProvider: (connectorId: string) => Promise<void>;
 }) => {
   const [draft, setDraft] = useState<Draft>({});
   const [busy, setBusy] = useState(false);
@@ -195,6 +197,15 @@ const ConnectorCard = ({
     }
   };
 
+  const providerRevoke = async () => {
+    setBusy(true);
+    try {
+      await onRevokeProvider(connector.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <article className="rounded-[30px] border border-[#f6f1e8]/[0.1] bg-[#11100e]/82 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
       <div className="flex items-start gap-4">
@@ -267,7 +278,19 @@ const ConnectorCard = ({
                 />
               </div>
             </div>
-            <div className="flex items-end justify-end">
+            <div className="flex items-end justify-end gap-2">
+              {health?.providerRevokeSupported ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy || !health.credentialPresent}
+                  onClick={providerRevoke}
+                  className="rounded-full border-emerald-300/20 bg-transparent text-emerald-100/80 hover:bg-emerald-300/10"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Provider revoke
+                </Button>
+              ) : null}
               <Button
                 variant="outline"
                 size="sm"
@@ -276,7 +299,7 @@ const ConnectorCard = ({
                 className="rounded-full border-[#f6f1e8]/[0.12] bg-transparent text-[#f6f1e8]/70 hover:bg-[#f6f1e8]/[0.08] hover:text-[#f6f1e8]"
               >
                 <Unplug className="h-3.5 w-3.5" />
-                Revoke
+                Local revoke
               </Button>
             </div>
           </div>
@@ -605,6 +628,17 @@ export default function Connectors() {
     }
   };
 
+  const revokeProvider = async (connectorId: string) => {
+    try {
+      const result = await api.revokeConnectorProviderToken({ connectorId });
+      setNotice(result.message);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      await refresh();
+    }
+  };
+
   return (
     <div className="neura-home-page h-full overflow-y-auto px-5 py-8 md:px-8">
       <div className="mx-auto max-w-6xl">
@@ -674,6 +708,7 @@ export default function Connectors() {
                 onRefresh={refresh}
                 onTest={runTest}
                 onRefreshCredential={refreshCredential}
+                onRevokeProvider={revokeProvider}
               />
             ))
           )}

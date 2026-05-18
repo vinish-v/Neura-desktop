@@ -201,6 +201,15 @@ const LocalTaskApiSchema = z.object({
   tokenCreatedAt: z.number().optional(),
 });
 
+const MailTaskIntakeSchema = z.object({
+  enabled: z.boolean(),
+  connectorId: z.literal('gmail'),
+  subjectPrefix: z.string().min(1),
+  maxResults: z.number().int().min(1).max(25),
+  processedMessageIds: z.array(z.string()),
+  updatedAt: z.number().optional(),
+});
+
 const DesktopProjectKnowledgeFileSchema = z.object({
   id: z.string(),
   path: z.string(),
@@ -475,6 +484,7 @@ export const PresetSchema = z.object({
   backgroundTasks: z.array(BackgroundTaskSchema).optional(),
   scheduledTasks: z.array(ScheduledTaskSchema).optional(),
   localTaskApi: LocalTaskApiSchema.optional(),
+  mailTaskIntake: MailTaskIntakeSchema.optional(),
   desktopProjects: z.array(DesktopProjectSchema).optional(),
   neuraRoadmap: RoadmapProgressSchema.optional(),
   connectors: z.array(ConnectorSchema).optional(),
