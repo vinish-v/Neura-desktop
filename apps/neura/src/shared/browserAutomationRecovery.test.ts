@@ -115,4 +115,23 @@ describe('browser automation recovery', () => {
     expect(serialized).not.toContain('abc123');
     expect(serialized).toContain('[REDACTED]');
   });
+
+  it('tells browser automation to switch source once and pause for human verification', () => {
+    const report = buildAutomationRecoveryReport({
+      surface: 'browser',
+      toolName: 'browser_navigate',
+      action: 'open search results',
+      url: 'https://duckduckgo.com/?q=top+AI+coding+tools+2026',
+      message: 'Please complete the CAPTCHA to verify you are human',
+      capturedAt: 10,
+    });
+
+    expect(report.kind).toBe('blocked_or_login_required');
+    expect(report.nextAction).toBe('ask_user_for_login_or_captcha');
+    expect(report.steps).toContain(
+      'Switch to a different source once when this is a search-provider block.',
+    );
+    expect(report.userFacingMessage).toContain('cannot bypass');
+    expect(report.userFacingMessage).toContain('Take over/resume');
+  });
 });

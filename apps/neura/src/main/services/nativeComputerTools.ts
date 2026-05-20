@@ -33,7 +33,10 @@ import * as env from '@main/env';
 import { logger } from '@main/logger';
 import type { ApprovalEvent, ArtifactKind } from '@main/store/types';
 import { SettingStore } from '@main/store/setting';
-import { NATIVE_COMPUTER_TOOLS } from '@main/shared/toolRegistry';
+import {
+  NATIVE_COMPUTER_TOOLS,
+  type NativeToolDefinition,
+} from '@main/shared/toolRegistry';
 import {
   createWebsiteProjectArtifact,
   createWebsiteZipArtifact,
@@ -41,6 +44,7 @@ import {
 import { validateArtifactFile } from './artifactValidation';
 import { createRunId, TaskRunRegistry } from './taskRunRegistry';
 import { requestUserApproval } from './approvalGate';
+import { requestUserQuestion } from './userQuestionGate';
 import { ComputerRuntimeController } from './computerRuntimeController';
 import { store } from '@main/store/create';
 
@@ -62,6 +66,9 @@ type ExtendedActionInputs = ActionInputs & {
   message?: string;
   tool?: string;
   payload?: string;
+  question?: string;
+  context?: string;
+  choices?: string;
 };
 
 type StartedProcess = {
@@ -142,6 +149,9 @@ export const registerExternalTerminalProcess = ({
 };
 
 const nativeToolNames = new Set(NATIVE_COMPUTER_TOOLS.map((tool) => tool.name));
+const nativeToolDefinitions = new Map(
+  NATIVE_COMPUTER_TOOLS.map((tool) => [tool.name, tool]),
+);
 
 const isDangerousCommand = (command: string) => {
   const normalized = command.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -165,8 +175,14 @@ export const executeNativeComputerTool = async (
   actionType: string,
   inputs: ActionInputs,
 ): Promise<ExecuteOutput> => {
+  const audit = startNativeToolAudit(actionType, inputs);
   const handler = handlers[actionType];
   if (!handler) {
+    completeNativeToolAudit(
+      audit,
+      'failed',
+      `Unsupported native computer tool: ${actionType}`,
+    );
     return {
       status: StatusEnum.END,
       message: `Unsupported native computer tool: ${actionType}`,
@@ -176,6 +192,7 @@ export const executeNativeComputerTool = async (
   try {
     syncRuntimeForNativeTool(actionType, inputs);
     const message = await handler(inputs);
+    completeNativeToolAudit(audit, 'completed', message);
     recordNativeToolOutput(actionType, inputs, message, false);
     return {
       status: StatusEnum.END,
@@ -184,6 +201,7 @@ export const executeNativeComputerTool = async (
   } catch (error) {
     logger.error('[nativeComputerTool] failed', actionType, error);
     const message = error instanceof Error ? error.message : String(error);
+    completeNativeToolAudit(audit, 'failed', message);
     recordNativeToolOutput(actionType, inputs, message, true);
     const recovery = recordNativeToolRecovery(actionType, inputs, message);
     const safeFailureMessage = String(redactEvidenceSecrets(message));
@@ -199,6 +217,80 @@ export const executeNativeComputerTool = async (
       ].join(' '),
     };
   }
+};
+
+type NativeToolAudit = {
+  runId: string;
+  externalCallId: string;
+};
+
+const summarizeNativeToolInputs = (inputs: ActionInputs) => {
+  const extra = inputs as ExtendedActionInputs;
+  const summary: Record<string, unknown> = {};
+  for (const key of [
+    'command',
+    'cwd',
+    'path',
+    'output_path',
+    'url',
+    'process_id',
+    'monitor_id',
+    'repository',
+    'target_path',
+    'tool',
+    'title',
+    'question',
+  ] as const) {
+    const value = extra[key];
+    if (typeof value === 'string' && value.trim()) {
+      summary[key] = truncate(value.trim(), 500);
+    }
+  }
+  if (typeof extra.content === 'string' && extra.content.trim()) {
+    summary.contentLength = extra.content.length;
+  }
+  if (typeof extra.message === 'string' && extra.message.trim()) {
+    summary.messageLength = extra.message.length;
+  }
+  if (typeof extra.payload === 'string' && extra.payload.trim()) {
+    summary.payloadLength = extra.payload.length;
+  }
+  return redactEvidenceSecrets(summary) as Record<string, unknown>;
+};
+
+const startNativeToolAudit = (
+  actionType: string,
+  inputs: ActionInputs,
+): NativeToolAudit | null => {
+  const runId = TaskRunRegistry.getActiveRunId();
+  if (!runId) {
+    return null;
+  }
+  const definition = nativeToolDefinitions.get(actionType);
+  const externalCallId = `native-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  TaskRunRegistry.addToolCall(runId, {
+    externalCallId,
+    serverName: `native:${definition?.domain || 'computer'}`,
+    toolName: actionType,
+    arguments: summarizeNativeToolInputs(inputs),
+    status: 'pending',
+    resultPreview: definition?.description,
+  });
+  return { runId, externalCallId };
+};
+
+const completeNativeToolAudit = (
+  audit: NativeToolAudit | null,
+  status: 'completed' | 'failed',
+  message: string,
+) => {
+  if (!audit) {
+    return;
+  }
+  TaskRunRegistry.updateToolCall(audit.runId, audit.externalCallId, {
+    status,
+    resultPreview: truncate(String(redactEvidenceSecrets(message)), 1500),
+  });
 };
 
 const recordNativeToolRecovery = (
@@ -233,6 +325,7 @@ const recordNativeToolRecovery = (
 };
 
 const handlers: Record<string, NativeToolHandler> = {
+  ask_user_question: askUserQuestion,
   read_file: readFile,
   write_file: writeFile,
   edit_file: editFile,
@@ -285,7 +378,14 @@ const terminalNativeTools = new Set([
 ]);
 
 const syncRuntimeForNativeTool = (actionType: string, inputs: ActionInputs) => {
+  const definition = nativeToolDefinitions.get(actionType);
   if (!terminalNativeTools.has(actionType)) {
+    ComputerRuntimeController.start({
+      mode: runtimeModeForNativeTool(definition),
+      subtitle: definition?.domain || 'computer',
+      display: nativeToolDisplay(actionType, inputs),
+      activity: definition?.label || actionType.replace(/_/g, ' '),
+    });
     return;
   }
   if (isDesktopLaunchHelper(actionType, inputs)) {
@@ -302,6 +402,27 @@ const syncRuntimeForNativeTool = (actionType: string, inputs: ActionInputs) => {
     cwd: inputs.cwd,
     activity: getNativeToolActivity(actionType),
   });
+};
+
+const runtimeModeForNativeTool = (definition?: NativeToolDefinition) => {
+  if (definition?.domain === 'browser') {
+    return 'browser' as const;
+  }
+  return 'desktop' as const;
+};
+
+const nativeToolDisplay = (actionType: string, inputs: ActionInputs) => {
+  const extra = inputs as ExtendedActionInputs;
+  return truncate(
+    extra.command ||
+      extra.path ||
+      extra.output_path ||
+      extra.url ||
+      extra.repository ||
+      extra.question ||
+      actionType.replace(/_/g, ' '),
+    180,
+  );
 };
 
 const isDesktopLaunchHelper = (actionType: string, inputs: ActionInputs) => {
@@ -349,7 +470,15 @@ const recordNativeToolOutput = (
   message: string,
   failed: boolean,
 ) => {
+  const definition = nativeToolDefinitions.get(actionType);
   if (!terminalNativeTools.has(actionType)) {
+    ComputerRuntimeController.update({
+      status: failed ? 'failed' : 'running',
+      activity: failed
+        ? `${definition?.label || actionType} failed`
+        : `${definition?.label || actionType} completed`,
+      display: nativeToolDisplay(actionType, inputs),
+    });
     return;
   }
   if (isDesktopLaunchHelper(actionType, inputs)) {
@@ -431,6 +560,13 @@ const formatCommandFailure = (
 const asBool = (value?: string) =>
   ['true', 'yes', '1'].includes((value || '').trim().toLowerCase());
 
+const parseChoices = (value?: string) =>
+  (value || '')
+    .split(/[;\n|]/u)
+    .map((choice) => choice.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+
 const requireInput = (value: string | undefined, name: string) => {
   const trimmed = value?.trim();
   if (!trimmed) {
@@ -438,6 +574,19 @@ const requireInput = (value: string | undefined, name: string) => {
   }
   return trimmed;
 };
+
+async function askUserQuestion(inputs: ExtendedActionInputs) {
+  const question = requireInput(
+    inputs.question || inputs.prompt || inputs.message || inputs.text,
+    'question',
+  );
+  const answer = await requestUserQuestion({
+    question,
+    context: inputs.context?.trim() || undefined,
+    choices: parseChoices(inputs.choices),
+  });
+  return `User answered: ${answer}`;
+}
 
 type KnownFolderName = 'Desktop' | 'Documents' | 'Downloads';
 
@@ -663,6 +812,25 @@ const requireApproval = async (
   target: string,
   risk: ApprovalEvent['risk'] = 'high',
 ) => {
+  const runId = TaskRunRegistry.getActiveRunId();
+  if (runId) {
+    const run = TaskRunRegistry.list().find((item) => item.runId === runId);
+    if (run) {
+      const isLowRisk = run.riskLevel === 'low';
+      const noApprovalNeeded = run.needsApproval === false;
+      
+      if (noApprovalNeeded || isLowRisk) {
+        TaskRunRegistry.addApproval(runId, {
+          action,
+          target,
+          risk: 'low',
+          status: 'auto_approved',
+        });
+        return;
+      }
+    }
+  }
+
   const approved = await requestUserApproval({ action, target, risk });
   if (!approved) {
     throw new Error(`${action} was denied by the user.`);

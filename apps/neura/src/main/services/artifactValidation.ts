@@ -21,6 +21,19 @@ export type ArtifactValidationResult = {
 
 type ArtifactLike = Pick<TaskArtifact, 'path' | 'kind' | 'mimeType' | 'title'>;
 
+const KIND_EXTENSIONS: Partial<Record<ArtifactKind, string[]>> = {
+  document: ['.docx', '.pdf', '.md', '.txt'],
+  spreadsheet: ['.xlsx', '.csv', '.tsv'],
+  presentation: ['.pptx'],
+  image: ['.gif', '.jpeg', '.jpg', '.png', '.svg', '.webp'],
+  audio: ['.aac', '.flac', '.m4a', '.mp3', '.ogg', '.wav'],
+  video: ['.m4v', '.mov', '.mp4', '.mpeg', '.mpg', '.webm'],
+  website: ['.html', '.htm', '.zip'],
+  archive: ['.zip'],
+  data: ['.csv', '.json', '.tsv', '.txt', '.xlsx'],
+  report: ['.docx', '.md', '.pdf', '.txt'],
+};
+
 const readPrefix = async (filePath: string, bytes = 512) => {
   const handle = await fs.open(filePath, 'r');
   try {
@@ -185,6 +198,14 @@ export const validateArtifactFile = async (
   const extension = path.extname(artifact.path).toLowerCase();
   let readablePreview = false;
   let expectedFormat = extension || artifact.kind;
+  const expectedExtensions = KIND_EXTENSIONS[artifact.kind];
+  if (expectedExtensions && !expectedExtensions.includes(extension)) {
+    errors.push(
+      `${artifact.title || artifact.path} is declared as ${artifact.kind} but uses ${
+        extension || 'no extension'
+      }; expected one of ${expectedExtensions.join(', ')}.`,
+    );
+  }
 
   try {
     if (extension === '.pdf') {

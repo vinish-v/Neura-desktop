@@ -23,6 +23,7 @@ import { showWindow } from '@main/window/index';
 
 import { logger } from '@main/logger';
 import { resolveUserApproval } from '@main/services/approvalGate';
+import { resolveUserQuestion } from '@main/services/userQuestionGate';
 import { TaskRunRegistry } from '@main/services/taskRunRegistry';
 import { ComputerRuntimeController } from '@main/services/computerRuntimeController';
 import { writeProcessInput } from '@main/services/nativeComputerTools';
@@ -70,6 +71,27 @@ const getTakeoverHotkeys = (value: string) =>
     .split(/[\s+]+/)
     .map((part) => takeoverHotkeyMap[part.toLowerCase()])
     .filter(Boolean);
+
+type ComputerTakeoverInput =
+  | { type: 'click' | 'double_click' | 'right_click'; x: number; y: number }
+  | { type: 'scroll'; x: number; y: number; direction: 'up' | 'down' }
+  | { type: 'text'; text: string }
+  | { type: 'key' | 'hotkey'; key: string };
+
+const publishTakeoverInteraction = (input: ComputerTakeoverInput) => {
+  if ('x' in input && 'y' in input) {
+    ComputerRuntimeController.interaction(input);
+    return;
+  }
+  if (input.type === 'text') {
+    ComputerRuntimeController.interaction({
+      type: 'text',
+      text: input.text.length <= 3 ? input.text : `${input.text.length} chars`,
+    });
+    return;
+  }
+  ComputerRuntimeController.interaction(input);
+};
 
 const formatRunSummary = (
   run: NonNullable<ReturnType<typeof TaskRunRegistry.list>[number]>,
@@ -127,6 +149,17 @@ const formatRunSummary = (
             `- ${event.status}: ${event.action}${event.target ? ` (${event.target})` : ''}`,
         )
       : ['- No approval events recorded.']),
+    '',
+    '## User Questions',
+    '',
+    ...(run.userQuestionEvents?.length
+      ? run.userQuestionEvents.map(
+          (event) =>
+            `- ${event.status}: ${event.question}${
+              event.answer ? ` -> ${event.answer}` : ''
+            }`,
+        )
+      : ['- No user questions recorded.']),
     '',
   ].join('\n');
 
@@ -240,17 +273,13 @@ export const agentRoute = t.router({
       return { ok: true };
     }),
   computerTakeoverInput: t.procedure
-    .input<
-      | { type: 'click' | 'double_click' | 'right_click'; x: number; y: number }
-      | { type: 'scroll'; x: number; y: number; direction: 'up' | 'down' }
-      | { type: 'text'; text: string }
-      | { type: 'key' | 'hotkey'; key: string }
-    >()
+    .input<ComputerTakeoverInput>()
     .handle(async ({ input }) => {
       const runtime = store.getState().computerRuntime;
       if (!runtime?.takeoverEnabled) {
         throw new Error('Computer takeover is not enabled.');
       }
+      publishTakeoverInteraction(input);
 
       if (runtime.mode === 'terminal') {
         if (!runtime.activeProcessId) {
@@ -442,6 +471,11 @@ export const agentRoute = t.router({
     .input<{ runId: string; eventId: string; approved: boolean }>()
     .handle(async ({ input }) => {
       return resolveUserApproval(input);
+    }),
+  resolveUserQuestion: t.procedure
+    .input<{ runId: string; eventId: string; answer: string }>()
+    .handle(async ({ input }) => {
+      return resolveUserQuestion(input);
     }),
   exportRunSummary: t.procedure
     .input<{ runId: string }>()

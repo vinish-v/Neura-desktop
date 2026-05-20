@@ -12,9 +12,7 @@ import React, {
 import { motion } from 'framer-motion';
 import {
   Check,
-  CheckCircle2,
   AlertTriangle,
-  FileCode2,
   Maximize2,
   Minimize2,
   Monitor,
@@ -28,7 +26,10 @@ import {
 import { Button } from '@renderer/components/ui/button';
 import { Slider } from '@renderer/components/ui/slider';
 import { type ConversationWithSoM } from '@main/shared/types';
-import { type ComputerRuntimeOutput } from '@main/store/types';
+import {
+  type ComputerRuntimeInteraction,
+  type ComputerRuntimeOutput,
+} from '@main/store/types';
 import {
   MotionPanel,
   panelMotion,
@@ -74,6 +75,30 @@ const runtimeOutputToCommandFrame = (
     raw: output.raw,
     failed: output.failed,
   };
+};
+
+const interactionLabel = (interaction?: ComputerRuntimeInteraction) => {
+  if (!interaction) {
+    return '';
+  }
+  switch (interaction.type) {
+    case 'click':
+      return 'Click';
+    case 'double_click':
+      return 'Double click';
+    case 'right_click':
+      return 'Right click';
+    case 'scroll':
+      return interaction.direction === 'up' ? 'Scroll up' : 'Scroll down';
+    case 'text':
+      return interaction.text ? `Typing ${interaction.text}` : 'Typing';
+    case 'hotkey':
+      return interaction.key ? `Hotkey ${interaction.key}` : 'Hotkey';
+    case 'key':
+      return interaction.key ? `Key ${interaction.key}` : 'Key press';
+    default:
+      return 'Input';
+  }
 };
 
 const getActionInput = (
@@ -158,58 +183,6 @@ const publicProgressLabel = (value?: string) => {
     return 'Command';
   }
   return cleaned;
-};
-
-const publicToolLabel = (serverName?: string, toolName?: string) => {
-  const cleaned = cleanProgressInput(`${serverName || ''}.${toolName || ''}`)
-    .replace(/^neura\./i, '')
-    .replace(/\./g, ' ')
-    .trim();
-  if (/browser/i.test(cleaned)) {
-    return 'Browser action';
-  }
-  if (/terminal|command|shell/i.test(cleaned)) {
-    return 'Command';
-  }
-  if (/memory/i.test(cleaned)) {
-    return 'Memory';
-  }
-  if (/todo|plan/i.test(cleaned)) {
-    return 'Planning';
-  }
-  return cleaned || 'Tool action';
-};
-
-const publicToolPreview = (preview?: string) => {
-  const cleaned = cleanProgressInput(preview);
-  if (!cleaned || isInternalProgressText(cleaned)) {
-    return '';
-  }
-
-  try {
-    const parsed = JSON.parse(cleaned) as {
-      success?: boolean;
-      url?: string;
-      title?: string;
-      error?: string;
-    };
-    if (parsed.error) {
-      return parsed.error;
-    }
-    if (parsed.title || parsed.url) {
-      return [parsed.title, parsed.url].filter(Boolean).join(' - ');
-    }
-    if (typeof parsed.success === 'boolean') {
-      return parsed.success ? '' : 'Action did not complete.';
-    }
-  } catch {
-    // Use the cleaned text below when it is already user-readable.
-  }
-
-  if (/^\{/.test(cleaned) || /^\[/.test(cleaned)) {
-    return '';
-  }
-  return cleaned.length > 140 ? `${cleaned.slice(0, 140)}...` : cleaned;
 };
 
 const isInternalProgressText = (...parts: Array<string | undefined>) =>
@@ -303,7 +276,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
         if (msg.from === 'human') {
           actions = [
             {
-              label: 'Screenshot',
+              label: 'Observed frame',
               type: 'screenshot',
               cost: msg.timing?.cost,
             },
@@ -378,6 +351,9 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
   const currentEntry = imageEntries[currentIndex];
   const liveFrame = computerRuntime?.frame || computerRuntime?.latestFrame;
   const liveFrameSrc = liveFrame?.dataUrl;
+  const liveCursor = liveFrame?.cursor;
+  const latestInteraction = computerRuntime?.latestInteraction;
+  const streamFrameRate = computerRuntime?.liveStream?.frameRate;
   const takeoverEnabled = Boolean(computerRuntime?.takeoverEnabled);
   const isNativeBrowserSurface =
     computerRuntime?.mode === 'browser' &&
@@ -416,6 +392,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
       computerRuntime?.terminal || computerRuntime?.latestOutput,
     ) || parsedCommandFrame;
   const hasVisualFrame = Boolean(frameImageSrc) && !isNativeBrowserSurface;
+  const isLiveStream = Boolean(liveFrameSrc) && !isNativeBrowserSurface;
   const shouldShowCommandFrame =
     Boolean(commandFrame) &&
     (computerRuntime?.mode === 'terminal' ||
@@ -437,22 +414,6 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
   );
   const shouldShowFinalAnswer =
     Boolean(finalAnswer) && (taskState?.status === 'completed' || isFinished);
-  const visibleProgressItems = useMemo(
-    () =>
-      (taskState?.progressItems || [])
-        .map((item) => ({
-          ...item,
-          title: publicProgressLabel(item.title),
-          detail: publicProgressLabel(item.detail),
-        }))
-        .filter((item) => item.title && !isInternalProgressText(item.title, item.detail))
-        .slice(-5),
-    [taskState?.progressItems],
-  );
-  const visibleToolCalls = useMemo(
-    () => (taskState?.toolCalls || []).slice(-5),
-    [taskState?.toolCalls],
-  );
   const activityText =
     publicProgressLabel(
       computerRuntime?.activity || currentAction?.label || taskState?.currentStep,
@@ -563,6 +524,80 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
       </div>
     </div>
   );
+
+  const renderLiveOverlays = () => {
+    if (!activeFrameSize) {
+      return null;
+    }
+    const cursorLeft =
+      liveCursor && activeFrameSize.width
+        ? `${(liveCursor.x / activeFrameSize.width) * 100}%`
+        : undefined;
+    const cursorTop =
+      liveCursor && activeFrameSize.height
+        ? `${(liveCursor.y / activeFrameSize.height) * 100}%`
+        : undefined;
+    const interactionLeft =
+      latestInteraction?.x !== undefined && activeFrameSize.width
+        ? `${(latestInteraction.x / activeFrameSize.width) * 100}%`
+        : cursorLeft;
+    const interactionTop =
+      latestInteraction?.y !== undefined && activeFrameSize.height
+        ? `${(latestInteraction.y / activeFrameSize.height) * 100}%`
+        : cursorTop;
+    const showInteraction =
+      latestInteraction &&
+      Date.now() - latestInteraction.createdAt < 1800 &&
+      (interactionLeft || latestInteraction.type === 'text' || latestInteraction.type === 'key');
+
+    return (
+      <div className="pointer-events-none absolute inset-0">
+        {isLiveStream ? (
+          <div className="absolute left-3 top-3 flex items-center gap-2 rounded-md border border-emerald-300/25 bg-black/70 px-2.5 py-1 text-[11px] font-medium text-emerald-100 shadow-lg">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-300" />
+            Live
+            {streamFrameRate ? (
+              <span className="text-emerald-100/60">
+                {streamFrameRate.toFixed(1)} fps
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        {cursorLeft && cursorTop ? (
+          <motion.div
+            className="absolute h-4 w-4 -translate-x-1 -translate-y-1"
+            style={{ left: cursorLeft, top: cursorTop }}
+            animate={{ left: cursorLeft, top: cursorTop }}
+            transition={{ duration: 0.08, ease: 'linear' }}
+          >
+            <div className="h-3 w-3 rotate-45 border-l-2 border-t-2 border-white drop-shadow-[0_0_4px_rgba(0,0,0,0.9)]" />
+          </motion.div>
+        ) : null}
+        {showInteraction ? (
+          <motion.div
+            key={latestInteraction.id}
+            className="absolute"
+            style={{
+              left: interactionLeft || '50%',
+              top: interactionTop || '88%',
+            }}
+            initial={{ opacity: 0, scale: 0.75, x: '-50%', y: '-50%' }}
+            animate={{ opacity: [0, 1, 1, 0], scale: [0.75, 1, 1, 1.18] }}
+            transition={{ duration: 1.35, ease: 'easeOut' }}
+          >
+            <div className="relative flex items-center justify-center">
+              {latestInteraction.x !== undefined ? (
+                <span className="absolute h-12 w-12 rounded-full border-2 border-emerald-300/80 bg-emerald-300/10" />
+              ) : null}
+              <span className="relative rounded-md border border-white/15 bg-black/80 px-2 py-1 text-[11px] font-semibold text-white shadow-lg">
+                {interactionLabel(latestInteraction)}
+              </span>
+            </div>
+          </motion.div>
+        ) : null}
+      </div>
+    );
+  };
 
   const toggleTakeover = async () => {
     if (!computerRuntime || takeoverBusy) {
@@ -937,24 +972,27 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
             ) : shouldShowCommandFrame && commandFrame ? (
               renderCommandFrame(commandFrame)
             ) : frameImageSrc ? (
-              <motion.img
-                key={
-                  liveFrameSrc
-                    ? 'live-desktop-frame'
-                    : `replay-${currentEntry?.originalIndex || 0}`
-                }
-                src={frameImageSrc}
-                alt="Neura computer live frame"
-                className="h-full w-full select-none object-contain"
-                onClick={forwardFrameClick}
-                onDoubleClick={forwardFrameDoubleClick}
-                onContextMenu={forwardFrameContextMenu}
-                onWheel={forwardFrameWheel}
-                draggable={false}
-                initial={{ opacity: 0, scale: 0.985 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.22 }}
-              />
+              <div className="relative h-full w-full">
+                <motion.img
+                  key={
+                    liveFrameSrc
+                      ? 'live-desktop-frame'
+                      : `replay-${currentEntry?.originalIndex || 0}`
+                  }
+                  src={frameImageSrc}
+                  alt="Neura computer live stream"
+                  className="h-full w-full select-none object-contain"
+                  onClick={forwardFrameClick}
+                  onDoubleClick={forwardFrameDoubleClick}
+                  onContextMenu={forwardFrameContextMenu}
+                  onWheel={forwardFrameWheel}
+                  draggable={false}
+                  initial={{ opacity: 0, scale: 0.985 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.12 }}
+                />
+                {renderLiveOverlays()}
+              </div>
             ) : (
               renderEmptyState()
             )}
@@ -963,90 +1001,6 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({
 
         {imageEntries.length > 1 ? (
           <div className="mt-3">{renderSlider()}</div>
-        ) : null}
-
-        {visibleProgressItems.length > 0 || visibleToolCalls.length > 0 ? (
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            {visibleProgressItems.length > 0 ? (
-              <section className="rounded-lg border border-white/[0.08] bg-white/[0.025] p-4">
-                <div className="mb-3 text-xs font-medium uppercase text-white/35">
-                  Activity
-                </div>
-                <div className="space-y-3">
-                  {visibleProgressItems.map((item) => (
-                    <div key={item.id} className="flex gap-3 text-xs">
-                      <span
-                        className={cn(
-                          'mt-1 h-2.5 w-2.5 shrink-0 rounded-full',
-                          item.status === 'failed' && 'bg-red-400',
-                          item.status === 'done' && 'bg-emerald-400',
-                          item.status === 'in_progress' && 'bg-blue-400',
-                          item.status === 'pending' && 'bg-white/30',
-                        )}
-                      />
-                      <div className="min-w-0">
-                        <div className="break-words text-white/78">
-                          {item.title}
-                        </div>
-                        {item.detail ? (
-                          <div className="mt-1 line-clamp-2 break-words text-white/38">
-                            {item.detail}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
-            {visibleToolCalls.length > 0 ? (
-              <section className="rounded-lg border border-white/[0.08] bg-white/[0.025] p-4">
-                <div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase text-white/35">
-                  <FileCode2 className="h-3.5 w-3.5" />
-                  Tool calls
-                </div>
-                <div className="divide-y divide-white/[0.06]">
-                  {visibleToolCalls.map((toolCall) => {
-                    const preview = publicToolPreview(toolCall.resultPreview);
-                    return (
-                      <div key={toolCall.id} className="py-2 first:pt-0 last:pb-0">
-                        <div className="flex items-center gap-2 text-xs">
-                          <span className="min-w-0 flex-1 truncate text-white/82">
-                            {publicToolLabel(
-                              toolCall.serverName,
-                              toolCall.toolName,
-                            )}
-                          </span>
-                          <span
-                            className={cn(
-                              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] uppercase',
-                              toolCall.status === 'completed' &&
-                                'bg-emerald-400/12 text-emerald-200',
-                              toolCall.status === 'failed' &&
-                                'bg-red-400/12 text-red-200',
-                              toolCall.status === 'pending' &&
-                                'bg-blue-400/12 text-blue-200',
-                            )}
-                          >
-                            {toolCall.status === 'completed' ? (
-                              <CheckCircle2 className="h-3 w-3" />
-                            ) : null}
-                            {toolCall.status}
-                          </span>
-                        </div>
-                        {preview ? (
-                          <div className="mt-1 line-clamp-2 break-words text-[11px] text-white/38">
-                            {preview}
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            ) : null}
-          </div>
         ) : null}
 
         {shouldShowFinalAnswer ? (

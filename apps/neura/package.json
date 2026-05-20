@@ -22,6 +22,7 @@
     "package": "electron-forge package",
     "clean": "rimraf dist out",
     "test": "vitest",
+    "qa:installed": "node scripts/installed-app-qa.js",
     "test:bench": "vitest bench",
     "coverage": "vitest run --coverage",
     "build:e2e": "npm run build:dist && cross-env CI=e2e npm run package",

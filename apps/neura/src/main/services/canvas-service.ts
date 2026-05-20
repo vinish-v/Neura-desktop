@@ -8,6 +8,8 @@ import { shell } from 'electron';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import http from 'http';
+import net from 'net';
 
 const CANVAS_ROOT = path.join(os.homedir(), 'Neura-Projects');
 const METADATA_FILE = 'neura-canvas.json';
@@ -347,12 +349,162 @@ const metadataPathFor = (rootPath: string) =>
 
 export class CanvasService {
   private static instance: CanvasService | null = null;
+  private activeDevServers = new Map<string, { port: number; child?: any; server?: any }>();
+
+  private constructor() {
+    process.on('exit', () => {
+      for (const projectId of this.activeDevServers.keys()) {
+        const active = this.activeDevServers.get(projectId);
+        if (active?.child) {
+          try { active.child.kill(); } catch {}
+        }
+        if (active?.server) {
+          try { active.server.close(); } catch {}
+        }
+      }
+    });
+  }
 
   static getInstance() {
     if (!CanvasService.instance) {
       CanvasService.instance = new CanvasService();
     }
     return CanvasService.instance;
+  }
+
+  private findFreePort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const server = net.createServer();
+      server.unref();
+      server.on('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address();
+        const port = typeof address === 'string' ? 0 : address?.port || 0;
+        server.close(() => {
+          resolve(port);
+        });
+      });
+    });
+  }
+
+  async getOrStartPreviewServer(projectId: string): Promise<number> {
+    const active = this.activeDevServers.get(projectId);
+    if (active) {
+      return active.port;
+    }
+
+    const project = await this.getProject(projectId);
+    const port = await this.findFreePort();
+
+    // Check if package.json exists in rootPath
+    const packageJsonPath = path.join(project.rootPath, 'package.json');
+    let hasPackageJson = false;
+    try {
+      await fs.access(packageJsonPath);
+      hasPackageJson = true;
+    } catch {}
+
+    if (hasPackageJson) {
+      try {
+        const isWindows = process.platform === 'win32';
+        const cmd = isWindows ? 'npm.cmd' : 'npm';
+        const child = spawn(cmd, ['run', 'dev', '--', '--port', String(port), '--strictPort'], {
+          cwd: project.rootPath,
+          env: { ...process.env, PORT: String(port) },
+          shell: true,
+          windowsHide: true,
+        });
+
+        child.on('error', (err) => {
+          console.error(`Dev server child process error for project ${projectId}:`, err);
+        });
+
+        this.activeDevServers.set(projectId, { port, child });
+        return port;
+      } catch (err) {
+        console.error(`Failed to spawn dev server child process for project ${projectId}, falling back to static server:`, err);
+      }
+    }
+
+    // Static Server Fallback
+    const MIME_TYPES: Record<string, string> = {
+      '.html': 'text/html',
+      '.css': 'text/css',
+      '.js': 'application/javascript',
+      '.json': 'application/json',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.svg': 'image/svg+xml',
+      '.ico': 'image/x-icon',
+    };
+
+    const server = http.createServer(async (req, res) => {
+      try {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
+        res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+        if (req.method === 'OPTIONS') {
+          res.writeHead(200);
+          res.end();
+          return;
+        }
+
+        const decodedUrl = decodeURIComponent(req.url || '/');
+        const cleanUrl = decodedUrl.split('?')[0];
+        const filePath = path.join(project.rootPath, cleanUrl === '/' ? 'index.html' : cleanUrl);
+        
+        const resolved = path.resolve(filePath);
+        const rootResolved = path.resolve(project.rootPath);
+        if (!resolved.startsWith(rootResolved)) {
+          res.statusCode = 403;
+          res.end('Forbidden');
+          return;
+        }
+
+        const ext = path.extname(filePath).toLowerCase();
+        const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+        
+        const content = await fs.readFile(filePath);
+        res.writeHead(200, { 'Content-Type': contentType });
+        res.end(content);
+      } catch (err: any) {
+        if (err.code === 'ENOENT') {
+          res.statusCode = 404;
+          res.end('Not Found');
+        } else {
+          res.statusCode = 500;
+          res.end(`Internal Server Error: ${err.message}`);
+        }
+      }
+    });
+
+    server.listen(port, '127.0.0.1');
+    this.activeDevServers.set(projectId, { port, server });
+    return port;
+  }
+
+  async stopPreviewServer(projectId: string) {
+    const active = this.activeDevServers.get(projectId);
+    if (!active) return;
+    
+    if (active.child) {
+      try {
+        active.child.kill();
+      } catch (err) {
+        console.error(`Failed to kill dev server child process for project ${projectId}:`, err);
+      }
+    }
+    if (active.server) {
+      try {
+        active.server.close();
+      } catch (err) {
+        console.error(`Failed to close static server for project ${projectId}:`, err);
+      }
+    }
+    this.activeDevServers.delete(projectId);
   }
 
   getRootPath() {

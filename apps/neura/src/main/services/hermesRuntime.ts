@@ -11,7 +11,11 @@ import { app } from 'electron';
 
 import { logger } from '@main/logger';
 import { SettingStore } from '@main/store/setting';
-import { HermesBrowserBackend, LocalStore } from '@main/store/types';
+import {
+  HermesBrowserBackend,
+  LocalStore,
+  SearchEngineForSettings,
+} from '@main/store/types';
 import {
   HERMES_BRIDGE_EVENT_PREFIX,
   HERMES_BRIDGE_SCRIPT,
@@ -97,6 +101,31 @@ const HERMES_BROWSER_TOOLSETS = new Set([
   'hermes-slack',
 ]);
 const MAX_LIVE_OUTPUT = 64_000;
+export const DEFAULT_HERMES_STALL_TIMEOUT_MS = 4 * 60 * 1000;
+export const DEFAULT_HERMES_MAX_RUN_MS = 12 * 60 * 1000;
+
+export const getHermesRunTimingAbortReason = ({
+  now,
+  startedAt,
+  lastActivityAt,
+  stallTimeoutMs = DEFAULT_HERMES_STALL_TIMEOUT_MS,
+  maxRunMs = DEFAULT_HERMES_MAX_RUN_MS,
+}: {
+  now: number;
+  startedAt: number;
+  lastActivityAt: number;
+  stallTimeoutMs?: number;
+  maxRunMs?: number;
+}) => {
+  if (now - startedAt > maxRunMs) {
+    return `Runtime exceeded the local run limit of ${Math.round(maxRunMs / 60000)} minutes.`;
+  }
+  if (now - lastActivityAt > stallTimeoutMs) {
+    return `Runtime made no observable progress for ${Math.round(stallTimeoutMs / 60000)} minutes.`;
+  }
+  return '';
+};
+
 const NEURA_HERMES_SOUL = [
   '# Neura Hermes Profile',
   '',
@@ -107,8 +136,49 @@ const NEURA_HERMES_SOUL = [
   'Never store passwords, API keys, session tokens, private cookies, credentials, or one-off secrets in memory.',
   'When the user corrects how Neura or Hermes should work, treat the correction as a candidate memory if it is stable and useful across future sessions.',
   'Show useful progress through tools and final answers so Neura can display what happened clearly.',
+  'Ask the user a question only when a missing decision blocks safe progress; otherwise make a reasonable assumption, record it, and continue.',
+  'Default browser search policy: prefer Google Search for general web searches. Use Bing only if Google is unreachable or blocked. Do not use DuckDuckGo unless the user explicitly asks for DuckDuckGo.',
+  'If a browser search page is blank, blocked, paywalled, or protected by bot/security checks, switch source or report the blocker within one retry. Do not wait indefinitely on that page.',
   '',
 ].join('\n');
+
+const SEARCH_ENGINE_LABELS: Record<SearchEngineForSettings, string> = {
+  [SearchEngineForSettings.GOOGLE]: 'Google Search',
+  [SearchEngineForSettings.BING]: 'Bing',
+  [SearchEngineForSettings.BAIDU]: 'Baidu',
+};
+
+const SEARCH_ENGINE_HOSTS: Record<SearchEngineForSettings, string> = {
+  [SearchEngineForSettings.GOOGLE]: 'https://www.google.com/search?q=',
+  [SearchEngineForSettings.BING]: 'https://www.bing.com/search?q=',
+  [SearchEngineForSettings.BAIDU]: 'https://www.baidu.com/s?wd=',
+};
+
+const normalizeSearchEngine = (engine?: string): SearchEngineForSettings => {
+  if (engine === SearchEngineForSettings.BING) {
+    return SearchEngineForSettings.BING;
+  }
+  if (engine === SearchEngineForSettings.BAIDU) {
+    return SearchEngineForSettings.BAIDU;
+  }
+  return SearchEngineForSettings.GOOGLE;
+};
+
+export const buildBrowserSearchPolicy = (engine?: string) => {
+  const primary = normalizeSearchEngine(engine);
+  const fallback =
+    primary === SearchEngineForSettings.GOOGLE
+      ? SearchEngineForSettings.BING
+      : SearchEngineForSettings.GOOGLE;
+
+  return [
+    `Browser search preference: use ${SEARCH_ENGINE_LABELS[primary]} first (${SEARCH_ENGINE_HOSTS[primary]}...).`,
+    `If ${SEARCH_ENGINE_LABELS[primary]} is blank, slow, blocked, or asks for human verification, try ${SEARCH_ENGINE_LABELS[fallback]} once or open authoritative/direct sources from known URLs.`,
+    'Do not use DuckDuckGo unless the user explicitly asks for DuckDuckGo.',
+    'Never attempt to bypass or solve CAPTCHA/human-verification challenges automatically. Capture URL/title proof, ask the user to take over or answer, then resume.',
+    'Do not keep searching the same blocked provider. After one fallback, report the blocker with the current URL/title and next action.',
+  ].join('\n');
+};
 
 const findWorkspaceRoot = (start: string) => {
   let current = start;
@@ -493,6 +563,14 @@ export class HermesRuntimeService {
     }
 
     const settings = SettingStore.getStore();
+    const browserSearchPolicy = buildBrowserSearchPolicy(
+      settings.searchEngineForBrowser,
+    );
+    const promptWithBrowserPolicy = [
+      browserSearchPolicy,
+      '',
+      prompt,
+    ].join('\n');
     const hermesRoot = this.getHermesRoot();
     const hermesHome = this.getHermesHome();
     const cwd = input.cwd || app.getPath('home');
@@ -520,7 +598,7 @@ export class HermesRuntimeService {
     const { inputPath, scriptPath } = await writeHermesBridgeFiles({
       hermesHome,
       hermesRoot,
-      prompt,
+      prompt: promptWithBrowserPolicy,
       cwd,
       model,
       baseURL,
@@ -607,6 +685,10 @@ export class HermesRuntimeService {
           CUSTOM_BASE_URL: getModelSettings(settings).baseURL,
           HERMES_INFERENCE_PROVIDER: 'custom',
           HERMES_INFERENCE_MODEL: model,
+          NEURA_BROWSER_SEARCH_ENGINE: normalizeSearchEngine(
+            settings.searchEngineForBrowser,
+          ),
+          NEURA_BROWSER_SEARCH_POLICY: browserSearchPolicy,
         },
       });
       const processId = registerExternalTerminalProcess({
@@ -625,8 +707,15 @@ export class HermesRuntimeService {
       let finalAnswer = '';
       let stdoutLineBuffer = '';
       let settled = false;
+      const startedAt = Date.now();
+      let lastActivityAt = startedAt;
+      let lastActivity = 'runtime started';
       const cleanupBridgeInput = () => {
         void fs.promises.unlink(inputPath).catch(() => undefined);
+      };
+      const markActivity = (activity: string) => {
+        lastActivityAt = Date.now();
+        lastActivity = activity;
       };
 
       const abort = () => {
@@ -637,6 +726,43 @@ export class HermesRuntimeService {
         browserBridge?.stop();
       };
       input.signal?.addEventListener('abort', abort, { once: true });
+      const cleanupRuntime = () => {
+        input.signal?.removeEventListener('abort', abort);
+        clearInterval(watchdogTimer);
+        cleanupBridgeInput();
+      };
+      const rejectOnce = (error: Error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanupRuntime();
+        if (!child.killed) {
+          child.kill();
+        }
+        browserBridge?.stop();
+        emitOutput(stdout, `${stderr}${stderr ? '\n' : ''}${error.message}`, true);
+        reject(error);
+      };
+      const watchdogTimer = setInterval(() => {
+        if (settled) {
+          return;
+        }
+        const reason = getHermesRunTimingAbortReason({
+          now: Date.now(),
+          startedAt,
+          lastActivityAt,
+        });
+        if (!reason) {
+          return;
+        }
+        rejectOnce(
+          new Error(
+            `${reason} Last activity: ${lastActivity}. Neura stopped the local runtime instead of waiting indefinitely. Retry or resume after checking the browser blocker.`,
+          ),
+        );
+      }, 15_000);
+      watchdogTimer.unref?.();
 
       child.stdout.setEncoding('utf8');
       child.stderr.setEncoding('utf8');
@@ -650,6 +776,7 @@ export class HermesRuntimeService {
         });
       };
       const handleBridgeEvent = (event: HermesBridgeEvent) => {
+        markActivity(event.type || 'runtime event');
         input.onEvent?.(event);
 
         if (event.type === 'run.completed' && typeof event.finalAnswer === 'string') {
@@ -735,12 +862,14 @@ export class HermesRuntimeService {
         emitOutput();
       };
       child.stdout.on('data', (chunk: string) => {
+        markActivity('stdout');
         stdoutLineBuffer += chunk;
         const lines = stdoutLineBuffer.split(/\r?\n/);
         stdoutLineBuffer = lines.pop() || '';
         lines.forEach(handleStdoutLine);
       });
       child.stderr.on('data', (chunk: string) => {
+        markActivity('stderr');
         stderr = compactOutput(stderr + chunk);
         emitOutput();
         const line = chunk.trim();
@@ -754,28 +883,26 @@ export class HermesRuntimeService {
         }
       });
       child.on('error', (error) => {
-        input.signal?.removeEventListener('abort', abort);
-        browserBridge?.stop();
-        cleanupBridgeInput();
         if (settled) {
           return;
         }
         settled = true;
+        cleanupRuntime();
+        browserBridge?.stop();
         emitOutput(stdout, `${stderr}${stderr ? '\n' : ''}${error.message}`, true);
         reject(error);
       });
       child.on('close', (code) => {
-        input.signal?.removeEventListener('abort', abort);
         if (input.signal?.aborted) {
           browserBridge?.stop();
         } else if (!input.keepBrowserAlive) {
           releaseHermesBrowserBridge(browserBridge);
         }
-        cleanupBridgeInput();
         if (settled) {
           return;
         }
         settled = true;
+        cleanupRuntime();
         if (stdoutLineBuffer.trim()) {
           handleStdoutLine(stdoutLineBuffer.trim());
           stdoutLineBuffer = '';

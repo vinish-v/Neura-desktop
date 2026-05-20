@@ -8,6 +8,7 @@ import { store } from '@main/store/create';
 import type {
   ComputerRuntimeEventType,
   ComputerRuntimeFrame,
+  ComputerRuntimeInteraction,
   ComputerRuntimeMode,
   ComputerRuntimeOutput,
   ComputerRuntimeState,
@@ -46,6 +47,13 @@ type RuntimeUpdateInput = Partial<
   >
 >;
 
+type RuntimeInteractionInput = Omit<
+  ComputerRuntimeInteraction,
+  'id' | 'createdAt'
+>;
+
+const LIVE_DESKTOP_INTERVAL_MS = 125;
+
 const modeSubtitle = (mode: ComputerRuntimeMode) => {
   switch (mode) {
     case 'browser':
@@ -68,9 +76,12 @@ const syncLiveMirror = (mode?: ComputerRuntimeMode, status?: ComputerRuntimeStat
     status !== 'failed' &&
     status !== 'idle'
   ) {
-    localDesktopMirror.start((frame) => {
-      ComputerRuntimeController.frame(frame, { fromLiveMirror: true });
-    });
+    localDesktopMirror.start(
+      (frame) => {
+        ComputerRuntimeController.frame(frame, { fromLiveMirror: true });
+      },
+      LIVE_DESKTOP_INTERVAL_MS,
+    );
     return;
   }
 
@@ -177,6 +188,14 @@ export class ComputerRuntimeController {
       takeoverEnabled: false,
       events: [],
       updatedAt: Date.now(),
+      liveStream:
+        input.mode === 'desktop'
+          ? {
+              startedAt: Date.now(),
+              frameCount: 0,
+              frameIntervalMs: LIVE_DESKTOP_INTERVAL_MS,
+            }
+          : undefined,
     };
     store.setState({
       computerRuntime: appendEvent(
@@ -216,24 +235,61 @@ export class ComputerRuntimeController {
   ) {
     return patchRuntime(
       (runtime) => {
+        const now = Date.now();
         const nextFrame = {
           ...frame,
-          updatedAt: Date.now(),
+          updatedAt: now,
         };
+        const previousFrameAt =
+          runtime.liveStream?.lastFrameAt || runtime.latestFrame?.updatedAt;
+        const frameDelta = previousFrameAt ? now - previousFrameAt : undefined;
+        const frameRate =
+          frameDelta && frameDelta > 0
+            ? Number(Math.min(60, 1000 / frameDelta).toFixed(1))
+            : runtime.liveStream?.frameRate;
         return {
           ...runtime,
           frame: nextFrame,
           latestFrame: nextFrame,
+          liveStream: {
+            startedAt: runtime.liveStream?.startedAt || now,
+            frameCount: (runtime.liveStream?.frameCount || 0) + 1,
+            lastFrameAt: now,
+            frameIntervalMs:
+              frame.streamIntervalMs || runtime.liveStream?.frameIntervalMs,
+            frameRate,
+          },
           status:
             options.fromLiveMirror &&
             (runtime.status === 'waiting' || runtime.status === 'paused')
               ? runtime.status
               : 'running',
-          updatedAt: Date.now(),
+          updatedAt: now,
         };
       },
-      'runtime.frame',
-      'Frame updated',
+    );
+  }
+
+  static interaction(input: RuntimeInteractionInput) {
+    return patchRuntime(
+      (runtime) =>
+        appendEvent(
+          {
+            ...runtime,
+            latestInteraction: {
+              ...input,
+              id: randomUUID(),
+              createdAt: Date.now(),
+            },
+            status:
+              runtime.status === 'starting' || runtime.status === 'waiting'
+                ? 'running'
+                : runtime.status,
+            updatedAt: Date.now(),
+          },
+          'runtime.interaction',
+          input.type,
+        ),
     );
   }
 
@@ -278,6 +334,8 @@ export class ComputerRuntimeController {
         activity,
         frame: undefined,
         latestFrame: undefined,
+        latestInteraction: undefined,
+        liveStream: undefined,
         takeoverEnabled: false,
         updatedAt: Date.now(),
       }),
@@ -294,6 +352,8 @@ export class ComputerRuntimeController {
         activity,
         frame: undefined,
         latestFrame: undefined,
+        latestInteraction: undefined,
+        liveStream: undefined,
         takeoverEnabled: false,
         updatedAt: Date.now(),
       }),

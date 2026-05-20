@@ -95,6 +95,7 @@ export const tasksRoute = t.router({
       enabled?: boolean;
       subjectPrefix?: string;
       maxResults?: number;
+      senderAllowlist?: string[];
     }>()
     .handle(async ({ input }) => {
       return MailTaskIntakeService.getInstance().update(input);

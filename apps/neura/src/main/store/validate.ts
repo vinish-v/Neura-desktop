@@ -206,7 +206,23 @@ const MailTaskIntakeSchema = z.object({
   connectorId: z.literal('gmail'),
   subjectPrefix: z.string().min(1),
   maxResults: z.number().int().min(1).max(25),
+  senderAllowlist: z.array(z.string()).optional(),
   processedMessageIds: z.array(z.string()),
+  auditLog: z
+    .array(
+      z.object({
+        id: z.string(),
+        messageId: z.string().optional(),
+        from: z.string().optional(),
+        subject: z.string().optional(),
+        status: z.enum(['queued', 'skipped', 'failed']),
+        reason: z.string(),
+        queuedTaskId: z.string().optional(),
+        createdAt: z.number(),
+      }),
+    )
+    .optional(),
+  lastRunAt: z.number().optional(),
   updatedAt: z.number().optional(),
 });
 
@@ -238,6 +254,17 @@ const ApprovalEventSchema = z.object({
   risk: z.enum(['low', 'medium', 'high']),
   status: z.enum(['requested', 'approved', 'denied', 'auto_approved']),
   createdAt: z.number(),
+});
+
+const UserQuestionEventSchema = z.object({
+  id: z.string(),
+  question: z.string(),
+  context: z.string().optional(),
+  choices: z.array(z.string()).optional(),
+  status: z.enum(['requested', 'answered', 'dismissed']),
+  answer: z.string().optional(),
+  createdAt: z.number(),
+  answeredAt: z.number().optional(),
 });
 
 const CompletionProofSchema = z.object({
@@ -286,6 +313,30 @@ const RoadmapProgressSchema = z.object({
   version: z.number(),
   phases: z.array(RoadmapPhaseSchema),
   updatedAt: z.number(),
+});
+
+const ProductionReadinessIssueSchema = z.object({
+  id: z.string(),
+  severity: z.enum(['ready', 'warning', 'blocker']),
+  category: z.enum([
+    'model',
+    'browser',
+    'desktop',
+    'connector',
+    'provider',
+    'resumability',
+    'installed_app',
+  ]),
+  title: z.string(),
+  detail: z.string(),
+  nextAction: z.string().optional(),
+});
+
+const ProductionReadinessReportSchema = z.object({
+  status: z.enum(['ready', 'degraded', 'blocked']),
+  summary: z.string(),
+  issues: z.array(ProductionReadinessIssueSchema),
+  checkedAt: z.number(),
 });
 
 const TaskRunSchema = z.object({
@@ -356,6 +407,7 @@ const TaskRunSchema = z.object({
       }),
     )
     .optional(),
+  productionReadiness: ProductionReadinessReportSchema.optional(),
   todoItems: z
     .array(
       z.object({
@@ -375,6 +427,7 @@ const TaskRunSchema = z.object({
   artifacts: z.array(TaskArtifactSchema).optional(),
   artifactManifestPath: z.string().optional(),
   approvalEvents: z.array(ApprovalEventSchema).optional(),
+  userQuestionEvents: z.array(UserQuestionEventSchema).optional(),
   evidence: z.array(z.unknown()).optional(),
   evidenceValidation: z.unknown().optional(),
   completionProof: CompletionProofSchema.optional(),

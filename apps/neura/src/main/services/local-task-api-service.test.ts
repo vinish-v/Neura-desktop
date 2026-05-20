@@ -214,4 +214,36 @@ describe('LocalTaskApiService', () => {
     });
     await service.stop();
   });
+
+  it('rejects non-json and oversized task creation requests', async () => {
+    const service = new LocalTaskApiService();
+    const enabled = await service.enable(0);
+    const baseUrl = (await service.status()).baseUrl;
+
+    const wrongType = await fetch(`${baseUrl}/tasks`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${enabled.token}`,
+        'content-type': 'text/plain',
+      },
+      body: 'Build a report',
+    });
+    expect(wrongType.status).toBe(415);
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+
+    const tooLargeGoal = await fetch(`${baseUrl}/tasks`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${enabled.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ goal: 'x'.repeat(8001) }),
+    });
+    expect(tooLargeGoal.status).toBe(400);
+    expect(await tooLargeGoal.json()).toEqual({
+      error: 'goal must be 8000 characters or fewer.',
+    });
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+    await service.stop();
+  });
 });

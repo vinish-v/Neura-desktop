@@ -2,13 +2,14 @@
  * Copyright (c) 2025 Neura.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import http, { IncomingMessage, ServerResponse } from 'http';
 import type { AddressInfo } from 'net';
 
 import { logger } from '@main/logger';
 import { SettingStore } from '@main/store/setting';
 import type { BackgroundTaskKind, LocalTaskApiSettings } from '@main/store/types';
+import { MAX_TASK_GOAL_CHARS } from '@shared/taskIntakeLimits';
 
 import { BackgroundTaskService } from './background-task-service';
 import { TaskRunRegistry } from './taskRunRegistry';
@@ -34,8 +35,15 @@ const writeJson = (
   response.writeHead(statusCode, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
   });
   response.end(JSON.stringify(body));
+};
+
+const hasJsonContentType = (request: IncomingMessage) => {
+  const contentType = String(request.headers['content-type'] || '');
+  return /^application\/json(?:\s*;|$)/iu.test(contentType);
 };
 
 const readJsonBody = async (request: IncomingMessage) =>
@@ -206,10 +214,22 @@ export class LocalTaskApiService {
         return;
       }
       if (url.pathname === '/tasks' && request.method === 'POST') {
+        if (!hasJsonContentType(request)) {
+          writeJson(response, 415, {
+            error: 'Request body must use application/json.',
+          });
+          return;
+        }
         const body = (await readJsonBody(request)) as CreateTaskBody;
         const goal = String(body.goal || '').trim();
         if (!goal) {
           writeJson(response, 400, { error: 'goal is required.' });
+          return;
+        }
+        if (goal.length > MAX_TASK_GOAL_CHARS) {
+          writeJson(response, 400, {
+            error: `goal must be ${MAX_TASK_GOAL_CHARS} characters or fewer.`,
+          });
           return;
         }
         const kind =
@@ -271,7 +291,12 @@ export class LocalTaskApiService {
     }
     const authorization = request.headers.authorization || '';
     const match = /^Bearer\s+(.+)$/iu.exec(String(authorization));
-    return Boolean(match?.[1] && hashToken(match[1]) === tokenHash);
+    if (!match?.[1]) {
+      return false;
+    }
+    const expected = Buffer.from(tokenHash, 'hex');
+    const actual = Buffer.from(hashToken(match[1]), 'hex');
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
   }
 
   private getSettings(): LocalTaskApiSettings {

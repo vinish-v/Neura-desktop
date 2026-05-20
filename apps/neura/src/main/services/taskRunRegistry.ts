@@ -19,6 +19,7 @@ import {
   TaskTodoItem,
   TaskCheckpoint,
   TaskCheckpointSnapshot,
+  UserQuestionEvent,
 } from '@main/store/types';
 import { SettingStore } from '@main/store/setting';
 import { persistTaskRunContext } from './taskContextMemory';
@@ -402,6 +403,7 @@ export const createTaskRun = (
     toolCalls: [],
     artifacts: [],
     approvalEvents: [],
+    userQuestionEvents: [],
     validationFailures: [],
     validationStatus: runMode === 'executor_browser' ? 'pending' : undefined,
     startedAt: Date.now(),
@@ -423,6 +425,7 @@ const normalizeRun = (run: TaskRunRecord): TaskRunRecord => {
     toolCalls: run.toolCalls || [],
     artifacts: run.artifacts || [],
     approvalEvents: run.approvalEvents || [],
+    userQuestionEvents: run.userQuestionEvents || [],
     validationFailures: run.validationFailures || [],
     retrievedRunIds: run.retrievedRunIds || [],
     browserActionAudit: run.browserActionAudit || [],
@@ -1002,6 +1005,52 @@ export class TaskRunRegistry {
       approvalEvents: [...run.approvalEvents, approvalEvent],
     });
     return approvalEvent;
+  }
+
+  static addUserQuestion(
+    runId: string,
+    event: Omit<UserQuestionEvent, 'id' | 'createdAt'>,
+  ) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run) {
+      return null;
+    }
+    const userQuestionEvents = run.userQuestionEvents || [];
+    const questionEvent: UserQuestionEvent = {
+      ...event,
+      id: `${Date.now()}-${userQuestionEvents.length}`,
+      createdAt: Date.now(),
+    };
+    TaskRunRegistry.upsert({
+      ...run,
+      phase: 'waiting_for_approval',
+      nextAction: 'Answer the pending question so Neura can continue.',
+      userQuestionEvents: [...userQuestionEvents, questionEvent],
+    });
+    return questionEvent;
+  }
+
+  static updateUserQuestion(
+    runId: string,
+    eventId: string,
+    patch: Partial<Pick<UserQuestionEvent, 'status' | 'answer' | 'answeredAt'>>,
+  ) {
+    const run = TaskRunRegistry.list().find((record) => record.runId === runId);
+    if (!run) {
+      return null;
+    }
+    const userQuestionEvents = (run.userQuestionEvents || []).map((event) =>
+      event.id === eventId ? { ...event, ...patch } : event,
+    );
+    return TaskRunRegistry.upsert({
+      ...run,
+      phase: run.status === 'running' ? 'acting' : run.phase,
+      nextAction:
+        run.nextAction === 'Answer the pending question so Neura can continue.'
+          ? undefined
+          : run.nextAction,
+      userQuestionEvents,
+    });
   }
 
   static setCompletionProof(runId: string, completionProof: CompletionProof) {

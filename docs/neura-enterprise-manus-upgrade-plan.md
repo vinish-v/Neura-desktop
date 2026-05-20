@@ -29,6 +29,8 @@ Acceptance: launch actions produce explicit, routable prompts and every task run
 - [x] Add browser timing metrics and slow-step diagnostics for launch, navigation, click/action, extraction, download, login wait, and recovery phases.
 - [x] Add a local browser performance report artifact for real browser runs.
 - [x] Expand browser recovery classes for stale DOM, download failure, network timeout, captcha/paywall/login blocks, selector miss, permission denial, and browser crash.
+- [x] Add warm local browser session aging and bounded CDP restart policy so recovery refreshes stale sessions and does not loop forever.
+- [x] Add explicit browser search policy: prefer the configured Google/Bing/Baidu provider, keep DuckDuckGo opt-in only, switch source once on search-provider verification walls, and surface Firefox as a real CDP/Playwright adapter gap instead of pretending support.
 
 Acceptance: a browser task can recover from page crashes, stale CDP connections, and app restarts with clear user controls and no hidden hosted dependency.
 
@@ -54,6 +56,7 @@ Acceptance: research answers cite source records with quality labels, enough ind
 - [x] Add readable local previews for DOCX/PPTX/XLSX and ZIP containers by extracting safe text/entry summaries from the real archive contents.
 - [x] Render visual thumbnails for PPTX/DOCX/XLSX where local rendering tooling is available.
 - [x] Add export validation for file existence, size, readable preview, and expected format.
+- [x] Require claimed artifact kind to match the local file format so media/text mismatches cannot be registered as valid exports.
 
 Acceptance: created work is reviewable, refineable, exportable, and validated as a real file before Neura marks the run complete.
 
@@ -86,9 +89,11 @@ Acceptance: multimodal flows create real local artifacts only when providers are
 - [x] Add project-scoped run context with persisted project instructions, knowledge-file metadata, pinned projects, run history, and project memory.
 - [x] Add local `neura://task?goal=...` and `neura://run?goal=...` deep-link task intake that queues through the real background Hermes runtime.
 - [x] Add a localhost-only local task API with bearer-token auth, hashed token storage, task create/list/status, and run status endpoints.
+- [x] Harden local task API and deep-link task intake with explicit JSON-only requests, constant-time token comparison, and overlong-goal rejection.
 - [x] Add local task API token-integrity recovery so corrupt enabled settings do not start an API with an unknowable generated token.
 - [x] Add local task API port-conflict recovery so Desktop startup surfaces a setup gap instead of crashing the app.
 - [x] Add secure Gmail subject-prefix task intake that is disabled by default, uses the real read-only Gmail connector, and queues only explicit `[Neura Task]` messages.
+- [x] Add Gmail intake sender allowlist, dedupe-safe skipped-message handling, last-run timestamp, and visible audit events.
 - [x] Add focused browser/computer failure classification for navigation timeout, selector miss, login/captcha block, permission denial, browser crash, and unknown recovery.
 - [x] Add broader failure classification: user approval needed, provider config, tool error, validation error, and connector auth error.
 - [x] Add completion proof validators per task type.
@@ -100,4 +105,4 @@ Acceptance: Neura never silently marks brittle work complete; users see what hap
 
 ## Current Honesty Check
 
-The desktop app is materially closer after this slice, but it is not honest to call the current build Manus-level yet. The remaining gap is cloud-scale autonomy under very long real browser tasks, richer hosted browser durability, provider-level connector refresh coverage beyond implemented revoke paths, broader connector marketplace coverage, and production-grade mail intake beyond the current local Gmail read-only subject-prefix queue.
+The desktop app is materially closer after this slice, but it is not honest to call the current build Manus-level yet. Neura remains intentionally local-first with no required cloud browser, hosted worker, or paid remote sandbox dependency. Remaining gaps are extended real-world endurance under very long browser tasks, broader connector marketplace/provider coverage, richer provider-specific refresh/revoke support beyond implemented paths, and production-grade mail intake features beyond current read-only Gmail subject-prefix queueing.

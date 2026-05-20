@@ -24,6 +24,15 @@ export type NativeToolDefinition = {
 
 export const NATIVE_COMPUTER_TOOLS: NativeToolDefinition[] = [
   {
+    name: 'ask_user_question',
+    label: 'Ask User Question',
+    domain: 'computer',
+    actionSpace:
+      "ask_user_question(question='', context='', choices='')",
+    description:
+      'Ask the user a concise question only when a missing decision blocks safe progress. Do not use for routine planning, status updates, or questions Neura can answer from context.',
+  },
+  {
     name: 'read_file',
     label: 'Read File',
     domain: 'files',

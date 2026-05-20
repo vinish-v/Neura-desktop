@@ -102,6 +102,11 @@ Evidence values: `test`, `typecheck`, `build`, `manual`, `commit`, `tag`.
 | P7.32 | Browser action audit and timing         | Done        | Browser runs record action URL/title before and after, durations, failure classes, phase timing budgets, slow-step diagnostics, and a local performance report artifact |
 | P7.33 | Browser recovery class coverage         | Done        | Recovery classification covers stale DOM, selector miss, login/captcha/paywall blocks, permission denial, download failure, network timeout, and browser crash |
 | P7.34 | Browser research proof regression       | Done        | Numeric/current research claims remain needs-verification until two independent medium-or-better source records support them |
+| P7.35 | Gmail intake allowlist and audit        | Done        | Read-only Gmail intake supports sender allowlists, dedupe-safe skipped messages, last-run state, and visible audit events |
+| P7.36 | Local task intake abuse hardening       | Done        | Local API and deep links reject empty/overlong goals, local API requires JSON bodies, and bearer tokens are compared in constant time |
+| P7.37 | Browser session aging and restart bounds | Done       | Warm local browser sessions age out safely, profile locks trigger honest isolated-profile fallback, and CDP restart attempts are capped |
+| P7.38 | Artifact kind/format validation         | Done        | Claimed image/audio/video/document kinds must match readable local file formats before artifact proof is accepted |
+| P7.39 | Browser search fallback honesty         | Done        | Hermes browser tasks now prefer configured Google/Bing/Baidu search, keep DuckDuckGo opt-in only, switch source once on search-provider verification blocks, and surface Firefox as a real adapter gap instead of fake support |
 
 ## Phase Checkpoint
 
@@ -123,6 +128,10 @@ Latest local proof:
 - `npm.cmd --prefix apps/neura run test -- --run src/main/ipcRoutes/window.test.ts` passed.
 - `npm.cmd --prefix apps/neura run test -- --run src/main/services/deep-link-task-service.test.ts` passed.
 - `npm.cmd --prefix apps/neura run test -- --run src/main/services/local-task-api-service.test.ts` passed.
+- `npm.cmd --prefix apps/neura run test -- --run src/main/services/mail-task-intake-service.test.ts src/main/services/scheduled-task-service.test.ts` passed (2 files, 8 tests).
+- `npm.cmd --prefix apps/neura run test -- --run src/main/services/local-task-api-service.test.ts src/main/services/deep-link-task-service.test.ts` passed (2 files, 11 tests).
+- `npm.cmd --prefix apps/neura run test -- --run src/main/services/hermesBrowserBridge.test.ts` passed (1 file, 4 tests).
+- `npm.cmd --prefix apps/neura run test -- --run src/main/services/artifactValidation.test.ts` passed (1 file, 5 tests).
 - `npm.cmd --prefix apps/neura run typecheck:node` passed.
 - `npm.cmd --prefix apps/neura run typecheck:web` passed.
 - `npm.cmd --prefix apps/neura run build:dist` passed.

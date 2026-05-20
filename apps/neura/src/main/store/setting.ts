@@ -55,7 +55,9 @@ export const DEFAULT_SETTING: LocalStore = {
     connectorId: 'gmail',
     subjectPrefix: '[Neura Task]',
     maxResults: 10,
+    senderAllowlist: [],
     processedMessageIds: [],
+    auditLog: [],
   },
   desktopProjects: [],
   neuraRoadmap: createStabilizedV1Roadmap(),
@@ -300,9 +302,19 @@ const normalizeSettingStore = (state: Partial<LocalStore>): LocalStore => {
       typeof merged.mailTaskIntake?.maxResults === 'number'
         ? Math.min(25, Math.max(1, Math.round(merged.mailTaskIntake.maxResults)))
         : DEFAULT_SETTING.mailTaskIntake?.maxResults || 10,
+    senderAllowlist: Array.isArray(merged.mailTaskIntake?.senderAllowlist)
+      ? merged.mailTaskIntake.senderAllowlist
+          .map((entry) => String(entry).trim().toLowerCase())
+          .filter(Boolean)
+          .slice(0, 100)
+      : [],
     processedMessageIds: Array.isArray(merged.mailTaskIntake?.processedMessageIds)
       ? merged.mailTaskIntake.processedMessageIds.slice(-500)
       : [],
+    auditLog: Array.isArray(merged.mailTaskIntake?.auditLog)
+      ? merged.mailTaskIntake.auditLog.slice(0, 200)
+      : [],
+    lastRunAt: merged.mailTaskIntake?.lastRunAt,
     updatedAt: merged.mailTaskIntake?.updatedAt,
   };
   merged.desktopProjects = Array.isArray(merged.desktopProjects)

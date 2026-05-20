@@ -157,12 +157,18 @@ const callPlanner = async (
     settings.plannerTimeoutInMs || 90_000,
   );
   try {
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+    };
+    if (baseUrl.includes('openrouter.ai')) {
+      headers['HTTP-Referer'] = 'https://neura.desktop';
+      headers['X-Title'] = 'Neura Desktop';
+    }
+
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        'content-type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         model,
         temperature: 0,

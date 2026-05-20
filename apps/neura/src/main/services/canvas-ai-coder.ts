@@ -152,6 +152,12 @@ const completeJson = async (system: string, user: string) => {
     baseURL: config.baseURL,
     apiKey: config.apiKey,
     maxRetries: 0,
+    defaultHeaders: config.baseURL.includes('openrouter.ai')
+      ? {
+          'HTTP-Referer': 'https://neura.desktop',
+          'X-Title': 'Neura Desktop',
+        }
+      : undefined,
   });
   const response = await client.chat.completions.create(
     {

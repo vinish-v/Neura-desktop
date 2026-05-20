@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { desktopCapturer } from 'electron';
+import { mouse } from '@computer-use/nut-js';
 
 import { logger } from '@main/logger';
 import { getScreenSize } from '@main/utils/screen';
@@ -10,8 +11,8 @@ import type { ComputerRuntimeFrame } from '@main/store/types';
 
 type FrameHandler = (frame: Omit<ComputerRuntimeFrame, 'updatedAt'>) => void;
 
-const DEFAULT_INTERVAL_MS = 450;
-const JPEG_QUALITY = 62;
+const DEFAULT_INTERVAL_MS = 125;
+const JPEG_QUALITY = 52;
 
 class LocalDesktopMirrorService {
   private timer: NodeJS.Timeout | null = null;
@@ -19,6 +20,7 @@ class LocalDesktopMirrorService {
   private capturing = false;
   private onFrame: FrameHandler | null = null;
   private intervalMs = DEFAULT_INTERVAL_MS;
+  private frameIndex = 0;
 
   start(onFrame: FrameHandler, intervalMs = DEFAULT_INTERVAL_MS) {
     this.onFrame = onFrame;
@@ -28,6 +30,7 @@ class LocalDesktopMirrorService {
     }
 
     this.running = true;
+    this.frameIndex = 0;
     void this.capture();
     this.timer = setInterval(() => {
       void this.capture();
@@ -80,6 +83,13 @@ class LocalDesktopMirrorService {
         width: physicalSize.width,
         height: physicalSize.height,
       });
+      let cursor: { x: number; y: number } | undefined;
+      try {
+        const position = await mouse.getPosition();
+        cursor = { x: position.x, y: position.y };
+      } catch {
+        cursor = undefined;
+      }
       const dataUrl = `data:image/jpeg;base64,${frame
         .toJPEG(JPEG_QUALITY)
         .toString('base64')}`;
@@ -90,6 +100,10 @@ class LocalDesktopMirrorService {
         width: physicalSize.width,
         height: physicalSize.height,
         scaleFactor,
+        frameIndex: ++this.frameIndex,
+        capturedAt: Date.now(),
+        streamIntervalMs: this.intervalMs,
+        cursor,
         sourceId: source.id,
         sourceName: source.name,
       });

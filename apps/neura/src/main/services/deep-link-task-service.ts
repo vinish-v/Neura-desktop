@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { logger } from '@main/logger';
+import { MAX_TASK_GOAL_CHARS } from '@shared/taskIntakeLimits';
 
 import { BackgroundTaskService } from './background-task-service';
 
@@ -25,10 +26,14 @@ export const parseTaskDeepLink = (value: string): DeepLinkTaskRequest | null => 
     return null;
   }
   const goal = (url.searchParams.get('goal') || url.searchParams.get('q') || '')
-    .trim()
-    .slice(0, 8000);
+    .trim();
   if (!goal) {
     throw new Error('Neura task deep link requires a non-empty goal parameter.');
+  }
+  if (goal.length > MAX_TASK_GOAL_CHARS) {
+    throw new Error(
+      `Neura task deep link goal must be ${MAX_TASK_GOAL_CHARS} characters or fewer.`,
+    );
   }
   const mode = (url.searchParams.get('mode') || '').trim();
   return {

@@ -306,6 +306,31 @@ export type TaskCheckpoint = {
   createdAt: number;
 };
 
+export type ProductionReadinessSeverity = 'ready' | 'warning' | 'blocker';
+
+export type ProductionReadinessIssue = {
+  id: string;
+  severity: ProductionReadinessSeverity;
+  category:
+    | 'model'
+    | 'browser'
+    | 'desktop'
+    | 'connector'
+    | 'provider'
+    | 'resumability'
+    | 'installed_app';
+  title: string;
+  detail: string;
+  nextAction?: string;
+};
+
+export type ProductionReadinessReport = {
+  status: 'ready' | 'degraded' | 'blocked';
+  summary: string;
+  issues: ProductionReadinessIssue[];
+  checkedAt: number;
+};
+
 export type BackgroundTaskKind = 'mcp_autonomous' | 'skill' | 'multi_agent';
 
 export type BackgroundTaskStatus =
@@ -366,8 +391,22 @@ export type MailTaskIntakeSettings = {
   connectorId: 'gmail';
   subjectPrefix: string;
   maxResults: number;
+  senderAllowlist: string[];
   processedMessageIds: string[];
+  auditLog: MailTaskIntakeAuditEvent[];
+  lastRunAt?: number;
   updatedAt?: number;
+};
+
+export type MailTaskIntakeAuditEvent = {
+  id: string;
+  messageId?: string;
+  from?: string;
+  subject?: string;
+  status: 'queued' | 'skipped' | 'failed';
+  reason: string;
+  queuedTaskId?: string;
+  createdAt: number;
 };
 
 export type DesktopProjectKnowledgeFile = {
@@ -398,6 +437,17 @@ export type ApprovalEvent = {
   risk: 'low' | 'medium' | 'high';
   status: 'requested' | 'approved' | 'denied' | 'auto_approved';
   createdAt: number;
+};
+
+export type UserQuestionEvent = {
+  id: string;
+  question: string;
+  context?: string;
+  choices?: string[];
+  status: 'requested' | 'answered' | 'dismissed';
+  answer?: string;
+  createdAt: number;
+  answeredAt?: number;
 };
 
 export type CompletionProof = {
@@ -484,6 +534,8 @@ export type TaskState = {
   runMode: AgentRunMode;
   taskMode?: HermesTaskMode;
   browserBackend?: HermesBrowserBackend;
+  riskLevel?: 'low' | 'medium' | 'high';
+  needsApproval?: boolean;
   status: TaskRunStatus;
   phase?: TaskRunPhase;
   activeAgent?: 'planner' | 'researcher' | 'executor' | 'critic';
@@ -500,6 +552,7 @@ export type TaskState = {
   browserTiming?: BrowserTimingMetrics;
   wideResearchWorkers?: WideResearchWorkerRecord[];
   checkpoints?: TaskCheckpoint[];
+  productionReadiness?: ProductionReadinessReport;
   todoItems: TaskTodoItem[];
   progressItems: TaskProgressItem[];
   currentStep?: string;
@@ -511,6 +564,7 @@ export type TaskState = {
   artifacts: TaskArtifact[];
   artifactManifestPath?: string;
   approvalEvents: ApprovalEvent[];
+  userQuestionEvents?: UserQuestionEvent[];
   evidence?: TaskEvidence[];
   evidenceValidation?: TaskEvidenceValidationResult;
   completionProof?: CompletionProof;
@@ -539,11 +593,17 @@ export type ComputerRuntimeStatus =
 export type ComputerRuntimeEventType =
   | 'runtime.started'
   | 'runtime.frame'
+  | 'runtime.interaction'
   | 'runtime.output'
   | 'runtime.mode_changed'
   | 'runtime.takeover_changed'
   | 'runtime.completed'
   | 'runtime.failed';
+
+export type ComputerRuntimePointer = {
+  x: number;
+  y: number;
+};
 
 export type ComputerRuntimeFrame = {
   dataUrl?: string;
@@ -551,6 +611,10 @@ export type ComputerRuntimeFrame = {
   width?: number;
   height?: number;
   scaleFactor?: number;
+  frameIndex?: number;
+  capturedAt?: number;
+  streamIntervalMs?: number;
+  cursor?: ComputerRuntimePointer;
   sourceId?: string;
   sourceName?: string;
   updatedAt: number;
@@ -581,6 +645,25 @@ export type ComputerRuntimeBrowserState = {
   updatedAt: number;
 };
 
+export type ComputerRuntimeInteraction = {
+  id: string;
+  type:
+    | 'click'
+    | 'double_click'
+    | 'right_click'
+    | 'scroll'
+    | 'text'
+    | 'key'
+    | 'hotkey'
+    | 'mouse_move';
+  x?: number;
+  y?: number;
+  text?: string;
+  key?: string;
+  direction?: 'up' | 'down';
+  createdAt: number;
+};
+
 export type ComputerRuntimeEvent = {
   id: string;
   type: ComputerRuntimeEventType;
@@ -604,6 +687,14 @@ export type ComputerRuntimeState = {
   terminal?: ComputerRuntimeOutput;
   latestFrame?: ComputerRuntimeFrame;
   latestOutput?: ComputerRuntimeOutput;
+  latestInteraction?: ComputerRuntimeInteraction;
+  liveStream?: {
+    startedAt: number;
+    lastFrameAt?: number;
+    frameCount: number;
+    frameIntervalMs?: number;
+    frameRate?: number;
+  };
   activeProcessId?: string;
   takeoverEnabled: boolean;
   events: ComputerRuntimeEvent[];

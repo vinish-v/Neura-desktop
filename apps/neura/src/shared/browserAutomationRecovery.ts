@@ -420,11 +420,12 @@ export const recommendAutomationRecovery = (
         nextAction: 'ask_user_for_login_or_captcha',
         steps: [
           'Capture a screenshot or page snapshot of the blocker.',
-          'Ask the user to complete login, captcha, or verification.',
+          'Switch to a different source once when this is a search-provider block.',
+          'Ask the user to complete login, captcha, or verification when the site still requires a human.',
           'Resume from the same page after user handoff.',
         ],
         userFacingMessage:
-          'The site appears to require login, captcha, or human verification. Neura should pause and ask for user help instead of pretending it finished.',
+          'The site appears to require login, captcha, or human verification. Neura cannot bypass that automatically; it should switch source once when possible, then pause for Take over/resume instead of pretending it finished.',
       };
     case 'permission_denied':
       return {

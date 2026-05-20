@@ -21,6 +21,7 @@ import {
 } from '@main/store/types';
 import { ComputerRuntimeController } from './computerRuntimeController';
 import {
+  buildBrowserSearchPolicy,
   HermesBridgeEvent,
   HermesRuntimeService,
 } from './hermesRuntime';
@@ -28,6 +29,10 @@ import {
   getTaskContextHint,
   prepareTaskRunContext,
 } from './taskContextMemory';
+import {
+  assessProductionReadiness,
+  formatProductionReadinessForPrompt,
+} from './productionReadiness';
 import {
   buildTaskRunEvidenceRequirements,
   collectTaskEvidenceForRun,
@@ -132,7 +137,10 @@ const buildHermesTaskPrompt = (
     'Use the full Hermes toolset when useful: browser, terminal, files, skills, memory, session search, todo, delegation, code execution, cron, vision, image/audio/video tools, and MCP tools if configured.',
     'Neura is the UI cockpit. Keep progress observable through tool use and save user-facing deliverables into the workspace below.',
     'Optimize for speed: act immediately, avoid ceremony, use the fewest tools needed, and do not delegate or create a long plan unless the task is genuinely complex.',
+    'Use ask_user_question only when a specific missing user decision blocks safe progress. Do not ask routine preference questions; choose a sensible default and continue when safe.',
+    buildBrowserSearchPolicy(SettingStore.getStore().searchEngineForBrowser),
     'For simple research or browsing tasks, open the strongest source quickly, extract the answer, cite the source, and finish without repeated searching.',
+    'For browser research, do not wait on blank search pages or security/captcha pages. Retry once with a different source or report the blocker with URL/title proof.',
     'Browser retry policy: retry navigation at most once; refresh a stale DOM/snapshot at most once; then pause with recovery evidence and ask for takeover/resume instead of looping.',
     'Before and after browser form submissions, checkout-like flows, downloads, or external-write actions, verify the URL/title/page state and record evidence before claiming success.',
     'Prefer accessible labels, roles, text, and semantic selectors first; use visible DOM evidence next; use coordinates only when visible evidence is recorded.',
@@ -144,6 +152,7 @@ const buildHermesTaskPrompt = (
     run.projectId
       ? DesktopProjectsService.getInstance().buildProjectContext(run.projectId)
       : '',
+    formatProductionReadinessForPrompt(run.productionReadiness),
     `Workspace: ${run.workspacePath || 'default Hermes working directory'}`,
     'Use Hermes persistent memory for durable preferences, corrections, and stable environment facts. Do not save secrets or transient task logs to memory.',
     getTaskContextHint(run).trim(),
@@ -291,6 +300,11 @@ const extractUrls = (...values: Array<unknown>) => {
 const getStringField = (value: unknown, key: string) =>
   value && typeof value === 'object' && typeof (value as Record<string, unknown>)[key] === 'string'
     ? ((value as Record<string, unknown>)[key] as string)
+    : undefined;
+
+const getNumberField = (value: unknown, key: string) =>
+  value && typeof value === 'object' && typeof (value as Record<string, unknown>)[key] === 'number'
+    ? ((value as Record<string, unknown>)[key] as number)
     : undefined;
 
 const createWideResearchWorkers = (
@@ -582,6 +596,78 @@ const recordRuntimeFailureRecovery = (runId: string, message: string) => {
   });
 };
 
+const buildCompletionReadinessFailures = (
+  run: TaskRunRecord,
+  finalAnswer: string,
+) => {
+  const failures: string[] = [];
+  if (!finalAnswer.trim()) {
+    failures.push('A user-facing final answer is required before completion.');
+  }
+  const pendingToolCalls = (run.toolCalls || []).filter(
+    (toolCall) => toolCall.status === 'pending',
+  );
+  if (pendingToolCalls.length > 0) {
+    failures.push(
+      `Wait for ${pendingToolCalls.length} pending computer/tool action${
+        pendingToolCalls.length === 1 ? '' : 's'
+      } to finish before claiming completion.`,
+    );
+  }
+  const unresolvedTodos = (run.todoItems || []).filter(
+    (todo) => todo.status !== 'done',
+  );
+  if (unresolvedTodos.length > 0) {
+    failures.push(
+      `Resolve ${unresolvedTodos.length} unfinished planner item${
+        unresolvedTodos.length === 1 ? '' : 's'
+      } before claiming completion.`,
+    );
+  }
+  const pendingApprovals = (run.approvalEvents || []).filter(
+    (event) => event.status === 'requested',
+  );
+  if (pendingApprovals.length > 0) {
+    failures.push('Resolve pending approval requests before completion.');
+  }
+  const pendingQuestions = (run.userQuestionEvents || []).filter(
+    (event) => event.status === 'requested',
+  );
+  if (pendingQuestions.length > 0) {
+    failures.push('Answer or dismiss pending user questions before completion.');
+  }
+  const pendingBrowserActions = (run.browserActionAudit || []).filter(
+    (action) => action.status === 'pending' || action.status === 'retrying',
+  );
+  if (pendingBrowserActions.length > 0) {
+    failures.push('Finish or recover pending browser/computer actions before completion.');
+  }
+  return failures;
+};
+
+const completionProofKindFor = (
+  route: HermesTaskRoute,
+  artifacts: Array<Omit<TaskArtifact, 'sourceRunId'>>,
+  evidence: ReturnType<typeof collectTaskEvidenceForRun>,
+): CompletionProof['kind'] => {
+  if (artifacts.length > 0) {
+    return 'artifact';
+  }
+  if (route.requiresSource) {
+    return 'source';
+  }
+  if (evidence.some((item) => item.kind === 'browser_snapshot')) {
+    return 'browser_terminal_page';
+  }
+  if (evidence.some((item) => item.kind === 'command_test')) {
+    return 'local_action';
+  }
+  if (evidence.some((item) => item.connectorName?.startsWith('native:'))) {
+    return 'local_action';
+  }
+  return 'connector_action';
+};
+
 const validateRunCompletion = (
   run: TaskRunRecord,
   route: HermesTaskRoute,
@@ -593,6 +679,10 @@ const validateRunCompletion = (
     TaskRunRegistry.list().find((item) => item.runId === run.runId) || run;
   const sourceQuality = summarizeSourceQuality(currentRun.sourceRecords);
   const evidence = collectTaskEvidenceForRun(currentRun);
+  const readinessFailures = buildCompletionReadinessFailures(
+    currentRun,
+    finalAnswer,
+  );
   const requirements: TaskEvidenceRequirements = {
     ...buildTaskRunEvidenceRequirements(currentRun),
     requireEvidence: true,
@@ -608,7 +698,10 @@ const validateRunCompletion = (
       : finalAnswer,
     evidence,
     requirements,
-    knownFailures: currentRun.validationFailures,
+    knownFailures: [
+      ...(currentRun.validationFailures || []),
+      ...readinessFailures,
+    ],
   });
 
   TaskRunRegistry.patch(currentRun.runId, {
@@ -623,12 +716,7 @@ const validateRunCompletion = (
   return {
     valid: true,
     proof: {
-      kind:
-        artifacts.length > 0
-          ? 'artifact'
-          : route.requiresSource
-            ? 'source'
-            : 'connector_action',
+      kind: completionProofKindFor(route, artifacts, evidence),
       summary: 'Neura validated the final answer against recorded task evidence.',
       evidence: [
         compact(finalAnswer),
@@ -658,6 +746,7 @@ const maybeRecordHermesEvent = (
   workerId?: string,
 ) => {
   if (event.type === 'tool.call.started') {
+    recordVisibleAutomationInteraction(event);
     const toolName = (event.toolName || 'tool')
       .replace(/^hermes[._:-]?/i, '')
       .replace(/_/g, '.');
@@ -739,6 +828,53 @@ const maybeRecordHermesEvent = (
       status: 'done',
       eventType: 'hermes.clarify',
     });
+  }
+};
+
+const recordVisibleAutomationInteraction = (event: HermesBridgeEvent) => {
+  const toolName = event.toolName || '';
+  const x = getNumberField(event.arguments, 'x');
+  const y = getNumberField(event.arguments, 'y');
+  if (/double.*click/i.test(toolName) && x !== undefined && y !== undefined) {
+    ComputerRuntimeController.interaction({ type: 'double_click', x, y });
+    return;
+  }
+  if (/right.*click/i.test(toolName) && x !== undefined && y !== undefined) {
+    ComputerRuntimeController.interaction({ type: 'right_click', x, y });
+    return;
+  }
+  if (/click|tap|press/i.test(toolName) && x !== undefined && y !== undefined) {
+    ComputerRuntimeController.interaction({ type: 'click', x, y });
+    return;
+  }
+  if (/scroll|wheel/i.test(toolName)) {
+    ComputerRuntimeController.interaction({
+      type: 'scroll',
+      x,
+      y,
+      direction:
+        getNumberField(event.arguments, 'deltaY') &&
+        Number(getNumberField(event.arguments, 'deltaY')) < 0
+          ? 'up'
+          : 'down',
+    });
+    return;
+  }
+  if (/type|input|fill/i.test(toolName)) {
+    const text =
+      getStringField(event.arguments, 'text') ||
+      getStringField(event.arguments, 'value') ||
+      getStringField(event.arguments, 'content') ||
+      '';
+    ComputerRuntimeController.interaction({
+      type: 'text',
+      text: text.length > 0 ? `${text.length} chars` : 'typing',
+    });
+    return;
+  }
+  if (/key|hotkey|shortcut/i.test(toolName)) {
+    const key = getStringField(event.arguments, 'key') || toolName;
+    ComputerRuntimeController.interaction({ type: 'key', key });
   }
 };
 
@@ -825,6 +961,8 @@ export class TaskManager {
         activeAgent: 'planner' as const,
         taskMode: route.taskMode,
         browserBackend: route.browserBackend,
+        riskLevel: route.riskLevel,
+        needsApproval: route.semanticContract?.needsApproval,
         backgroundTaskId: options.backgroundTaskId,
         retryOfRunId: options.retryOfRunId,
         retryCount: options.retryCount || 0,
@@ -862,6 +1000,69 @@ export class TaskManager {
         eventType: 'wide_research.workers.created',
       });
     }
+    const readiness = await assessProductionReadiness({
+      goal: trimmedGoal,
+      runMode,
+      taskMode: route.taskMode,
+      toolsets: route.toolsets,
+      browserBackend: route.browserBackend,
+    });
+    this.patch(run.runId, {
+      productionReadiness: readiness,
+      nextAction:
+        readiness.status === 'blocked'
+          ? 'Fix the production readiness blockers, then retry the task.'
+          : run.nextAction,
+    });
+    TaskRunRegistry.addCheckpoint(run.runId, {
+      label: 'Production readiness preflight',
+      status: readiness.status === 'blocked' ? 'failed' : 'validated',
+      summary: readiness.summary,
+    });
+    this.addProgress(run.runId, {
+      title:
+        readiness.status === 'blocked'
+          ? 'Production readiness blocked'
+          : readiness.status === 'degraded'
+            ? 'Production readiness warnings'
+            : 'Production readiness passed',
+      detail: [
+        readiness.summary,
+        ...readiness.issues.map(
+          (item) =>
+            `${item.severity.toUpperCase()}: ${item.title} - ${item.nextAction || item.detail}`,
+        ),
+      ].join('\n'),
+      status: readiness.status === 'blocked' ? 'failed' : 'done',
+      eventType: 'production.preflight',
+    });
+    if (readiness.status === 'blocked') {
+      const message = [
+        readiness.summary,
+        ...readiness.issues
+          .filter((item) => item.severity === 'blocker')
+          .map(
+            (item) =>
+              `${item.title}: ${item.nextAction || item.detail}`,
+          ),
+      ].join(' ');
+      const failed = this.patch(run.runId, {
+        status: 'failed',
+        phase: 'failed',
+        error: message,
+        finalAnswer: `Neura cannot start this task yet: ${message}`,
+        validationStatus: 'failed',
+        completedAt: Date.now(),
+      });
+      store.setState({
+        status: StatusEnum.ERROR,
+        thinking: false,
+        errorMsg: message,
+        taskState: failed || store.getState().taskState,
+      });
+      return failed;
+    }
+
     TaskRunRegistry.setActiveRunId(run.runId);
 
     ComputerRuntimeController.start({

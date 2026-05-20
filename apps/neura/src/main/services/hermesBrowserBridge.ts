@@ -58,8 +58,19 @@ export type BrowserHealthProbeInput = {
   checkedAt?: number;
 };
 
-const POLL_INTERVAL_MS = 600;
+const POLL_INTERVAL_MS = 200;
 const IDLE_SHUTDOWN_MS = 180_000;
+const WARM_BROWSER_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+const RESTART_ATTEMPT_WINDOW_MS = 5 * 60 * 1000;
+const MAX_AUTOMATIC_RESTARTS_PER_WINDOW = 2;
+export const SUPPORTED_HERMES_CDP_BROWSERS = [
+  'Google Chrome',
+  'Microsoft Edge',
+  'Brave',
+  'Chromium',
+];
+export const FIREFOX_HERMES_BROWSER_GAP =
+  'Firefox is not supported by the current Hermes CDP bridge; it requires a real Playwright/BiDi adapter before Neura can automate it.';
 let activeSession: HermesBrowserBridgeSession | null = null;
 let idleShutdownTimer: NodeJS.Timeout | null = null;
 
@@ -271,6 +282,62 @@ const recordBrowserRecovery = ({
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
+export type WarmBrowserReuseDecision = {
+  reuse: boolean;
+  reason?: 'stopped' | 'aged' | 'user_takeover_active';
+  ageMs: number;
+};
+
+export const shouldReuseWarmBrowserSession = ({
+  createdAt,
+  now = Date.now(),
+  stopped = false,
+  takeoverActive = false,
+  maxAgeMs = WARM_BROWSER_MAX_AGE_MS,
+}: {
+  createdAt: number;
+  now?: number;
+  stopped?: boolean;
+  takeoverActive?: boolean;
+  maxAgeMs?: number;
+}): WarmBrowserReuseDecision => {
+  const ageMs = Math.max(0, now - createdAt);
+  if (stopped) {
+    return { reuse: false, reason: 'stopped', ageMs };
+  }
+  if (takeoverActive) {
+    return { reuse: true, reason: 'user_takeover_active', ageMs };
+  }
+  if (ageMs > maxAgeMs) {
+    return { reuse: false, reason: 'aged', ageMs };
+  }
+  return { reuse: true, ageMs };
+};
+
+export const shouldAttemptAutomaticBrowserRestart = ({
+  attempts,
+  firstAttemptAt,
+  now = Date.now(),
+  maxAttempts = MAX_AUTOMATIC_RESTARTS_PER_WINDOW,
+  windowMs = RESTART_ATTEMPT_WINDOW_MS,
+}: {
+  attempts: number;
+  firstAttemptAt?: number;
+  now?: number;
+  maxAttempts?: number;
+  windowMs?: number;
+}) => {
+  const withinWindow = Boolean(
+    firstAttemptAt && now - firstAttemptAt <= windowMs,
+  );
+  const attemptsInWindow = withinWindow ? attempts : 0;
+  return {
+    allowed: attemptsInWindow < maxAttempts,
+    attemptsInWindow,
+    resetWindow: !withinWindow,
+  };
+};
+
 const cdpPortFromUrl = (cdpUrl?: string) => {
   if (!cdpUrl) {
     return undefined;
@@ -300,7 +367,10 @@ export const buildBrowserHealthReport = ({
   const profileIssues: string[] = [];
 
   if (!executableExists) {
-    issues.push('No supported local browser executable was found.');
+    issues.push(
+      `No supported local browser executable was found. Supported local browsers: ${SUPPORTED_HERMES_CDP_BROWSERS.join(', ')}.`,
+    );
+    issues.push(FIREFOX_HERMES_BROWSER_GAP);
   }
   if (!profileExists) {
     profileIssues.push('The local browser automation profile does not exist.');
@@ -422,6 +492,9 @@ export class HermesBrowserBridgeSession {
   private lastRecoverySignature = '';
   private lastSnapshotAt = 0;
   private lastSnapshotSignature = '';
+  private readonly createdAt = Date.now();
+  private automaticRestartAttempts = 0;
+  private firstAutomaticRestartAt = 0;
 
   constructor(
     readonly cdpUrl: string,
@@ -441,6 +514,14 @@ export class HermesBrowserBridgeSession {
     return {
       url: this.lastUrl || undefined,
       title: this.lastTitle || undefined,
+    };
+  }
+
+  getReusePolicyInput() {
+    return {
+      createdAt: this.createdAt,
+      stopped: this.isStopped,
+      takeoverActive: Boolean(store.getState().computerRuntime?.takeoverEnabled),
     };
   }
 
@@ -512,6 +593,31 @@ export class HermesBrowserBridgeSession {
           !this.restarting &&
           !store.getState().computerRuntime?.takeoverEnabled
         ) {
+          const restartPolicy = shouldAttemptAutomaticBrowserRestart({
+            attempts: this.automaticRestartAttempts,
+            firstAttemptAt: this.firstAutomaticRestartAt || undefined,
+          });
+          if (!restartPolicy.allowed) {
+            recordBrowserRecovery({
+              action: 'browser_restart',
+              message: `Automatic browser restart limit reached after ${restartPolicy.attemptsInWindow} attempts: ${message}`,
+              url: this.lastUrl,
+              status: 'failed',
+            });
+            await this.publishRestoreSnapshot({
+              url: this.lastUrl,
+              title: this.lastTitle,
+              bridgeStatus: 'failed',
+            });
+            return;
+          }
+          if (restartPolicy.resetWindow) {
+            this.automaticRestartAttempts = 0;
+            this.firstAutomaticRestartAt = Date.now();
+          } else if (!this.firstAutomaticRestartAt) {
+            this.firstAutomaticRestartAt = Date.now();
+          }
+          this.automaticRestartAttempts += 1;
           await this.restartAfterDisconnect(message);
         }
       }
@@ -553,31 +659,41 @@ export class HermesBrowserBridgeSession {
     }
 
     if (input.type === 'click') {
+      ComputerRuntimeController.interaction(input);
       await page.mouse.click(input.x, input.y);
       return;
     }
     if (input.type === 'double_click') {
+      ComputerRuntimeController.interaction(input);
       await page.mouse.click(input.x, input.y, { clickCount: 2 });
       return;
     }
     if (input.type === 'right_click') {
+      ComputerRuntimeController.interaction(input);
       await page.mouse.click(input.x, input.y, { button: 'right' });
       return;
     }
     if (input.type === 'scroll') {
+      ComputerRuntimeController.interaction(input);
       await page.mouse.move(input.x, input.y);
       await page.mouse.wheel({ deltaY: input.direction === 'up' ? -500 : 500 });
       return;
     }
     if (input.type === 'text') {
+      ComputerRuntimeController.interaction({
+        type: 'text',
+        text: input.text.length <= 3 ? input.text : `${input.text.length} chars`,
+      });
       await page.keyboard.type(input.text);
       return;
     }
     if (input.type === 'key') {
+      ComputerRuntimeController.interaction(input);
       await page.keyboard.press(toPuppeteerKey(input.key));
       return;
     }
     if (input.type === 'hotkey') {
+      ComputerRuntimeController.interaction(input);
       const keys = input.key
         .split('+')
         .map((part) => toPuppeteerKey(part))
@@ -614,7 +730,7 @@ export class HermesBrowserBridgeSession {
     const screenshot = await page.screenshot({
       encoding: 'base64',
       type: 'jpeg',
-      quality: 70,
+      quality: 58,
     });
     ComputerRuntimeController.frame({
       dataUrl: `data:image/jpeg;base64,${screenshot}`,
@@ -834,44 +950,75 @@ export const startHermesBrowserBridge = async ({
     status: 'in_progress',
   });
   if (!dedicated && activeSession && !activeSession.isStopped) {
-    if (idleShutdownTimer) {
-      clearTimeout(idleShutdownTimer);
-      idleShutdownTimer = null;
+    const reuseDecision = shouldReuseWarmBrowserSession(
+      activeSession.getReusePolicyInput(),
+    );
+    if (reuseDecision.reuse) {
+      if (idleShutdownTimer) {
+        clearTimeout(idleShutdownTimer);
+        idleShutdownTimer = null;
+      }
+      if (runId) {
+        TaskRunRegistry.addBrowserActionAudit(runId, {
+          action: 'browser_reuse',
+          status: 'completed',
+          urlAfter: activeSession.getLastStableState().url,
+          titleAfter: activeSession.getLastStableState().title,
+          durationMs: Date.now() - launchStartedAt,
+          completedAt: Date.now(),
+        });
+        TaskRunRegistry.recordBrowserTiming(
+          runId,
+          'browser_reuse',
+          Date.now() - launchStartedAt,
+          'launch',
+        );
+      }
+      onProgress?.({
+        title: 'Browser automation ready',
+        detail:
+          reuseDecision.reason === 'user_takeover_active'
+            ? 'Reusing warm browser session while takeover is active.'
+            : 'Reusing warm browser session.',
+        status: 'done',
+      });
+      return activeSession;
     }
+    const staleSession = activeSession;
+    activeSession = null;
+    staleSession.stop();
     if (runId) {
       TaskRunRegistry.addBrowserActionAudit(runId, {
-        action: 'browser_reuse',
+        action: 'browser_session_refresh',
         status: 'completed',
-        urlAfter: activeSession.getLastStableState().url,
-        titleAfter: activeSession.getLastStableState().title,
+        urlBefore: staleSession.getLastStableState().url,
+        titleBefore: staleSession.getLastStableState().title,
         durationMs: Date.now() - launchStartedAt,
         completedAt: Date.now(),
       });
-      TaskRunRegistry.recordBrowserTiming(
-        runId,
-        'browser_reuse',
-        Date.now() - launchStartedAt,
-        'launch',
-      );
     }
     onProgress?.({
-      title: 'Browser automation ready',
-      detail: 'Reusing warm browser session.',
-      status: 'done',
+      title: 'Refreshing browser automation',
+      detail:
+        reuseDecision.reason === 'aged'
+          ? 'The warm browser session was aged out and will be relaunched locally.'
+          : 'The previous browser session is not reusable and will be relaunched locally.',
+      status: 'in_progress',
     });
-    return activeSession;
   }
 
   const executable = resolveChromeExecutable();
   if (!executable) {
+    const supportedBrowsers = SUPPORTED_HERMES_CDP_BROWSERS.join(', ');
+    const setupGap = `Supported local browsers: ${supportedBrowsers}. ${FIREFOX_HERMES_BROWSER_GAP}`;
     recordBrowserRecovery({
       action: 'browser_launch',
-      message: 'Chrome, Edge, Brave, or Chromium was not found on this machine.',
+      message: setupGap,
       status: 'failed',
     });
     onProgress?.({
       title: 'Browser automation unavailable',
-      detail: 'Chrome, Edge, Brave, or Chromium was not found on this machine.',
+      detail: setupGap,
       status: 'failed',
     });
     return null;
@@ -881,9 +1028,36 @@ export const startHermesBrowserBridge = async ({
 
   const port = await getFreePort();
   const cdpUrl = `http://127.0.0.1:${port}`;
-  const userDataDir = dedicated
+  let userDataDir = dedicated
     ? await createDedicatedBrowserProfile()
     : await ensurePersistentBrowserProfile();
+  let preserveProfile = !dedicated;
+  if (!dedicated && hasProfileLock(userDataDir)) {
+    const lockedProfile = userDataDir;
+    userDataDir = await createDedicatedBrowserProfile();
+    preserveProfile = false;
+    recordBrowserRecovery({
+      action: 'browser_profile_lock',
+      message: `Persistent browser profile is locked at ${lockedProfile}. Starting an isolated local browser session for this run.`,
+      status: 'in_progress',
+    });
+    if (runId) {
+      TaskRunRegistry.addBrowserActionAudit(runId, {
+        action: 'browser_profile_lock',
+        status: 'blocked',
+        urlBefore: activeSession?.getLastStableState().url,
+        durationMs: Date.now() - launchStartedAt,
+        completedAt: Date.now(),
+        failureClass: 'permission_denied',
+      });
+    }
+    onProgress?.({
+      title: 'Browser profile continuity unavailable',
+      detail:
+        'The persistent browser profile is locked, so Neura is using an isolated local browser profile for this run.',
+      status: 'in_progress',
+    });
+  }
 
   const args = [
     `--remote-debugging-port=${port}`,
@@ -925,7 +1099,7 @@ export const startHermesBrowserBridge = async ({
       executable,
       args,
       backend,
-      !dedicated,
+      preserveProfile,
     );
     await session.connect();
   } catch (error) {

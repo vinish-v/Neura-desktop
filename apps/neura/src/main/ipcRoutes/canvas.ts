@@ -81,4 +81,15 @@ export const canvasRoute = t.router({
   getCanvasIdeStatus: t.procedure.input<void>().handle(async () => {
     return CanvasIdeLauncher.getInstance().getStatus();
   }),
+  getCanvasPreviewUrl: t.procedure
+    .input<{ projectId: string }>()
+    .handle(async ({ input }) => {
+      const port = await CanvasService.getInstance().getOrStartPreviewServer(input.projectId);
+      return `http://localhost:${port}`;
+    }),
+  stopCanvasPreviewServer: t.procedure
+    .input<{ projectId: string }>()
+    .handle(async ({ input }) => {
+      await CanvasService.getInstance().stopPreviewServer(input.projectId);
+    }),
 });

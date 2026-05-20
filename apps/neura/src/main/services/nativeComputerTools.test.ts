@@ -6,7 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   requestUserApproval: vi.fn(),
+  requestUserQuestion: vi.fn(),
   settingGet: vi.fn(),
+  activeRunId: null as string | null,
+  addToolCall: vi.fn(),
+  updateToolCall: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -33,12 +37,18 @@ vi.mock('./approvalGate', () => ({
   requestUserApproval: mocks.requestUserApproval,
 }));
 
+vi.mock('./userQuestionGate', () => ({
+  requestUserQuestion: mocks.requestUserQuestion,
+}));
+
 vi.mock('./taskRunRegistry', () => ({
   createRunId: () => 'run_test',
   TaskRunRegistry: {
     addApproval: vi.fn(),
     addArtifact: vi.fn(),
-    getActiveRunId: vi.fn(() => null),
+    addToolCall: mocks.addToolCall,
+    updateToolCall: mocks.updateToolCall,
+    getActiveRunId: vi.fn(() => mocks.activeRunId),
   },
 }));
 
@@ -46,7 +56,88 @@ import { StatusEnum } from '@neura-desktop/shared/types';
 import { executeNativeComputerTool } from './nativeComputerTools';
 
 afterEach(() => {
+  mocks.activeRunId = null;
   vi.unstubAllGlobals();
+});
+
+describe('native computer task evidence audit', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mocks.activeRunId = 'run_active';
+  });
+
+  it('records native tool lifecycle without storing full file content', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neura-audit-test-'));
+    const targetPath = path.join(tempDir, 'report.md');
+
+    const result = await executeNativeComputerTool('write_file', {
+      path: targetPath,
+      content: 'Private report body that should not be copied into tool args.',
+    } as never);
+
+    expect(result.status).toBe(StatusEnum.END);
+    expect(mocks.addToolCall).toHaveBeenCalledWith(
+      'run_active',
+      expect.objectContaining({
+        serverName: 'native:files',
+        toolName: 'write_file',
+        status: 'pending',
+        arguments: expect.objectContaining({
+          path: targetPath,
+          contentLength: expect.any(Number),
+        }),
+      }),
+    );
+    expect(JSON.stringify(mocks.addToolCall.mock.calls[0][1].arguments)).not.toContain(
+      'Private report body',
+    );
+    expect(mocks.updateToolCall).toHaveBeenCalledWith(
+      'run_active',
+      expect.stringMatching(/^native-/),
+      expect.objectContaining({
+        status: 'completed',
+        resultPreview: expect.stringContaining('Created file'),
+      }),
+    );
+
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+});
+
+describe('native user question tool', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mocks.activeRunId = null;
+  });
+
+  it('asks the user only through the explicit question gate', async () => {
+    mocks.requestUserQuestion.mockResolvedValueOnce('Use the finance folder.');
+
+    const result = await executeNativeComputerTool('ask_user_question', {
+      question: 'Which folder should I use?',
+      context: 'Two matching project folders were found.',
+      choices: 'Finance; Marketing',
+    } as never);
+
+    expect(result.status).toBe(StatusEnum.END);
+    expect(result.message).toContain('Use the finance folder.');
+    expect(mocks.requestUserQuestion).toHaveBeenCalledWith({
+      question: 'Which folder should I use?',
+      context: 'Two matching project folders were found.',
+      choices: ['Finance', 'Marketing'],
+    });
+    expect(mocks.requestUserApproval).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty question tool calls instead of creating a vague prompt', async () => {
+    const result = await executeNativeComputerTool('ask_user_question', {
+      question: '',
+    } as never);
+
+    expect(result.status).toBe(StatusEnum.ERROR);
+    expect(result.message).toContain('question is required');
+    expect(mocks.requestUserQuestion).not.toHaveBeenCalled();
+  });
 });
 
 describe('native GitHub connector tools', () => {

@@ -4,9 +4,8 @@
  */
 import {
   AlertCircle,
-  ChevronDown,
-  ChevronRight,
   CheckCircle2,
+  CircleHelp,
   ExternalLink,
   FileCode2,
   FileImage,
@@ -20,7 +19,7 @@ import {
   ShieldCheck,
   Wand2,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useState, useEffect } from 'react';
 
 import { TaskSourceRecord, TaskState } from '@main/store/types';
 import type { TaskEvidence } from '@shared/taskEvidence';
@@ -59,6 +58,204 @@ type WorkspaceRoot = {
   entries: WorkspaceEntry[];
 };
 
+class SoundEffects {
+  private static ctx: AudioContext | null = null;
+
+  private static getContext(): AudioContext | null {
+    if (!this.ctx) {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        this.ctx = new AudioCtx();
+      }
+    }
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+    return this.ctx;
+  }
+
+  static playClick() {
+    try {
+      const ctx = this.getContext();
+      if (!ctx) return;
+
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(800, now);
+      osc.frequency.exponentialRampToValueAtTime(100, now + 0.05);
+
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.05);
+    } catch (e) {
+      console.warn('Web Audio synthesis failed:', e);
+    }
+  }
+
+  static playChime() {
+    try {
+      const ctx = this.getContext();
+      if (!ctx) return;
+
+      const now = ctx.currentTime;
+      const notes = [523.25, 659.25, 783.99, 1046.50];
+      notes.forEach((freq, idx) => {
+        const time = now + idx * 0.12;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, time);
+
+        gain.gain.setValueAtTime(0.0, time);
+        gain.gain.linearRampToValueAtTime(0.12, time + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.6);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(time);
+        osc.stop(time + 0.61);
+      });
+    } catch (e) {
+      console.warn('Web Audio chime synthesis failed:', e);
+    }
+  }
+}
+
+function VisualFlowchart({ taskState, validationFailures }: { taskState: TaskState; validationFailures: any[] }) {
+  const status = taskState.status;
+  
+  const getStageStatus = (stage: 'intent' | 'created' | 'execution' | 'validation') => {
+    if (stage === 'intent') return 'completed';
+    if (stage === 'created') return 'completed';
+    
+    if (stage === 'execution') {
+      if (status === 'completed') return 'completed';
+      if (status === 'failed' || status === 'cancelled') return 'failed';
+      if (status === 'running') return 'active';
+      return 'pending';
+    }
+    
+    if (stage === 'validation') {
+      if (status === 'completed') return 'completed';
+      if (validationFailures.length > 0 || status === 'failed') return 'failed';
+      if (status === 'running' && taskState.phase === 'validating') return 'active';
+      return 'pending';
+    }
+    return 'pending';
+  };
+
+  const stages = [
+    { id: 'intent', label: 'Intent Arbitration', desc: 'Arbitrating input' },
+    { id: 'created', label: 'Task Created', desc: 'Context initialized' },
+    { id: 'execution', label: 'Autopilot Executing', desc: 'Running workspace steps' },
+    { id: 'validation', label: 'Artifact Validation', desc: 'QA & proof verification' },
+  ];
+
+  return (
+    <div className="mb-6 rounded-2xl border border-white/[0.06] bg-white/[0.01] p-4 text-xs">
+      <style>{`
+        @keyframes flowDash {
+          to {
+            stroke-dashoffset: -20;
+          }
+        }
+        @keyframes pulseGlow {
+          0%, 100% {
+            transform: scale(1);
+            opacity: 0.15;
+          }
+          50% {
+            transform: scale(1.35);
+            opacity: 0.5;
+          }
+        }
+        .flow-line-active {
+          stroke-dasharray: 6, 4;
+          animation: flowDash 0.8s linear infinite;
+        }
+        .pulse-ring {
+          animation: pulseGlow 1.8s ease-in-out infinite;
+        }
+      `}</style>
+
+      <div className="mb-3 text-[11px] font-medium uppercase tracking-wider text-white/35">
+        Execution Pipeline
+      </div>
+
+      <div className="grid grid-cols-4 gap-4 relative">
+        {stages.map((stage, idx) => {
+          const s = getStageStatus(stage.id as any);
+          const isLast = idx === stages.length - 1;
+          
+          let colorClass = 'border-white/10 text-muted-foreground bg-white/[0.02]';
+          
+          if (s === 'completed') {
+            colorClass = 'border-emerald-500/30 bg-emerald-500/[0.04] text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.08)]';
+          } else if (s === 'active') {
+            colorClass = 'border-blue-500/40 bg-blue-500/[0.04] text-blue-100 shadow-[0_0_15px_rgba(59,130,246,0.12)]';
+          } else if (s === 'failed') {
+            colorClass = 'border-red-500/30 bg-red-500/[0.04] text-red-100 shadow-[0_0_12px_rgba(239,68,68,0.08)]';
+          }
+
+          return (
+            <div key={stage.id} className="flex flex-col items-center text-center relative z-10">
+              <div className="relative flex items-center justify-center h-10 w-10 mb-2">
+                {s === 'active' && (
+                  <div className="absolute inset-0 rounded-full bg-blue-500/20 pulse-ring" />
+                )}
+                <div className={cn(
+                  'flex h-10 w-10 items-center justify-center rounded-full border transition-all duration-300',
+                  colorClass
+                )}>
+                  {stage.id === 'intent' && <span className="font-semibold text-[10px]">INT</span>}
+                  {stage.id === 'created' && <span className="font-semibold text-[10px]">NEW</span>}
+                  {stage.id === 'execution' && <span className="font-semibold text-[10px]">EXE</span>}
+                  {stage.id === 'validation' && <span className="font-semibold text-[10px]">VAL</span>}
+                </div>
+              </div>
+
+              <div className="font-medium text-white/80 text-[11px] truncate w-full px-1" title={stage.label}>
+                {stage.label}
+              </div>
+              <div className="text-[10px] text-white/40 mt-0.5 truncate w-full px-1">
+                {stage.desc}
+              </div>
+
+              {!isLast && (
+                <div className="absolute left-[calc(50%+20px)] top-[20px] w-[calc(100%-40px)] h-[2px] z-0 hidden md:block">
+                  <svg className="w-full h-2 overflow-visible">
+                    <line
+                      x1="0"
+                      y1="1"
+                      x2="100%"
+                      y2="1"
+                      stroke={s === 'completed' ? '#10b981' : s === 'active' ? '#3b82f6' : '#2a2a2a'}
+                      strokeWidth="2"
+                      className={cn(
+                        s === 'active' ? 'flow-line-active' : ''
+                      )}
+                    />
+                  </svg>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 const statusIcon = {
   pending: Loader2,
   running: Loader2,
@@ -69,99 +266,6 @@ const statusIcon = {
 
 const DEBUG_PROGRESS_PATTERN =
   /\b(regex|pattern|validator|validated \d+ local computer actor|command output contains|planner checklist|planner step|raw|screenshot observed|predictionParsed|FullyQualifiedErrorId|CategoryInfo)\b|previous response was not executable|authorized benign UI automation|Action Space|previous action had invalid coordinates|browser state has not changed after repeated actions|previous browser DOM action could not be executed|continue autonomously: take a fresh screenshot\/DOM map|do not finish with this recovery message|element id was stale|take a fresh screenshot\/DOM map|Could not (?:type into|click) that DOM element|Refresh the DOM map or use coordinate click\/type|reply with finished\(content=|visible current DOM element|<(html|xml|rdf|!doctype)|xmlns=|rdf:resource=/i;
-const RUNTIME_NAME_PATTERN = new RegExp('her' + 'mes[-_.]agent', 'gi');
-const RUNTIME_PREFIX_PATTERN = new RegExp('\\bher' + 'mes[._:-]?', 'gi');
-const RUNTIME_WORD_PATTERN = new RegExp('\\bher' + 'mes\\b', 'gi');
-
-const cleanProgressText = (value?: string) =>
-  (value || '')
-    .replace(RUNTIME_NAME_PATTERN, 'runtime')
-    .replace(RUNTIME_WORD_PATTERN, 'Neura')
-    .replace(RUNTIME_PREFIX_PATTERN, '')
-    .replace(/\s+/g, ' ')
-    .replace(/^step (started|completed)\s*-\s*/i, '')
-    .trim();
-
-const publicProgressTitle = (title: string) => {
-  const cleanedTitle = cleanProgressText(title);
-  if (/ruminating|processing|computing/i.test(cleanedTitle)) {
-    return 'Thinking';
-  }
-  if (/browser bridge ready|browser automation ready/i.test(cleanedTitle)) {
-    return 'Browser automation ready';
-  }
-  if (/backend configured|runtime configured/i.test(cleanedTitle)) {
-    return 'Runtime configured';
-  }
-  if (/backend output|preparing runtime/i.test(cleanedTitle)) {
-    return 'Preparing runtime';
-  }
-  if (/agent started|runtime started/i.test(cleanedTitle)) {
-    return 'Runtime started';
-  }
-  if (/local validator passed/i.test(title)) {
-    return 'Checked the result';
-  }
-  if (/run_command completed/i.test(title)) {
-    return 'Command completed';
-  }
-  if (/process_worker:\s*run_command/i.test(title)) {
-    return 'Running command';
-  }
-  if (/visual_worker:/i.test(title)) {
-    return title.replace(/^visual_worker:\s*/i, 'Computer action: ');
-  }
-  if (/local computer actor plan/i.test(title)) {
-    return 'Prepared local computer task';
-  }
-  return cleanedTitle;
-};
-
-const publicProgressDetail = (detail?: string) => {
-  const cleaned = cleanProgressText(detail);
-  if (!cleaned || DEBUG_PROGRESS_PATTERN.test(cleaned)) {
-    return undefined;
-  }
-  if (/^\{.*"success"\s*:/.test(cleaned) || /^\[/.test(cleaned)) {
-    return undefined;
-  }
-  if (/CDP WebSocket connect failed|No connection could be made/i.test(cleaned)) {
-    return 'Browser connection is still starting.';
-  }
-  return cleaned.length > 180 ? `${cleaned.slice(0, 180)}...` : cleaned;
-};
-
-const publicToolPreview = (preview?: string) => {
-  const cleaned = cleanProgressText(preview);
-  if (!cleaned || DEBUG_PROGRESS_PATTERN.test(cleaned)) {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(cleaned) as {
-      success?: boolean;
-      url?: string;
-      title?: string;
-      error?: string;
-    };
-    if (parsed.error) {
-      return parsed.error;
-    }
-    if (parsed.title || parsed.url) {
-      return [parsed.title, parsed.url].filter(Boolean).join(' - ');
-    }
-    if (typeof parsed.success === 'boolean') {
-      return parsed.success ? undefined : 'Action did not complete.';
-    }
-  } catch {
-    // Fall through to the cleaned string below.
-  }
-
-  if (/^\{/.test(cleaned)) {
-    return undefined;
-  }
-  return cleaned.length > 140 ? `${cleaned.slice(0, 140)}...` : cleaned;
-};
 
 const publicFinalAnswer = (answer?: string) => {
   const cleaned = (answer || '').trim();
@@ -261,23 +365,42 @@ const artifactPrimaryAction = (kind: string) => {
 };
 
 export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [questionDrafts, setQuestionDrafts] = useState<Record<string, string>>(
+    {},
+  );
   const [previewLoading, setPreviewLoading] = useState(false);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [previewState, setPreviewState] = useState<ArtifactPreviewState | null>(
     null,
   );
   const [workspaceState, setWorkspaceState] = useState<WorkspaceRoot[]>([]);
+
+  const currentStatus = taskState?.status;
+  const currentPhase = taskState?.phase;
+  const currentTodoCount = (taskState?.todoItems || []).filter((t) => t.status === 'done').length;
+
+  useEffect(() => {
+    if (!taskState) return;
+    if (taskState.status === 'running') {
+      SoundEffects.playClick();
+    }
+  }, [currentStatus, currentPhase, currentTodoCount]);
+
+  useEffect(() => {
+    if (taskState?.status === 'completed') {
+      SoundEffects.playChime();
+    }
+  }, [currentStatus]);
+
   const finalAnswer = publicFinalAnswer(taskState?.finalAnswer);
   const artifacts = (taskState?.artifacts || []).slice(-6);
   const todoItems = taskState?.todoItems || [];
-  const toolCalls = taskState?.toolCalls || [];
   const validationFailures = taskState?.validationFailures || [];
-  const progressItems = taskState?.progressItems || [];
   const approvalEvents = taskState?.approvalEvents || [];
+  const userQuestionEvents = taskState?.userQuestionEvents || [];
   const sourcesVisited = taskState?.sourcesVisited || [];
   const rawSourceRecords = taskState?.sourceRecords || [];
   const wideResearchWorkers = taskState?.wideResearchWorkers || [];
@@ -286,10 +409,6 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
   const browserActionAudit = taskState?.browserActionAudit || [];
   const latestBrowserAction =
     browserActionAudit[browserActionAudit.length - 1] || null;
-  const browserTiming = taskState?.browserTiming;
-  const lastSlowBrowserStep = browserTiming?.slowSteps.length
-    ? browserTiming.slowSteps[browserTiming.slowSteps.length - 1]
-    : null;
   const recoveryEvidence: RecoveryEvidenceItem[] = (taskState?.evidence || [])
     .map((item) => ({
       evidence: item,
@@ -297,22 +416,6 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
     }))
     .filter((item): item is RecoveryEvidenceItem => Boolean(item.recovery))
     .slice(-3);
-  const latestProgress = useMemo(
-    () =>
-      progressItems
-        .map((item) => ({
-          ...item,
-          title: publicProgressTitle(item.title),
-          detail: publicProgressDetail(item.detail),
-        }))
-        .filter(
-          (item) =>
-            item.status === 'failed' ||
-            !DEBUG_PROGRESS_PATTERN.test(item.title),
-        )
-        .slice(-5),
-    [progressItems],
-  );
 
   if (!taskState) {
     return null;
@@ -475,30 +578,15 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
   const requestedApprovals = approvalEvents.filter(
     (event) => event.status === 'requested',
   );
+  const requestedQuestions = userQuestionEvents.filter(
+    (event) => event.status === 'requested',
+  );
   const evidenceLabel =
     evidenceValidation?.completionStatus === 'verified'
       ? 'Verified'
       : evidenceValidation?.completionStatus === 'blocked'
         ? 'Blocked'
         : 'Needs verification';
-  const publicToolLabel = (serverName: string, toolName: string) => {
-    const joined = `${serverName}.${toolName}`;
-    const cleaned = cleanProgressText(joined).replace(/^neura\./i, '');
-    if (/browser/i.test(cleaned)) {
-      return 'Browser action';
-    }
-    if (/terminal|command|shell/i.test(cleaned)) {
-      return 'Command';
-    }
-    if (/memory/i.test(cleaned)) {
-      return 'Memory';
-    }
-    if (/todo|plan/i.test(cleaned)) {
-      return 'Planning';
-    }
-    return cleaned.replace(/\./g, ' ');
-  };
-
   return (
     <section className="overflow-hidden rounded-[22px] border border-white/[0.075] bg-[#070808] text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
       <div className="border-b border-white/[0.07] px-5 py-4">
@@ -580,6 +668,7 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
         </div>
       </div>
       <div className="p-5">
+        <VisualFlowchart taskState={taskState} validationFailures={validationFailures} />
 
       {taskState.nextAction || taskState.browserRestoreSnapshot ? (
         <div className="mb-5 rounded-2xl border border-blue-300/15 bg-blue-300/[0.04] px-4 py-3 text-xs">
@@ -676,37 +765,6 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {latestProgress.length > 0 && (
-        <div className="mt-5 space-y-0 border-l border-white/[0.08] pl-4">
-          {latestProgress.map((item) => (
-            <div
-              key={item.id}
-              className="relative py-2.5"
-            >
-              <div className="flex items-start gap-3 text-xs">
-                <span
-                  className={cn(
-                    'absolute -left-[19px] mt-1 h-2.5 w-2.5 shrink-0 rounded-full border border-[#070808]',
-                    item.status === 'done' && 'bg-emerald-400',
-                    item.status === 'failed' && 'bg-red-400',
-                    item.status === 'in_progress' && 'bg-blue-400',
-                    item.status === 'pending' && 'bg-slate-400',
-                  )}
-                />
-                <span className="min-w-0 break-words text-white/64">
-                  {item.title}
-                </span>
-              </div>
-              {item.detail && (
-                <div className="mt-1 whitespace-pre-wrap break-words text-[11px] leading-4 text-white/38">
-                  {item.detail}
-                </div>
-              )}
-            </div>
-          ))}
         </div>
       )}
 
@@ -920,47 +978,6 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
         </div>
       )}
 
-      {toolCalls.length > 0 && (
-        <div className="mt-5 border-t border-white/[0.07] pt-4">
-          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase text-white/35">
-            <FileCode2 className="h-3.5 w-3.5" />
-            Tool activity
-          </div>
-          <div className="divide-y divide-white/[0.06]">
-            {toolCalls.slice(-6).map((toolCall) => {
-              const preview = publicToolPreview(toolCall.resultPreview);
-              return (
-                <div key={toolCall.id} className="py-2.5 text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-white">
-                      {publicToolLabel(toolCall.serverName, toolCall.toolName)}
-                    </span>
-                    <span
-                      className={cn(
-                        'ml-auto rounded-full px-2 py-0.5 text-[10px] uppercase',
-                        toolCall.status === 'completed' &&
-                          'bg-emerald-400/15 text-emerald-200',
-                        toolCall.status === 'failed' &&
-                          'bg-red-400/15 text-red-200',
-                        toolCall.status === 'pending' &&
-                          'bg-blue-400/15 text-blue-200',
-                      )}
-                    >
-                      {toolCall.status}
-                    </span>
-                  </div>
-                  {preview ? (
-                    <div className="mt-1 line-clamp-2 text-[11px] text-white/38">
-                      {preview}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {validationFailures.length > 0 && (
         <div className="mt-3 border-t border-white/10 pt-3">
           <div className="mb-2 flex items-center gap-2 text-xs font-medium text-red-200">
@@ -977,70 +994,6 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {progressItems.length > 0 && (
-        <div className="mt-5 border-t border-white/[0.07] pt-3">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-8 rounded-lg px-2 text-xs text-white/42 hover:bg-white/[0.05] hover:text-white"
-            onClick={() => setShowDiagnostics((value) => !value)}
-          >
-            {showDiagnostics ? (
-              <ChevronDown className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5" />
-            )}
-            Diagnostics
-          </Button>
-          {showDiagnostics && (
-            <div className="mt-2 max-h-44 overflow-y-auto rounded-2xl border border-white/[0.08] bg-black/25 p-3 text-[11px] leading-4 text-white/45">
-              {browserTiming ? (
-                <div className="mb-3 border-b border-white/[0.06] pb-2">
-                  <div className="text-white/70">browser timing</div>
-                  <div>
-                    launch {browserTiming.launchCount} / {browserTiming.launchMs}
-                    ms, navigation {browserTiming.navigationCount} /{' '}
-                    {browserTiming.navigationMs}ms, extraction{' '}
-                    {browserTiming.extractionCount} / {browserTiming.extractionMs}
-                    ms
-                  </div>
-                  {browserTiming.slowSteps.length > 0 ? (
-                    <div className="mt-1 text-amber-100/70">
-                      slow: {lastSlowBrowserStep?.action} took{' '}
-                      {lastSlowBrowserStep?.durationMs}ms
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              {browserActionAudit.length > 0 ? (
-                <div className="mb-3 border-b border-white/[0.06] pb-2">
-                  <div className="text-white/70">browser actions</div>
-                  {browserActionAudit.slice(-4).map((action) => (
-                    <div key={action.id} className="mt-1">
-                      {action.status}: {action.action.replace(/_/g, ' ')}
-                      {action.durationMs ? ` (${action.durationMs}ms)` : ''}
-                      {action.urlAfter ? ` -> ${action.urlAfter}` : ''}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {progressItems.slice(-12).map((item) => (
-                <div key={item.id} className="mb-2 last:mb-0">
-                  <div className="text-white/70">
-                    {item.status}: {publicProgressTitle(item.title)}
-                  </div>
-                  {publicProgressDetail(item.detail) ? (
-                    <div className="mt-1 whitespace-pre-wrap break-words">
-                      {publicProgressDetail(item.detail)}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
@@ -1138,6 +1091,106 @@ export function TaskRunPanel({ taskState }: { taskState: TaskState | null }) {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {userQuestionEvents.length > 0 && (
+        <div className="mt-5 border-t border-white/[0.07] pt-4">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase text-white/35">
+            <CircleHelp className="h-3.5 w-3.5" />
+            Questions
+          </div>
+          <div className="divide-y divide-white/[0.06]">
+            {userQuestionEvents.slice(-4).map((event) => (
+              <div key={event.id} className="py-2.5 text-xs">
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-white">{event.question}</div>
+                    {event.context && (
+                      <div className="mt-1 text-[11px] text-white/40">
+                        {event.context}
+                      </div>
+                    )}
+                  </div>
+                  <span
+                    className={cn(
+                      'rounded-full px-2 py-0.5 text-[10px] uppercase',
+                      event.status === 'requested' &&
+                        'bg-amber-400/15 text-amber-200',
+                      event.status === 'answered' &&
+                        'bg-emerald-400/15 text-emerald-200',
+                      event.status === 'dismissed' &&
+                        'bg-red-400/15 text-red-200',
+                    )}
+                  >
+                    {event.status}
+                  </span>
+                </div>
+                {event.choices?.length ? (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {event.choices.map((choice) => (
+                      <button
+                        key={choice}
+                        type="button"
+                        disabled={event.status !== 'requested'}
+                        className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-white/65 hover:border-white/20 hover:text-white disabled:opacity-45"
+                        onClick={() =>
+                          setQuestionDrafts((drafts) => ({
+                            ...drafts,
+                            [event.id]: choice,
+                          }))
+                        }
+                      >
+                        {choice}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {event.status === 'answered' && event.answer && (
+                  <div className="mt-2 rounded-md border border-white/[0.07] bg-white/[0.03] px-2 py-1.5 text-[11px] text-white/55">
+                    {event.answer}
+                  </div>
+                )}
+                {event.status === 'requested' && (
+                  <div className="mt-2 flex flex-col gap-2">
+                    <textarea
+                      value={questionDrafts[event.id] || ''}
+                      onChange={(input) =>
+                        setQuestionDrafts((drafts) => ({
+                          ...drafts,
+                          [event.id]: input.target.value,
+                        }))
+                      }
+                      placeholder="Type your answer so Neura can continue"
+                      className="min-h-16 rounded-md border border-white/10 bg-black/35 px-2 py-2 text-xs text-white outline-none placeholder:text-white/25 focus:border-white/25"
+                    />
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        className="h-7 rounded-lg px-2 text-xs"
+                        disabled={!questionDrafts[event.id]?.trim()}
+                        onClick={async () => {
+                          const answer = questionDrafts[event.id] || '';
+                          await api.resolveUserQuestion({
+                            runId: taskState.runId,
+                            eventId: event.id,
+                            answer,
+                          });
+                        }}
+                      >
+                        Send answer
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {requestedQuestions.length > 0 && (
+            <div className="mt-2 text-[11px] text-amber-200">
+              Agent execution is waiting for your answer.
+            </div>
+          )}
         </div>
       )}
 

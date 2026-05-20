@@ -59,4 +59,46 @@ describe('ComputerRuntimeController embedded surface controls', () => {
     });
     expect(embeddedMock.setVisible).toHaveBeenCalledWith(true);
   });
+
+  it('tracks live desktop frames and visible interactions', () => {
+    ComputerRuntimeController.start({
+      mode: 'desktop',
+      activity: 'Watching desktop',
+    });
+
+    expect(store.getState().computerRuntime?.liveStream).toEqual(
+      expect.objectContaining({
+        frameCount: 0,
+        frameIntervalMs: 125,
+      }),
+    );
+
+    ComputerRuntimeController.frame({
+      dataUrl: 'data:image/jpeg;base64,test',
+      width: 1920,
+      height: 1080,
+      frameIndex: 1,
+      cursor: { x: 320, y: 240 },
+    });
+    ComputerRuntimeController.interaction({
+      type: 'click',
+      x: 320,
+      y: 240,
+    });
+
+    expect(store.getState().computerRuntime).toMatchObject({
+      latestFrame: expect.objectContaining({
+        frameIndex: 1,
+        cursor: { x: 320, y: 240 },
+      }),
+      liveStream: expect.objectContaining({
+        frameCount: 1,
+      }),
+      latestInteraction: expect.objectContaining({
+        type: 'click',
+        x: 320,
+        y: 240,
+      }),
+    });
+  });
 });

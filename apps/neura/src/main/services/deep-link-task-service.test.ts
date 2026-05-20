@@ -48,6 +48,14 @@ describe('deep link task intake', () => {
     );
   });
 
+  it('rejects oversized task deep links instead of silently truncating context', () => {
+    const url = `neura://task?goal=${encodeURIComponent('x'.repeat(8001))}`;
+
+    expect(() => parseTaskDeepLink(url)).toThrow(
+      '8000 characters or fewer',
+    );
+  });
+
   it('queues deep-link tasks through the background Hermes task path', async () => {
     const service = new DeepLinkTaskService();
     await service.start([]);

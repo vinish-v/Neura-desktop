@@ -114,4 +114,15 @@ describe('artifact validation', () => {
     expect(result.ok).toBe(false);
     expect(result.errors.join(' ')).toContain('could not be read as PPTX');
   });
+
+  it('rejects artifacts whose claimed kind does not match the local file format', async () => {
+    const wrongAudioPath = path.join(tempDir, 'speech.txt');
+    await fs.writeFile(wrongAudioPath, 'this is readable text, not audio');
+
+    const result = await validateArtifactFile(artifact(wrongAudioPath, 'audio'));
+
+    expect(result.ok).toBe(false);
+    expect(result.readablePreview).toBe(true);
+    expect(result.errors.join(' ')).toContain('declared as audio');
+  });
 });

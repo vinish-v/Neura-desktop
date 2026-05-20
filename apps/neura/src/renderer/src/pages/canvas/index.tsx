@@ -159,6 +159,7 @@ export default function Canvas() {
   const [ideOpening, setIdeOpening] = useState(false);
   const [ideStatus, setIdeStatus] = useState<CanvasIdeStatus | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) || null,
@@ -230,6 +231,35 @@ export default function Canvas() {
       setDirty(false);
     }
   }, [activeFile?.path, activeFile?.updatedAt, activeProject?.id]);
+
+  useEffect(() => {
+    if (!activeProject?.id) {
+      setPreviewUrl(null);
+      return;
+    }
+
+    let active = true;
+    (async () => {
+      try {
+        const url = await api.getCanvasPreviewUrl({ projectId: activeProject.id });
+        if (active) {
+          setPreviewUrl(url);
+        }
+      } catch (err) {
+        console.error('Failed to get canvas preview URL:', err);
+        if (active) {
+          setPreviewUrl(null);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+      if (activeProject?.id) {
+        api.stopCanvasPreviewServer({ projectId: activeProject.id }).catch(() => {});
+      }
+    };
+  }, [activeProject?.id]);
 
   const createProject = async () => {
     setSaving(true);
@@ -754,8 +784,9 @@ export default function Canvas() {
               </div>
               <iframe
                 title="Neura Canvas Preview"
-                srcDoc={preview}
-                sandbox="allow-scripts"
+                src={previewUrl || undefined}
+                srcDoc={previewUrl ? undefined : preview}
+                sandbox="allow-scripts allow-same-origin allow-forms"
                 className="h-full w-full flex-1 bg-white"
               />
             </section>

@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => {
     runs,
     activeRunId: null as string | null,
     hermesRun: vi.fn(async (input: any) => {
-      if (String(input.prompt).includes('Run one independent Wide Research worker')) {
+      if (String(input.prompt).includes('Worker id:')) {
         const workerId = /Worker id: ([^\n]+)/u.exec(input.prompt)?.[1] || 'worker';
         input.onEvent?.({
           type: 'tool.call.completed',
@@ -26,6 +26,17 @@ const mocks = vi.hoisted(() => {
           exitCode: 0,
           command: 'hermes',
         };
+      }
+      if (String(input.prompt).includes('pending computer action')) {
+        input.onEvent?.({
+          type: 'tool.call.started',
+          callId: 'pending-call',
+          toolName: 'run_command',
+          arguments: {
+            command: 'npm run build',
+          },
+          preview: 'Started npm run build',
+        });
       }
       return {
         finalAnswer: 'Final synthesized report with citations.',
@@ -90,6 +101,8 @@ vi.mock('./computerRuntimeController', () => ({
 }));
 
 vi.mock('./hermesRuntime', () => ({
+  buildBrowserSearchPolicy: () =>
+    'Browser search preference: use Google Search first. Do not use DuckDuckGo unless explicitly requested.',
   HermesRuntimeService: {
     getInstance: () => ({
       run: mocks.hermesRun,
@@ -103,6 +116,16 @@ vi.mock('./taskContextMemory', () => ({
     ...run,
     workspacePath: 'D:\\tmp\\neura-test-run',
   }),
+}));
+
+vi.mock('./productionReadiness', () => ({
+  assessProductionReadiness: vi.fn(async () => ({
+    status: 'ready',
+    summary: 'Ready for tests.',
+    issues: [],
+    checkedAt: Date.now(),
+  })),
+  formatProductionReadinessForPrompt: () => 'Production readiness preflight: ready',
 }));
 
 vi.mock('./hermesTaskRouter', () => ({
@@ -147,24 +170,34 @@ vi.mock('./artifactValidation', () => ({
 
 vi.mock('@shared/taskEvidence', () => ({
   sanitizeTaskEvidence: (evidence: any) => evidence,
-  validateTaskEvidence: () => ({
-    completionStatus: 'verified',
-    confidence: 0.95,
-    agentFacingMessage: 'verified',
-    userFacingMessage: 'verified',
-    missingEvidence: [],
-    safeEvidence: [
-      {
-        id: 'source',
-        kind: 'source',
-        summary: 'source',
-        status: 'completed',
-        confidence: 0.9,
-        capturedAt: Date.now(),
-        url: 'https://worker.research.test/report',
-      },
-    ],
-  }),
+  validateTaskEvidence: ({ knownFailures = [] }: any = {}) =>
+    knownFailures.length
+      ? {
+          completionStatus: 'blocked',
+          confidence: 0,
+          agentFacingMessage: 'blocked',
+          userFacingMessage: 'blocked',
+          missingEvidence: knownFailures,
+          safeEvidence: [],
+        }
+      : {
+          completionStatus: 'verified',
+          confidence: 0.95,
+          agentFacingMessage: 'verified',
+          userFacingMessage: 'verified',
+          missingEvidence: [],
+          safeEvidence: [
+            {
+              id: 'source',
+              kind: 'source',
+              summary: 'source',
+              status: 'completed',
+              confidence: 0.9,
+              capturedAt: Date.now(),
+              url: 'https://worker.research.test/report',
+            },
+          ],
+        },
 }));
 
 vi.mock('./sourceQuality', () => ({
@@ -243,8 +276,28 @@ vi.mock('./taskRunRegistry', () => {
         }
         return run || null;
       },
-      addToolCall: vi.fn(),
-      updateToolCall: vi.fn(),
+      addToolCall: (runId: string, toolCall: any) => {
+        const run = mocks.runs.find((record) => record.runId === runId);
+        if (run) {
+          run.toolCalls.push({
+            id: `tool-${run.toolCalls.length}`,
+            startedAt: Date.now(),
+            ...toolCall,
+          });
+        }
+        return run || null;
+      },
+      updateToolCall: (runId: string, callId: string, patch: any) => {
+        const run = mocks.runs.find((record) => record.runId === runId);
+        if (run) {
+          run.toolCalls = run.toolCalls.map((toolCall) =>
+            toolCall.id === callId || toolCall.externalCallId === callId
+              ? { ...toolCall, ...patch, completedAt: Date.now() }
+              : toolCall,
+          );
+        }
+        return run || null;
+      },
       addBrowserActionAudit: vi.fn(),
       updateBrowserActionAudit: vi.fn(),
       recordBrowserTiming: vi.fn(),
@@ -348,5 +401,16 @@ describe('TaskManager Wide Research workers', () => {
     expect(result?.wideResearchWorkers?.every((worker) => worker.status === 'completed')).toBe(
       true,
     );
+  });
+
+  it('does not mark a task complete while a computer action is still pending', async () => {
+    const result = await TaskManager.getInstance().startHermesTask(
+      'Do wide research with a pending computer action',
+      { runMode: 'wide_research' },
+    );
+
+    expect(result?.status).toBe('failed');
+    expect(result?.error).toContain('pending computer/tool action');
+    expect(result?.completionProof).toBeUndefined();
   });
 });

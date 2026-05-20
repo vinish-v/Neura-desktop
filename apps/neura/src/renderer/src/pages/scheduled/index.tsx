@@ -60,6 +60,7 @@ export default function Scheduled() {
     ReturnType<typeof api.getMailTaskIntakeStatus>
   > | null>(null);
   const [mailNotice, setMailNotice] = useState('');
+  const [mailAllowlistDraft, setMailAllowlistDraft] = useState('');
   const [localApiToken, setLocalApiToken] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -74,6 +75,7 @@ export default function Scheduled() {
     setScheduledTasks(scheduled);
     setLocalApiStatus(apiStatus);
     setMailStatus(mailIntake);
+    setMailAllowlistDraft(mailIntake.settings.senderAllowlist.join('\n'));
   }, []);
 
   useEffect(() => {
@@ -183,6 +185,20 @@ export default function Scheduled() {
 
   const updateMailIntake = async (enabled: boolean) => {
     await api.updateMailTaskIntake({ enabled });
+    await refresh();
+  };
+
+  const saveMailAllowlist = async () => {
+    const senderAllowlist = mailAllowlistDraft
+      .split(/[\n,;]/u)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    await api.updateMailTaskIntake({ senderAllowlist });
+    setMailNotice(
+      senderAllowlist.length
+        ? `Saved ${senderAllowlist.length} allowed sender rule(s).`
+        : 'Sender allowlist cleared; any sender with the prefix can queue tasks.',
+    );
     await refresh();
   };
 
@@ -514,8 +530,8 @@ export default function Scheduled() {
                 </div>
                 <p className="mt-1 max-w-[420px] text-xs leading-5 text-[#f6f1e8]/42">
                   Queues unread Gmail subjects that start with the configured
-                  prefix. Requires the real Gmail connector and never reads
-                  arbitrary mail as a task.
+                  prefix. Optional sender allowlist keeps task intake local,
+                  auditable, and explicit.
                 </p>
               </div>
               <span
@@ -535,9 +551,32 @@ export default function Scheduled() {
                 <div className="mt-1">
                   Processed locally: {mailStatus.settings.processedMessageIds.length}
                 </div>
+                <div className="mt-1">
+                  Sender allowlist:{' '}
+                  {mailStatus.settings.senderAllowlist.length
+                    ? `${mailStatus.settings.senderAllowlist.length} rule(s)`
+                    : 'any sender with the prefix'}
+                </div>
                 {mailStatus.setupGap ? (
                   <div className="mt-2 rounded-xl border border-amber-300/20 bg-amber-300/10 p-2 text-amber-100">
                     {mailStatus.setupGap}
+                  </div>
+                ) : null}
+                {mailStatus.settings.auditLog.length ? (
+                  <div className="mt-3 border-t border-[#f6f1e8]/[0.08] pt-2">
+                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#f6f1e8]/35">
+                      Intake audit
+                    </div>
+                    {mailStatus.settings.auditLog.slice(0, 3).map((event) => (
+                      <div
+                        key={event.id}
+                        className="mt-1 truncate text-[11px] text-[#f6f1e8]/48"
+                        title={`${event.status}: ${event.reason}`}
+                      >
+                        {event.status}: {event.reason}
+                        {event.from ? ` / ${event.from}` : ''}
+                      </div>
+                    ))}
                   </div>
                 ) : null}
                 {mailNotice ? (
@@ -547,6 +586,29 @@ export default function Scheduled() {
                 ) : null}
               </div>
             ) : null}
+            <div className="mt-3 rounded-2xl border border-[#f6f1e8]/[0.08] bg-black/20 p-3">
+              <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#f6f1e8]/38">
+                Allowed senders
+              </label>
+              <Textarea
+                value={mailAllowlistDraft}
+                onChange={(event) => setMailAllowlistDraft(event.target.value)}
+                placeholder={'ops@example.com\ntrusted.example.com'}
+                className="mt-2 min-h-20 border-[#f6f1e8]/[0.1] bg-black/35 text-xs text-[#f6f1e8]/80 placeholder:text-[#f6f1e8]/25"
+              />
+              <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-[#f6f1e8]/38">
+                <span>One email or domain per line. Empty allows any prefixed sender.</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="rounded-full border-[#f6f1e8]/[0.12] bg-transparent text-[#f6f1e8]/70"
+                  onClick={saveMailAllowlist}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
             <div className="mt-3 flex flex-wrap justify-end gap-2">
               <Button
                 type="button"

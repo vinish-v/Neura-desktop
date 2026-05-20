@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
     subjectPrefix: '[Neura Task]',
     maxResults: 10,
     processedMessageIds: [],
+    senderAllowlist: [],
+    auditLog: [],
   } as MailTaskIntakeSettings,
   callTool: vi.fn(),
   getHealth: vi.fn(),
@@ -58,6 +60,8 @@ describe('MailTaskIntakeService', () => {
       subjectPrefix: '[Neura Task]',
       maxResults: 10,
       processedMessageIds: [],
+      senderAllowlist: [],
+      auditLog: [],
     };
     mocks.callTool.mockReset();
     mocks.getHealth.mockReset();
@@ -144,6 +148,81 @@ describe('MailTaskIntakeService', () => {
     });
     expect(mocks.settings.processedMessageIds).toEqual(
       expect.arrayContaining(['old-message', 'new-message']),
+    );
+    expect(mocks.settings.auditLog[0]).toEqual(
+      expect.objectContaining({
+        messageId: 'new-message',
+        status: 'queued',
+        from: 'ops@example.com',
+        reason: 'Queued explicit Gmail task subject.',
+      }),
+    );
+  });
+
+  it('skips explicit task subjects from senders outside the allowlist and records audit proof', async () => {
+    mocks.settings = {
+      ...mocks.settings,
+      enabled: true,
+      senderAllowlist: ['trusted.example.com', 'lead@example.org'],
+    };
+    mocks.getHealth.mockResolvedValue([
+      {
+        connectorId: 'gmail',
+        setupGap: undefined,
+      },
+    ]);
+    mocks.callTool.mockResolvedValue({
+      content: [
+        {
+          type: 'json',
+          json: {
+            messages: [
+              {
+                id: 'blocked-message',
+                payload: {
+                  headers: [
+                    { name: 'Subject', value: '[Neura Task] Run anything' },
+                    { name: 'From', value: 'Attacker <attacker@example.net>' },
+                  ],
+                },
+              },
+              {
+                id: 'allowed-message',
+                payload: {
+                  headers: [
+                    { name: 'Subject', value: '[Neura Task] Research vendors' },
+                    { name: 'From', value: 'Ops <ops@trusted.example.com>' },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const result = await new MailTaskIntakeService().runOnce();
+
+    expect(result).toEqual(expect.objectContaining({ queued: 1, skipped: 1 }));
+    expect(mocks.enqueue).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ goal: 'Research vendors' }),
+    );
+    expect(mocks.settings.processedMessageIds).toEqual(
+      expect.arrayContaining(['blocked-message', 'allowed-message']),
+    );
+    expect(mocks.settings.auditLog).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          messageId: 'blocked-message',
+          status: 'skipped',
+          reason: 'Sender is not in the local allowlist.',
+        }),
+        expect.objectContaining({
+          messageId: 'allowed-message',
+          status: 'queued',
+        }),
+      ]),
     );
   });
 
